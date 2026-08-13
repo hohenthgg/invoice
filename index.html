@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ajustes MELI</title>
+<meta name="description" content="Detecta movimentações posteriores ao corte do dia 15 e gera os ajustes da próxima fatura MELI.">
+
+<!-- Bibliotecas externas: leitura (SheetJS) e escrita com estilos (ExcelJS) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<h1>Ajustes MELI</h1>
+
+<div class="top">
+  <button id="btnImport" class="primary">Importar planilha</button>
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <span class="file-name" id="fileName"></span>
+</div>
+
+<div id="result">
+  <div class="hint">Importe a planilha com a aba <b>Labor enviado ao MELI</b>.<br>A competência é detectada e os ajustes calculados automaticamente.</div>
+</div>
+
+<footer id="footer">
+  <div class="inner">
+    <span class="sel" id="selCount"></span>
+    <button class="primary" id="btnExport">Exportar Excel</button>
+  </div>
+</footer>
+
+<!-- A ordem importa: configuração → datas → motor → detecção → importação → tela → exportação → eventos -->
+<script src="js/config.js"></script>
+<script src="js/dates.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/competence.js"></script>
+<script src="js/import.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
