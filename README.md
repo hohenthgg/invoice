@@ -1,14 +1,41 @@
 # Ajustes MELI
 
-Ferramenta de página única que lê a planilha **Labor enviado ao MELI**, detecta as
-movimentações ocorridas depois do corte do dia 15 e gera os ajustes que precisam
-entrar na próxima fatura.
+Ferramenta de página única que lê a planilha **Labor enviado ao MELI** e responde
+duas perguntas diferentes sobre ela, uma em cada aba.
 
 Todo o processamento acontece no navegador. Nenhum dado sai da máquina: não há
 servidor, banco nem envio de arquivos.
 
+## As três abas
+
+| Aba | Pergunta | Entrega |
+|---|---|---|
+| **Conciliação Faturas** | O que já foi cobrado está certo? | Ajustes de desconto e acréscimo da próxima fatura |
+| **Fusão de Linhas** | O arquivo bate com o alvo do MELI? | Labor equalizado dia a dia contra o retorno |
+| **Guia** | — | Resumo conceitual do que cada aba faz |
+
+A aba é escolhida pelo topo da página e também pela URL: `index.html#fusao` abre
+direto na segunda.
+
+### Conciliação Faturas
+
 ```
 Importar planilha  →  competência detectada  →  lista de ajustes  →  Exportar Excel
+```
+
+### Fusão de Linhas
+
+Compara, dia a dia, o headcount ativo no Labor com a quantidade que o MELI aponta
+na aba `Retorno MELI` (`Qtd. PREF` e `Q Pós Comp.`). Onde sobra gente monta um
+plano e o aplica — retirar linha, adiar início, encurtar fim, ou pausar e retomar
+o contrato preservando GROOT e matrícula — e devolve o Labor corrigido no mesmo
+layout do original, com abas `A_INCLUIR` e `REVISAR` para o que depende de
+decisão humana. Aceita ainda dois arquivos opcionais: a base de diaristas, para
+preencher os dias em falta, e o HCM Report, para achar quem está na base do MELI
+e não tem cobertura nenhuma no Labor.
+
+```
+Soltar planilha  →  conciliação dia a dia  →  plano aplicado  →  Baixar Labor ajustado
 ```
 
 ## A regra em uma frase
@@ -53,8 +80,8 @@ O arquivo `.nojekyll` já está no repositório para o Pages servir tudo sem pro
 ## Estrutura
 
 ```
-index.html            marcação da página e ordem de carga dos scripts
-css/styles.css        estilos
+index.html            as três abas e a ordem de carga dos scripts
+css/styles.css        estilos das três abas
 js/config.js          nomes de abas, colunas aceitas, dia de corte
 js/dates.js           datas como inteiro AAAAMMDD, imune a fuso horário
 js/engine.js          motor de regras: valida, classifica, dedupe
@@ -62,13 +89,25 @@ js/competence.js      detecção automática da competência
 js/import.js          leitura da planilha (SheetJS)
 js/ui.js              renderização da tabela e do detalhe
 js/export.js          geração do Excel herdando o estilo do arquivo original
-js/app.js             inicialização e eventos
+js/app.js             inicialização e eventos da aba de conciliação
+js/fusao.js           aba Fusão de Linhas, inteira (IIFE)
+js/tabs.js            navegação entre as abas principais
 tests/                testes do motor, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
 ```
 
 Os arquivos são carregados como scripts clássicos, na ordem declarada no
 `index.html`. Não há build, bundler nem instalação: é o código que roda.
+
+### Por que a aba 2 é uma IIFE
+
+As duas ferramentas nasceram como páginas independentes e cada uma define, entre
+outras coisas, uma função `render`. A de conciliação está espalhada por sete
+arquivos que compartilham o escopo global e continua assim; a de fusão foi
+fechada dentro de uma IIFE em `js/fusao.js` e publica em `window.Fusao` apenas o
+que os handlers do HTML precisam chamar. Os `id` dos seus elementos levam o
+prefixo `fz-` pelo mesmo motivo — as duas abas coexistem no mesmo documento e
+ambas tinham um `#result` e um `#btnExport`.
 
 ### Bibliotecas
 
