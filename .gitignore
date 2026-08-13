@@ -1,0 +1,16 @@
+# dependências (o app não usa build, mas testes locais podem instalar algo)
+node_modules/
+package-lock.json
+
+# planilhas reais — nunca versionar dados de colaboradores
+*.xlsx
+*.xls
+*.csv
+!docs/exemplo-*.xlsx
+
+# sistema operacional e editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,12 @@
+{
+  "name": "ajustes-meli",
+  "version": "1.0.0",
+  "description": "Detecta movimentações posteriores ao corte do dia 15 e gera os ajustes da próxima fatura MELI.",
+  "private": true,
+  "scripts": {
+    "test": "node tests/engine.test.js",
+    "start": "python3 -m http.server 8080"
+  },
+  "keywords": ["meli", "faturamento", "fte", "labor", "xlsx"],
+  "license": "MIT"
+}
