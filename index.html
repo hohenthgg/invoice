@@ -78,21 +78,21 @@
       o app aponta, explica e sugere; a decisão de mudar alguma coisa é sua.</p>
 
     <div class="rc-slots">
-      <div class="rc-slot">
+      <div class="rc-slot" data-slot="origem">
         <div class="rc-slot-head"><span class="rc-slot-n">N</span> Fatura origem</div>
         <label class="rc-slot-drop">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span>Escolher arquivo .xlsx</span>
+          <span>Arraste aqui ou clique para escolher</span>
           <input type="file" accept=".xlsx,.xls" onchange="Recon.carregar('origem',event)">
         </label>
         <div class="rc-slot-info" id="rc-origem-info">Nenhum arquivo carregado.</div>
       </div>
 
-      <div class="rc-slot">
+      <div class="rc-slot" data-slot="seguinte">
         <div class="rc-slot-head"><span class="rc-slot-n">N+1</span> Fatura seguinte</div>
         <label class="rc-slot-drop">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <span>Escolher arquivo .xlsx</span>
+          <span>Arraste aqui ou clique para escolher</span>
           <input type="file" accept=".xlsx,.xls" onchange="Recon.carregar('seguinte',event)">
         </label>
         <div class="rc-slot-info" id="rc-seguinte-info">Nenhum arquivo carregado.</div>

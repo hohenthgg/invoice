@@ -478,5 +478,63 @@ console.log("\nImpacto financeiro");
         it && it.impacto.motivo.slice(0,60));
 }
 
+/* ================================================================
+   RUÍDO DE PLANILHA
+   Fatura real tem rodapé, subtotal e linhas de formatação. Elas não
+   podem virar apontamento — nem "indeterminado", nem "revisão".
+   ================================================================ */
+console.log("\nLinhas que não são colaborador");
+{
+  const sobra = { srcRow: 500, groot: null, nome: "", matricula: null,
+                  inicio: null, fim: null, rateio: null, raw: {} };
+  const sobra2 = { srcRow: 501, groot: "", nome: "   ", matricula: "",
+                   inicio: NaN, fim: NaN, rateio: null, raw: {} };
+  const real  = linha({ nome: "Gente", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) });
+
+  const s = splitInvoiceLines([sobra, sobra2, real], JUNHO);
+  check(s.ignoradas.length === 2 && s.indeterminados.length === 0,
+        "rodapé sem nome, sem identificador e sem datas é ignorado, não indeterminado",
+        `ignoradas=${s.ignoradas.length} indeterminados=${s.indeterminados.length}`);
+
+  const res = conciliar([real, sobra, sobra2], [sobra, sobra2]);
+  check(!res.items.some(i => i.nome === "(sem nome)"),
+        "nenhum apontamento '(sem nome)' chega à tela",
+        res.items.map(i => i.nome).join(", "));
+  check(res.items.every(i => i.status !== RECON_STATUS.INDETERMINADO),
+        "sobra de planilha não gera INDETERMINADO");
+  check(res.contexto.ignoradas === 4,
+        "as linhas ignoradas são contadas e informadas", "ignoradas=" + res.contexto.ignoradas);
+}
+{
+  // uma linha COM período ambíguo continua sendo apontada — esse sinal é real
+  const ambigua = linha({ nome: "Ambigua", inicio: ymd(2026,6,5), fim: ymd(2026,6,20), rateio: -1 });
+  const res = conciliar([], [ambigua]);
+  const it = itemDe(res, "Ambigua");
+  check(it && it.status === RECON_STATUS.INDETERMINADO,
+        "linha com período contraditório continua sendo apontada como indeterminada",
+        it && it.status);
+  check(it && /aparece aqui porque/.test(it.diagnostico) && /não entra em nenhuma comparação/.test(it.diagnostico),
+        "…e o texto explica por que ela está ali e o que isso implica",
+        it && it.diagnostico.slice(0, 100));
+}
+{
+  // erro de dados em linha anônima não é acionável; em linha identificada, é
+  const anonima = { srcRow: 9, groot: null, nome: "", matricula: null,
+                    inicio: ymd(2026,5,1), fim: ymd(2026,5,20), rateio: 1, raw: {} };
+  const res = conciliar([anonima], []);
+  check(!res.items.some(i => i.status === RECON_STATUS.REVISAO),
+        "erro de dados em linha sem nome não vira apontamento de revisão",
+        res.items.map(i => i.status).join(", "));
+
+  const comNome = { srcRow: 9, groot: null, nome: "Fulano Sem Groot", matricula: null,
+                    inicio: ymd(2026,5,1), fim: ymd(2026,5,20), rateio: 1, raw: {} };
+  const res2 = conciliar([comNome], []);
+  const it = itemDe(res2, "Fulano Sem Groot");
+  check(it && it.status === RECON_STATUS.REVISAO,
+        "erro de dados em pessoa identificável continua sendo apontado", it && it.status);
+  check(it && /aparece aqui porque/.test(it.diagnostico) && /Corrija a linha na origem/.test(it.diagnostico),
+        "…com explicação do porquê e do que fazer", it && it.diagnostico.slice(0, 100));
+}
+
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);
