@@ -29,11 +29,16 @@ competência seguinte.
 Importar planilha  →  competência detectada  →  lista de ajustes  →  Exportar Excel
 ```
 
-**Conciliar duas faturas** — duas competências consecutivas. Confronta o que a
-fatura N obrigava a ajustar com o que a fatura N+1 de fato traz, e classifica
-cada caso: conciliado, ajuste ausente, parcial, rateio divergente, sinal
-incorreto, duplicado, retroativo sem origem ou revisão manual. Cada apontamento
-vem com nível de confiança e um diagnóstico em texto.
+**Conciliar duas faturas** — duas competências consecutivas. Para cada pessoa
+reconstrói a história de faturamento — o que foi cobrado, o que o corte
+congelou, o que se infere ter acontecido depois, que ajuste era devido e o que
+de fato apareceu — e classifica o encontro em conciliado, ajuste ausente,
+período divergente, FTE divergente, sinal incorreto, duplicado, retroativo sem
+origem, identidade ambígua, indeterminado ou revisão manual. Um mesmo registro
+pode acumular alertas. Cada apontamento mostra quais das cinco dimensões
+comparadas fecharam (identidade, competência, período, sinal e FTE), o nível de
+confiança e a razão dele, uma linha do tempo da competência de origem e um
+diagnóstico em texto.
 
 ```
 Fatura N + Fatura N+1  →  apontamentos  →  você decide  →  prévia  →  Fatura Conciliada
@@ -76,10 +81,11 @@ Soltar planilha  →  período + filtros  →  placar por operação  →  Baixa
 
 ## A regra em uma frase
 
-O faturamento congela um retrato do quadro no dia 15. Quem está ativo nesse dia é
-cobrado pela competência inteira. O que acontece **depois** do congelamento —
-uma saída no dia 20, uma entrada no dia 22 — não cabe mais naquela fatura e vira
-ajuste na seguinte.
+O faturamento congela um retrato do quadro no dia 15 e **projeta** a cobrança de
+cada pessoa, da sua data de início até o fim do mês — quem entrou em 07/05 e
+estava ativo em 15/05 foi cobrado de 07/05 a 31/05, e não o mês cheio. O que
+acontece **depois** do congelamento — uma saída no dia 20, uma entrada no dia
+22 — não cabe mais naquela fatura e vira ajuste na seguinte.
 
 | Situação | Ajuste |
 |---|---|
@@ -126,6 +132,8 @@ js/import.js          leitura da planilha (SheetJS)
 js/ui.js              renderização da tabela e do detalhe
 js/export.js          geração do Excel herdando o estilo do arquivo original
 js/app.js             inicialização e eventos do modo "projetar ajustes"
+js/billing.js               reconstrói a cobrança e classifica cada linha
+js/competence-source.js     competência por ordem de evidência, com fonte visível
 js/reconciliation.js        motor de conciliação entre duas faturas
 js/reconciliation-ui.js     uploads duplos, apontamentos, decisões e prévia (IIFE)
 js/reconciliation-export.js clona a fatura N+1 e aplica só o que foi aceito
@@ -177,11 +185,13 @@ Não há dependências para instalar. Os testes carregam os mesmos arquivos de
 competência, a proteção contra ajuste duplicado e a detecção automática da
 competência.
 
-`tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as oito
-classificações, a separação entre linha normal e linha retroativa (incluindo
-rateio negativo legítimo), a normalização de identificadores, a checagem de
-sequência, as sugestões por tipo de divergência e a garantia de que nenhum
-apontamento nasce aceito.
+`tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
+classificações de status, a reconstrução da cobrança original (o corte projeta
+da admissão, não cria mês cheio), a classificação de linha normal × retroativa
+nos dois sentidos de sinal, a competência por ordem de evidência, a
+normalização de identificadores, a checagem de sequência, os alertas múltiplos,
+a diferença exata em dias, a identidade da linha criada e a garantia de que
+nenhum apontamento nasce aceito.
 
 ## Detecção da competência
 

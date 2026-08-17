@@ -34,22 +34,45 @@ function lerFatura(data, fileName){
   const employees=parseEmployees(read.rows, read.map);
   if(!employees.length) return {erro:"A aba de Labor não tem linhas legíveis."};
 
-  /* A detecção automática olha para o cluster de movimentações do arquivo. Numa
-     fatura N+1 isso engana: ela carrega os retroativos do mês N, todos datados
-     do mês anterior, e a competência detectada escorrega para trás. Linhas de
-     rateio negativo são retroativas sem margem de dúvida — ficam de fora da
-     detecção. O que sobrar de ambiguidade o usuário corrige na tela. */
-  const paraDetectar=employees.filter(e=>!(typeof e.rateio==="number"&&e.rateio<0));
-  const det=detectCompetence(paraDetectar.length?paraDetectar:employees, readRetornoHint(wb));
-  return {employees, comp:det.comp, confident:det.confident, fileName,
-    buffer:data.slice().buffer, sheetName:read.sheetName, map:read.map};
+  /* A competência é buscada na ordem de força da evidência — campo da
+     planilha, nome do arquivo, sequência com a outra fatura, heurística —
+     e a fonte usada fica visível na tela. Ver js/competence-source.js. */
+  const retornoHint=readRetornoHint(wb);
+  const det=resolveCompetence({wb, employees, fileName, retornoHint});
+  return {employees, comp:det.comp, fonte:det.fonte, fonteDetalhe:det.detalhe,
+    confianca:det.confianca, fileName,
+    buffer:data.slice().buffer, sheetName:read.sheetName, map:read.map, retornoHint};
+}
+
+/* PRIORIDADE 3: com as duas faturas na mão, a sequência é evidência mais forte
+   que a heurística de datas — mas nunca sobrepõe um campo explícito nem uma
+   escolha manual do usuário. */
+const FONTE_FRACA=f=>!f||f.id==="HEURISTICA"||f.id==="VAZIO";
+function reforcarPorSequencia(){
+  if(!R.origem||!R.seguinte) return;
+  const forte=q=>R[q]&&!FONTE_FRACA(R[q].fonte);
+  if(forte("origem")&&FONTE_FRACA(R.seguinte.fonte)){
+    const nm=proximoMes(R.origem.comp);
+    R.seguinte.comp=buildCompetence(nm.y,nm.m);
+    R.seguinte.fonte=COMP_SOURCE.SEQUENCIA;
+    R.seguinte.fonteDetalhe="assumida a partir de "+R.origem.comp.label;
+    R.seguinte.confianca=COMP_SOURCE.SEQUENCIA.confianca;
+  } else if(forte("seguinte")&&FONTE_FRACA(R.origem.fonte)){
+    const ma=mesAnterior(R.seguinte.comp);
+    R.origem.comp=buildCompetence(ma.y,ma.m);
+    R.origem.fonte=COMP_SOURCE.SEQUENCIA;
+    R.origem.fonteDetalhe="assumida a partir de "+R.seguinte.comp.label;
+    R.origem.confianca=COMP_SOURCE.SEQUENCIA.confianca;
+  }
 }
 
 /* O usuário manda na competência: a detecção é um palpite, não um veredito. */
 function setComp(qual, y, m){
   if(!R[qual]) return;
   R[qual].comp=buildCompetence(y,m);
-  R[qual].confident=true;
+  R[qual].fonte=COMP_SOURCE.MANUAL;
+  R[qual].fonteDetalhe="escolhida por você";
+  R[qual].confianca=COMP_SOURCE.MANUAL.confianca;
   R.result=null;
   renderSlot(qual); renderSequencia(); renderResultado();
 }
@@ -64,6 +87,7 @@ function renderSlot(qual){
   const r=R[qual], box=$("rc-"+qual+"-info");
   if(!r){ box.className="rc-slot-info"; box.textContent="Nenhum arquivo carregado."; return; }
   box.className="rc-slot-info ok";
+  const CONF={ALTA:"Alta",MEDIA:"Média",REVISAO:"Revisão necessária"};
   box.innerHTML=`<b>${esc2(r.fileName)}</b>
     <span class="rc-linhas">${r.employees.length} linhas de Labor</span>
     <span class="rc-comp-linha">Competência
@@ -73,7 +97,10 @@ function renderSlot(qual){
       <select onchange="Recon.setComp('${qual}',this.value,null)">${
         Array.from({length:5},(_,k)=>r.comp.y-2+k).map(y=>`<option value="${y}"${y===r.comp.y?" selected":""}>${y}</option>`).join("")
       }</select>
-      ${r.confident?"":'<i class="rc-incerta">detecção incerta</i>'}
+    </span>
+    <span class="rc-fonte">
+      <span>Fonte: <b>${esc2(r.fonte?r.fonte.label:"—")}</b>${r.fonteDetalhe?` <i>(${esc2(r.fonteDetalhe)})</i>`:""}</span>
+      <span class="rc-conf-tag c-${r.confianca}">Confiança: ${esc2(CONF[r.confianca]||r.confianca)}</span>
     </span>`;
 }
 
@@ -93,7 +120,8 @@ function carregar(qual, ev){
       R[qual]=null;
     } else {
       R[qual]=r;
-      renderSlot(qual);
+      reforcarPorSequencia();
+      renderSlot("origem"); renderSlot("seguinte");
     }
     R.result=null;
     renderSequencia();
@@ -154,12 +182,14 @@ const FILTROS=[
   {k:"DIVERGENTE", rot:"Divergentes"},
   {k:"DUPLICADO",  rot:"Duplicados"},
   {k:"SEM_ORIGEM", rot:"Retroativos sem origem"},
+  {k:"INDETERMINADO", rot:"Indeterminados"},
   {k:"REVISAO",    rot:"Revisão manual"}
 ];
 function passaFiltro(it,f){
   if(f==="TODOS") return true;
-  if(f==="DIVERGENTE") return it.status===RECON_STATUS.PARCIAL
-    ||it.status===RECON_STATUS.RATEIO||it.status===RECON_STATUS.SINAL;
+  if(f==="DIVERGENTE") return it.alerts.includes(RECON_STATUS.PERIODO)
+    ||it.alerts.includes(RECON_STATUS.FTE)||it.alerts.includes(RECON_STATUS.SINAL);
+  if(f==="REVISAO") return it.status===RECON_STATUS.REVISAO||it.status===RECON_STATUS.AMBIGUA;
   return it.status===f;
 }
 function contaFiltro(f){ return R.result.items.filter(it=>passaFiltro(it,f)).length; }
@@ -216,9 +246,12 @@ function linhaItem(it){
     ? (it.diffDias>0?"+":"")+it.diffDias+" dia"+(Math.abs(it.diffDias)===1?"":"s")
     : (Math.abs(it.diffFte)>1e-9?fmtFteUI(it.diffFte):"0");
   const aberto=R.aberto===it.id;
+  const extras=(it.alerts||[]).filter(a=>a!==it.status)
+    .map(a=>(RECON_META[a]||{label:a}).label);
   let h=`<tr class="rc-linha t-${meta.tone}${aberto?" aberta":""}" onclick="Recon.toggle(${it.id})">
     <td><span class="rc-status t-${meta.tone}">${meta.icon} ${meta.label}</span>
-        <span class="rc-conf c-${it.confianca}">${conf}</span></td>
+        ${extras.map(e=>`<span class="rc-alerta-extra">+ ${esc2(e)}</span>`).join("")}
+        <span class="rc-conf c-${it.confianca}" title="${esc2(it.confiancaMotivo||"")}">${conf}</span></td>
     <td class="rc-nome">${esc2(it.nome)}<small>${esc2(it.groot?"GROOT "+it.groot:(it.matricula?"Mat. "+it.matricula:"sem identificador"))}</small></td>
     <td class="rc-per">${it.esperado?descreverAjusteUI(it.esperado):"—"}</td>
     <td class="rc-per">${it.achado?descreverAjusteUI(it.achado):"—"}</td>
@@ -239,35 +272,103 @@ function seletorDecisao(it){
 }
 
 function detalhe(it){
-  const e=it.esperado, a=it.achado;
-  const origem=e&&e.emp?e.emp:null;
-  return `<tr class="rc-detalhe"><td colspan="6"><div class="rc-cols">
-    <div class="rc-col">
-      <h4>Fatura ${esc2(it.compOrigem)}</h4>
-      ${origem?`<p><b>Período no cadastro:</b> ${fmtYmd(origem.inicio)||"—"} → ${isValidYmd(origem.fim)?fmtYmd(origem.fim):"em aberto"}</p>
-        <p><b>Snapshot:</b> ${e.mov?esc2(e.mov):"—"}</p>
-        <p><b>Rateio:</b> ${(e.rateio*100).toLocaleString("pt-BR",{maximumFractionDigits:1})}%</p>`
-        :`<p class="rc-mut">Sem linha de origem identificada nesta fatura.</p>`}
+  return `<tr class="rc-detalhe"><td colspan="6">
+    ${timeline(it)}
+    <div class="rc-narrativa">
+      ${bloco("Cobrança original em "+esc2(it.compOrigem), it.cobrancaOriginal
+        ? (it.cobrancaOriginal.cobrado
+            ? `<p class="rc-forte">${fmtShort(it.cobrancaOriginal.start)} → ${fmtShort(it.cobrancaOriginal.end)}</p>
+               <p>${it.cobrancaOriginal.days} dia${it.cobrancaOriginal.days===1?"":"s"} · FTE ${fmtFteUI(it.cobrancaOriginal.fte)}</p>
+               <p class="rc-base">${esc2(it.cobrancaOriginal.base)}</p>`
+            : `<p class="rc-mut">Não cobrada nesta competência.</p>
+               <p class="rc-base">${esc2(it.cobrancaOriginal.base)}</p>`)
+        : `<p class="rc-mut">Sem linha de origem identificada nesta fatura.</p>`)}
+
+      ${bloco("Movimentação inferida", it.movimentacaoInferida
+        ? `<p class="rc-forte">${esc2(it.movimentacaoInferida.texto)}</p>
+           <p class="rc-base">Base da inferência: ${esc2(it.movimentacaoInferida.base)}</p>`
+        : `<p class="rc-mut">Nenhuma movimentação posterior ao corte foi inferida.</p>`)}
+
+      ${bloco("Retroativo esperado em "+esc2(it.compAplicacao), it.esperado
+        ? `<p class="rc-forte">${it.esperado.kind}</p>
+           <p>${fmtShort(it.esperado.start)} → ${fmtShort(it.esperado.end)} · ${it.esperado.days} dia${it.esperado.days===1?"":"s"}</p>
+           <p><b>FTE esperado:</b> ${fmtFteUI(it.esperado.fte)}</p>`
+        : `<p class="rc-mut">A regra do corte não prevê ajuste para esta pessoa.</p>`)}
+
+      ${bloco("Retroativo encontrado", it.achado
+        ? `<p class="rc-forte">${it.achado.kind}</p>
+           <p>${fmtShort(it.achado.start)} → ${fmtShort(it.achado.end)} · ${it.achado.days} dia${it.achado.days===1?"":"s"}</p>
+           <p><b>FTE:</b> ${fmtFteUI(it.achado.fte)}${it.achado.srcRow?` · linha ${it.achado.srcRow}`:""}</p>
+           ${it.achados.length>1?`<p class="rc-mut">${it.achados.length} lançamentos: ${it.achados.map(x=>"linha "+x.srcRow).join(", ")}</p>`:""}`
+        : `<p class="rc-mut">Nenhum lançamento retroativo correspondente.</p>`)}
     </div>
-    <div class="rc-col">
-      <h4>Esperado em ${esc2(it.compAplicacao)}</h4>
-      ${e?`<p class="rc-forte">${e.kind==="DESCONTAR"?"DESCONTAR":"ACRESCENTAR"}</p>
-        <p>${fmtShort(e.start)} → ${fmtShort(e.end)} · ${e.days} dia${e.days===1?"":"s"}</p>
-        <p><b>FTE esperado:</b> ${fmtFteUI(e.fte)}</p>`
-        :`<p class="rc-mut">A regra do snapshot não prevê ajuste para esta pessoa.</p>`}
-    </div>
-    <div class="rc-col">
-      <h4>Fatura ${esc2(it.compAplicacao)}</h4>
-      ${a?`<p class="rc-forte">${a.kind==="DESCONTAR"?"DESCONTAR":"ACRESCENTAR"}</p>
-        <p>${fmtShort(a.start)} → ${fmtShort(a.end)} · ${a.days} dia${a.days===1?"":"s"}</p>
-        <p><b>FTE:</b> ${fmtFteUI(a.fte)}${a.srcRow?` · linha ${a.srcRow}`:""}</p>
-        ${it.achados.length>1?`<p class="rc-mut">${it.achados.length} lançamentos: ${it.achados.map(x=>"linha "+x.srcRow).join(", ")}</p>`:""}`
-        :`<p class="rc-mut">Nenhum lançamento retroativo correspondente.</p>`}
-    </div>
-  </div>
-  <div class="rc-diag"><b>Diagnóstico</b><p>${esc2(it.diagnostico)}</p></div>
-  ${it.decisao==="ACEITAR"?painelAjuste(it):painelSugestaoDisponivel(it)}
+
+    ${it.achado&&it.achado.classeMotivo?`<div class="rc-classe">
+      <b>Linha interpretada como ${esc2((typeof LINE_CLASS_LABEL!=="undefined"&&LINE_CLASS_LABEL[it.achado.classe])||it.achado.classe)}</b>
+      <p>${esc2(it.achado.classeMotivo)}</p></div>`:""}
+    ${!it.achado&&it.lineClassReason?`<div class="rc-classe">
+      <b>Linha interpretada como ${esc2((typeof LINE_CLASS_LABEL!=="undefined"&&LINE_CLASS_LABEL[it.lineClassification])||"Indeterminado")}</b>
+      <p>${esc2(it.lineClassReason)}</p></div>`:""}
+
+    ${dimensoes(it)}
+
+    <div class="rc-diag"><b>Diagnóstico</b><p>${esc2(it.diagnostico)}</p></div>
+    ${it.impacto?`<div class="rc-impacto">${it.impacto.calculado
+      ? `<b>Impacto financeiro</b> · original ${brl(it.impacto.original)} · esperado ${brl(it.impacto.esperado)} · encontrado ${brl(it.impacto.encontrado)} · diferença ${brl(it.impacto.diferenca)}`
+      : esc2(it.impacto.motivo)}</div>`:""}
+    ${it.decisao==="ACEITAR"?painelAjuste(it):painelSugestaoDisponivel(it)}
   </td></tr>`;
+}
+
+function bloco(titulo, corpo){
+  return `<div class="rc-col"><h4>${titulo}</h4>${corpo}</div>`;
+}
+function brl(v){
+  return (v===null||v===undefined)?"—":v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+}
+
+/* Checklist das dimensões comparadas — mostra o que fechou e o que não. */
+const DIM_ROT={identidade:"Identidade", competencia:"Competência", periodo:"Período",
+  sinal:"Sinal", fte:"FTE"};
+function dimensoes(it){
+  const d=it.dimensoes||{};
+  const itens=Object.keys(DIM_ROT).map(k=>{
+    const v=d[k];
+    const ic=v===true?"✓":v===false?"✗":"–";
+    const cls=v===true?"ok":v===false?"bad":"na";
+    return `<span class="rc-dim ${cls}"><i>${ic}</i>${DIM_ROT[k]}</span>`;
+  }).join("");
+  return `<div class="rc-dims">${itens}
+    <span class="rc-dim-conf">Confiança: <b>${{ALTA:"Alta",MEDIA:"Média",REVISAO:"Revisão necessária"}[it.confianca]}</b>${it.confiancaMotivo?" — "+esc2(it.confiancaMotivo):""}</span>
+  </div>`;
+}
+
+/* Linha do tempo da competência de origem: corte, período cobrado, ajuste. */
+function timeline(it){
+  const first=it.compFirst, last=it.compLast, dias=it.compDias;
+  const pos=v=>((ymdParts(v).d-1)/(dias-1))*100;
+  const faixa=(a,b,cls,rot)=>{
+    const x=pos(Math.max(a,first)), w=Math.max(1.2,pos(Math.min(b,last))-x);
+    return `<div class="rc-tl-faixa ${cls}" style="left:${x}%;width:${w}%" title="${rot}"></div>`;
+  };
+  const marcas=[1,5,10,15,20,25,dias].filter((v,i,a)=>a.indexOf(v)===i);
+  const cobr=it.cobrancaOriginal&&it.cobrancaOriginal.cobrado?it.cobrancaOriginal:null;
+  const cortePos=pos(it.compSnapshot);
+  return `<div class="rc-tl">
+    <div class="rc-tl-titulo">${esc2(it.compOrigem)}</div>
+    <div class="rc-tl-trilho">
+      ${cobr?faixa(cobr.start,cobr.end,"cobr","cobrado originalmente"):""}
+      ${it.esperado?faixa(it.esperado.start,it.esperado.end,it.esperado.kind==="DESCONTAR"?"esp-neg":"esp-pos","ajuste esperado"):""}
+      ${it.achado?faixa(it.achado.start,it.achado.end,"ach","ajuste encontrado"):""}
+      <div class="rc-tl-corte" style="left:${cortePos}%"><i></i><span>corte ${fmtShort(it.compSnapshot)}</span></div>
+    </div>
+    <div class="rc-tl-eixo">${marcas.map(d=>`<span style="left:${((d-1)/(dias-1))*100}%">${d}</span>`).join("")}</div>
+    <div class="rc-tl-legenda">
+      ${cobr?`<span><i class="cobr"></i>cobrado em ${esc2(it.compOrigem)}</span>`:""}
+      ${it.esperado?`<span><i class="${it.esperado.kind==="DESCONTAR"?"esp-neg":"esp-pos"}"></i>ajuste esperado</span>`:""}
+      ${it.achado?`<span><i class="ach"></i>ajuste encontrado</span>`:""}
+    </div>
+  </div>`;
 }
 
 function painelSugestaoDisponivel(it){
@@ -293,16 +394,18 @@ function descreverProposta(s){
 function painelAjuste(it){
   const s=it.sugestao; if(!s) return "";
   if(s.acao==="REMOVER") return painelRemocao(it,s);
-  const podeEscolherModo=it.status===RECON_STATUS.PARCIAL;
+  const podeEscolherModo=it.alerts.includes(RECON_STATUS.PERIODO)&&it.achado;
   return `<div class="rc-ajuste">
     <b>Ajuste fino</b>
     ${podeEscolherModo?`<div class="rc-modos">
       <label><input type="radio" name="modo${it.id}" value="SUBSTITUIR"${s.acao==="SUBSTITUIR"?" checked":""}
-        onchange="Recon.modo(${it.id},'SUBSTITUIR')"> Substituir a linha existente</label>
+        onchange="Recon.modo(${it.id},'SUBSTITUIR')"> Substituir a linha existente pelo período esperado</label>
       <label><input type="radio" name="modo${it.id}" value="COMPLEMENTAR"${s.acao==="INCLUIR"?" checked":""}
-        onchange="Recon.modo(${it.id},'COMPLEMENTAR')"> Complementar a diferença</label>
+        onchange="Recon.modo(${it.id},'COMPLEMENTAR')"> Complementar somente ${it.faltantes.length?esc2(it.faltantes.map(f=>f.days===1?fmtShort(f.start):fmtShort(f.start)+" a "+fmtShort(f.end)).join(" e ")):"a diferença"}</label>
       <label><input type="radio" name="modo${it.id}" value="MANTER"
-        onchange="Recon.decidir(${it.id},'MANTER')"> Manter o original</label>
+        onchange="Recon.decidir(${it.id},'MANTER')"> Manter o original, sem alterar nada</label>
+      <label><input type="radio" name="modo${it.id}" value="REVISAR"
+        onchange="Recon.decidir(${it.id},'REVISAR')"> Revisar manualmente</label>
     </div>`:""}
     <div class="rc-campos">
       <label>Tipo
