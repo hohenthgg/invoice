@@ -32,6 +32,7 @@
   const drop = $("ex-drop"), fileInput = $("ex-fileInput");
   let workbook = null;
   let parsed = null;   // {op: [{date, id, solic:'id'|'meli'|'', cells:[...]}]}
+  let leitura = {semData:[], abas:[]};   // o que a leitura do arquivo não conseguiu aproveitar
   let results = null;
   let lastPeriod = null;
 
@@ -89,11 +90,19 @@
     const warn = $("ex-warn1");
     parsed = {};
     const missing = [];
+    /* O que a leitura descarta também é um problema — e era o mais invisível
+       de todos: uma linha sem data legível não entrava nem no total de lidos,
+       então nem a contagem denunciava a falta. */
+    leitura = {semData:[], abas:[]};
     let globalMin = null, globalMax = null, totalRows = 0;
 
     for(const op of OPERATIONS){
       const sheetName = findSheet(op);
-      if(!sheetName){ missing.push(op); parsed[op] = []; continue; }
+      if(!sheetName){
+        missing.push(op); parsed[op] = [];
+        leitura.abas.push({op, motivo:"Aba não encontrada no arquivo."});
+        continue;
+      }
       const ws = workbook.Sheets[sheetName];
       const grid = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, blankrows:false});
 
@@ -108,21 +117,32 @@
           break;
         }
       }
-      if(headerIdx < 0){ missing.push(op + " (cabeçalho não encontrado)"); parsed[op] = []; continue; }
+      if(headerIdx < 0){
+        missing.push(op + " (cabeçalho não encontrado)"); parsed[op] = [];
+        leitura.abas.push({op, motivo:"Aba encontrada, mas sem a coluna GROOT ID nas 20 primeiras linhas — "
+          + "o cabeçalho não pôde ser localizado e a aba inteira ficou de fora."});
+        continue;
+      }
 
       const rows = [];
+      const txt = v => (v === null || v === undefined) ? "" : String(v).trim();
       for(let i=headerIdx+1;i<grid.length;i++){
         const r = grid[i]; if(!r) continue;
         const dv = r[colDate];
         let key = null;
         if(dv instanceof Date && !isNaN(dv)) key = dateKey(dv);
         else if(typeof dv === "number" && dv > 20000 && dv < 80000) key = excelSerialToKey(dv);
-        if(!key) continue;
+        if(!key){
+          // linha em branco é formatação; linha COM conteúdo e sem data é perda de dado
+          if(r.some(c => c !== null && c !== undefined && String(c).trim() !== ""))
+            leitura.semData.push({op, linha:i+1, valor:txt(dv),
+                                  nome:txt(r[colId+1]), groot:txt(r[colId])});
+          continue;
+        }
 
         const idRaw = r[colId];
         const id = (idRaw === null || idRaw === undefined || String(idRaw).trim()==="") ? null : String(idRaw).trim();
         const solicRaw = r[colDate+1];
-        const txt = v => (v === null || v === undefined) ? "" : String(v).trim();
 
         rows.push({
           date: key,
@@ -203,6 +223,9 @@
        (mesmo nome com GROOTs diferentes). */
     lastAudit = auditarIdentidade(entradas);
     lastSolic = solic;
+    /* Um formato só para a tela e para a planilha: os balões contam estes
+       tópicos e o Excel recebe exatamente estas linhas. */
+    lastTopicos = listarTopicos(lastAudit, mode === "nao" ? [] : dedup.descartados, leitura);
     let tFilt=0, tDup=0, tFinal=0;
     for(const op of OPERATIONS){
       results[op] = dedup.porOperacao[op];
@@ -210,7 +233,7 @@
     }
     renderResults(ini, fim, tFilt, tDup, tFinal, mode === "nao", solic);
   });
-  let lastDedup = null, lastAudit = null, lastSolic = "ambos";
+  let lastDedup = null, lastAudit = null, lastTopicos = null, lastSolic = "ambos";
 
   function renderResults(ini, fim, tFilt, tDup, tFinal, dedupOff, solic){
     const body = $("ex-resultBody");
@@ -239,102 +262,128 @@
     }
     const solicTxt = solic === "ambos" ? "ID + MELI" : (solic === "id" ? "só ID Logistics" : "só MELI");
     $("ex-periodLabel").textContent = fmtBR(ini) + " → " + fmtBR(fim) + " · " + solicTxt;
-    const ra = lastAudit ? lastAudit.resumo : null;
-    const conflitos = ra ? ra.mesmoNome + ra.mesmoGroot : 0;
+    /* A barra fica com os números da extração; os problemas viraram balões,
+       cada um com seu nome e sua cor, logo abaixo. */
     $("ex-totalBar").innerHTML =
       "Registros encontrados: <b>"+tFilt.toLocaleString("pt-BR")+"</b>&nbsp;·&nbsp;" +
       "Únicos pessoa-dia: <b>"+tFinal.toLocaleString("pt-BR")+"</b>&nbsp;·&nbsp;" +
-      "Duplicados removidos: <b>"+(dedupOff ? "—" : tDup.toLocaleString("pt-BR"))+"</b>" +
-      (ra && ra.semGroot ? "&nbsp;·&nbsp;GROOT ausente: <b>"+ra.semGroot.toLocaleString("pt-BR")+"</b>" : "") +
-      (conflitos ? "&nbsp;·&nbsp;Conflitos de identidade: <b>"+conflitos.toLocaleString("pt-BR")+"</b>" : "");
+      "Duplicados removidos: <b>"+(dedupOff ? "—" : tDup.toLocaleString("pt-BR"))+"</b>";
     renderDetalheDedup(dedupOff);
     $("ex-num2").classList.add("done"); $("ex-num2").textContent="✓";
     $("ex-step3").classList.remove("disabled");
     $("ex-step3").scrollIntoView({behavior:"smooth",block:"nearest"});
   }
 
-  /* Nada é removido em silêncio: quem foi descartado, de onde veio e onde a
-     ocorrência mantida ficou. Painel recolhido para não poluir a tela. */
+  /* ================================================================
+     PAINEL DE REVISÃO
+     ----------------------------------------------------------------
+     Uma pilha de listas não diz por onde começar. Os balões respondem
+     isso de relance: um por tópico, na ordem de quem precisa de atenção
+     antes, com a contagem e a cor da gravidade. Clicar abre o tópico.
+     ================================================================ */
+  const GRAV_CLASSE = {alta:"g-alta", media:"g-media", baixa:"g-baixa", info:"g-info"};
+  const slug = s => "ex-t-" + normalizeNome(s).toLowerCase().replace(/\s+/g, "-");
+
   function renderDetalheDedup(dedupOff){
     const alvo = $("ex-detalheDedup");
     if(!alvo) return;
-    if(!lastDedup){ alvo.innerHTML=""; alvo.classList.add("hidden"); return; }
-    const {descartados, resumo} = lastDedup;
-    const aud = lastAudit || {semGroot:[], mesmoNome:[], mesmoGroot:[], resumo:{}};
-    /* A lista de "sem GROOT" vem da auditoria, não da dedup: com a dedup
-       desligada a dedup não olha identificador nenhum, mas os registros sem
-       identificador continuam lá e continuam precisando de revisão. */
-    const semGroot = aud.semGroot;
-    const temAnomalia = aud.mesmoNome.length || aud.mesmoGroot.length;
-    /* Com a dedup desligada não há descartados, mas os conflitos de identidade
-       continuam existindo — o arquivo é o mesmo. */
-    if(!descartados.length && !semGroot.length && !temAnomalia){
-      alvo.innerHTML=""; alvo.classList.add("hidden"); return;
+    if(!lastDedup || !lastAudit){ alvo.innerHTML=""; alvo.classList.add("hidden"); return; }
+    const topicos = lastTopicos || [];
+    if(!topicos.length){
+      alvo.innerHTML = '<p class="ex-limpo">Nenhum problema encontrado no período: '
+        + 'todos os registros têm identificador, nome legível e nenhum conflito entre eles.</p>';
+      alvo.classList.remove("hidden");
+      return;
     }
     alvo.classList.remove("hidden");
-    const regra = resumo.modo==="dia"
+    const baloes = resumirTopicos(topicos);
+    const regra = lastDedup.resumo.modo==="dia"
       ? "Duplicado = mesmo GROOT normalizado + mesma data, valendo entre operações, abas e arquivos."
       : "Duplicado = mesmo GROOT normalizado no período inteiro, valendo entre operações, abas e arquivos.";
-    const partes = [];
-    if(!dedupOff) partes.push(descartados.length + ' duplicado' + (descartados.length===1?'':'s'));
-    if(semGroot.length) partes.push(semGroot.length + ' sem GROOT');
-    if(temAnomalia) partes.push((aud.mesmoNome.length + aud.mesmoGroot.length) + ' conflito'
-      + (aud.mesmoNome.length + aud.mesmoGroot.length===1?'':'s') + ' de identidade');
-    let h = '<details class="ex-dedup"><summary>Deduplicação e revisão de identidade ('
-      + partes.join(' · ') + ')</summary>'
+
+    let h = '<div class="ex-revisao-top">'
+      + '<div><b>Revisão</b> — ' + topicos.length + ' ponto' + (topicos.length===1?'':'s')
+      + ' em ' + baloes.length + ' tópico' + (baloes.length===1?'':'s') + '</div>'
+      + '<button type="button" class="btn mini amber" id="ex-btnRelatorio">Baixar relatório (.xlsx)</button>'
+      + '</div>'
+      + '<div class="ex-baloes">'
+      + baloes.map(b => '<button type="button" class="ex-balao ' + GRAV_CLASSE[b.gravidade]
+          + '" data-alvo="' + slug(b.topico) + '">' + esc(b.topico)
+          + '<b>' + b.total.toLocaleString("pt-BR") + '</b></button>').join("")
+      + '</div>'
       + '<p class="regra">' + (dedupOff
-          ? 'Deduplicação desligada — nada foi removido. Os conflitos de identidade abaixo continuam valendo: eles são do arquivo, não da remoção.'
-          : regra + ' Fica sempre a <b>primeira ocorrência encontrada</b>.')
-      + ' <button type="button" class="btn mini amber" id="ex-btnRelatorio">Baixar relatório de revisão (.xlsx)</button></p>';
-    if(descartados.length && !dedupOff){
-      h += '<table><thead><tr><th>GROOT</th><th>Nome</th><th>Data</th><th>Operação mantida</th><th>Operação descartada</th></tr></thead><tbody>'
-        + descartados.slice(0,200).map(d=>'<tr><td>'+esc(d.groot)+'</td><td>'+(esc(d.nome)||'<i>—</i>')
-          +'</td><td>'+esc(dataBR(d.data))+'</td><td>'+esc(d.mantidaEm)+'</td><td>'+esc(d.descartadaDe)+'</td></tr>').join("")
-        + '</tbody></table>'
-        + (descartados.length>200?'<p class="regra">…e mais '+(descartados.length-200)+'.</p>':'');
-    }
-    if(semGroot.length) h += blocoSemGroot(semGroot);
-    h += blocoAnomalias(aud);
-    alvo.innerHTML = h + '</details>';
+          ? 'Deduplicação desligada — nada foi removido. Os demais tópicos continuam valendo: são do arquivo, não da remoção.'
+          : regra + ' Fica sempre a <b>primeira ocorrência encontrada</b>.') + '</p>';
+
+    // uma seção por tópico, na mesma ordem dos balões
+    h += baloes.map(b => {
+      const linhas = topicos.filter(t => t.topico === b.topico);
+      const corpo = b.topico === "Mesmo nome, GROOTs diferentes"
+          ? corpoConflito(lastAudit.mesmoNome, "GROOT",
+              "A deduplicação <b>não uniu</b> estes registros — e não deveria: nome não é chave, "
+              + "homônimo existe. Mas se for a mesma pessoa cadastrada duas vezes, ela está sendo "
+              + "contada em dobro.")
+        : b.topico === "Mesmo GROOT, nomes diferentes"
+          ? corpoConflito(lastAudit.mesmoGroot, "Nome",
+              "A deduplicação <b>uniu</b> estes registros, por serem o mesmo GROOT. Se os nomes "
+              + "forem de pessoas diferentes, uma diária pode ter sido descartada como se fosse "
+              + "repetida.")
+          : corpoLista(linhas);
+      return '<details class="ex-topico ' + GRAV_CLASSE[b.gravidade] + '" id="' + slug(b.topico) + '">'
+        + '<summary>' + esc(b.topico) + ' <span class="ex-tag">' + b.total + '</span>'
+        + '<span class="ex-grav">' + esc(GRAVIDADE_TXT[b.gravidade]) + '</span></summary>'
+        + corpo + '</details>';
+    }).join("");
+
+    alvo.innerHTML = h;
     const btn = $("ex-btnRelatorio");
     if(btn) btn.addEventListener("click", baixarRelatorio);
+    alvo.querySelectorAll(".ex-balao").forEach(b => b.addEventListener("click", () => {
+      const d = document.getElementById(b.dataset.alvo);
+      if(!d) return;
+      d.open = true;
+      d.scrollIntoView({behavior:"smooth", block:"nearest"});
+    }));
   }
 
-  /* Sem GROOT não há pessoa-dia — mas o registro existe e alguém trabalhou.
-     Um número solto não é revisável: para conferir é preciso saber QUEM é a
-     pessoa e em qual filial ela está, para então buscar o identificador na
-     origem. Daí a lista nominal, recolhida por padrão. */
-  const LIMITE_SEM_GROOT = 300;
-  function blocoSemGroot(semGroot){
-    const n = semGroot.length, um = n===1;
-    let h = '<p class="regra alerta"><b>GROOT ausente — revisar:</b> ' + n
-      + ' registro'+(um?'':'s')+' sem identificador ' + (um?'foi mantido':'foram mantidos')
-      + ' e não '+(um?'entrou':'entraram')+' na deduplicação. Sem GROOT não há '
-      + 'pessoa-dia, e tratar todos os vazios como a mesma pessoa apagaria gente diferente. '
-      + 'Se algum desses nomes se repetir no mesmo dia, a duplicidade só pode ser '
-      + 'resolvida preenchendo o GROOT na origem.</p>';
+  /* Lista simples de um tópico. Só aparecem as colunas que carregam alguma
+     informação: numa aba não lida não existe nome nem cargo, e sete traços
+     seguidos não ajudam ninguém. */
+  const COLUNAS = [
+    {k:"nome",        t:"Nome"},
+    {k:"groot",       t:"GROOT"},
+    {k:"op",          t:"Filial / operação"},
+    {k:"date",        t:"Data", fmt:dataBR},
+    {k:"empresa",     t:"Empresa"},
+    {k:"cargo",       t:"Cargo"},
+    {k:"escala",      t:"Escala"},
+    {k:"solicitante", t:"Solicitante"}
+  ];
+  const LIMITE_LINHAS = 300;
 
-    // por filial primeiro: normalmente o problema está concentrado em uma operação
+  function corpoLista(linhas){
+    const cols = COLUNAS.filter(c => linhas.some(l => String(l[c.k] || "").trim() !== ""));
+    const umDiag = linhas.every(l => l.diagnostico === linhas[0].diagnostico);
+    let h = '<p class="regra">' + (umDiag ? esc(linhas[0].diagnostico) + " " : "")
+      + '<b>O que fazer:</b> ' + esc(linhas[0].acao) + '</p>';
+
+    // por filial: o problema quase sempre está concentrado em uma operação
     const porOp = new Map();
-    semGroot.forEach(s => porOp.set(s.op, (porOp.get(s.op)||0)+1));
-    h += '<p class="regra">Por filial: '
-      + Array.from(porOp).map(([op,c]) => '<b>'+esc(op)+'</b> '+c).join(' · ') + '</p>';
+    linhas.forEach(l => { if(l.op) porOp.set(l.op, (porOp.get(l.op)||0)+1); });
+    if(porOp.size > 1)
+      h += '<p class="regra">Por filial: '
+         + Array.from(porOp).map(([op,c]) => '<b>'+esc(op)+'</b> '+c).join(' · ') + '</p>';
 
-    h += '<details class="ex-semgroot"><summary>Ver ' + (um?'o registro':'os '+n+' registros')
-      + ' sem identificador</summary>'
-      + '<table><thead><tr><th>Filial / operação</th><th>Data</th><th>Nome</th>'
-      + '<th>Empresa</th><th>Cargo</th><th>Escala</th><th>Solicitante</th></tr></thead><tbody>'
-      + semGroot.slice(0, LIMITE_SEM_GROOT).map(s => {
-          const cel = v => '<td>' + (esc(v) || '<i>—</i>') + '</td>';
-          return '<tr><td>'+esc(s.op)+'</td><td>'+esc(dataBR(s.date))+'</td>'
-            + cel(s.nome) + cel(s.empresa) + cel(s.cargo) + cel(s.escala) + cel(s.solicitante)
-            + '</tr>';
-        }).join("")
-      + '</tbody></table>'
-      + (n>LIMITE_SEM_GROOT
-          ? '<p class="regra">…e mais '+(n-LIMITE_SEM_GROOT)+'. A lista completa está no relatório .xlsx.</p>'
-          : '')
-      + '</details>';
+    h += '<table class="ex-lista"><thead><tr>'
+      + cols.map(c => '<th>'+esc(c.t)+'</th>').join("")
+      + (umDiag ? "" : '<th>Diagnóstico</th>') + '</tr></thead><tbody>'
+      + linhas.slice(0, LIMITE_LINHAS).map(l => '<tr>'
+          + cols.map(c => '<td>' + (esc(c.fmt ? c.fmt(l[c.k]) : l[c.k]) || '<i>—</i>') + '</td>').join("")
+          + (umDiag ? "" : '<td class="diag">'+esc(l.diagnostico)+'</td>') + '</tr>').join("")
+      + '</tbody></table>';
+    if(linhas.length > LIMITE_LINHAS)
+      h += '<p class="regra">…e mais ' + (linhas.length-LIMITE_LINHAS)
+         + '. O relatório .xlsx traz todos.</p>';
     return h;
   }
 
@@ -342,38 +391,12 @@
      diferentes. O app só aponta — sem outra fonte, o dado não diz qual das
      versões está certa, e unir por conta própria apagaria gente. */
   const LIMITE_CASOS = 50, LIMITE_OCORR = 8;
-  function blocoAnomalias(aud){
-    let h = "";
-    if(aud.mesmoNome.length){
-      h += secaoConflito({
-        classe:"ex-mesmonome", casos:aud.mesmoNome,
-        titulo:"Mesmo nome, identificadores diferentes",
-        intro:"A deduplicação <b>não uniu</b> estes registros — e não deveria: nome não é chave, "
-             +"homônimo existe. Mas se for a mesma pessoa cadastrada duas vezes, ela está sendo "
-             +"contada em dobro.",
-        colVariante:"GROOT"
-      });
-    }
-    if(aud.mesmoGroot.length){
-      h += secaoConflito({
-        classe:"ex-mesmogroot", casos:aud.mesmoGroot,
-        titulo:"Mesmo identificador, nomes diferentes",
-        intro:"A deduplicação <b>uniu</b> estes registros, por serem o mesmo GROOT. Se os nomes "
-             +"forem de pessoas diferentes, uma diária pode ter sido descartada como se fosse "
-             +"repetida — este é o caso mais grave da lista.",
-        colVariante:"Nome"
-      });
-    }
-    return h;
-  }
 
-  function secaoConflito({classe, casos, titulo, intro, colVariante}){
+  function corpoConflito(casos, colVariante, intro){
     const mostrados = casos.slice(0, LIMITE_CASOS);
-    let h = '<details class="ex-conflito '+classe+'"><summary>'+esc(titulo)+' — '
-      + casos.length + ' caso' + (casos.length===1?'':'s') + '</summary>'
-      + '<p class="regra">'+intro+'</p>';
+    let h = '<p class="regra">'+intro+'</p>';
     h += mostrados.map(c => {
-      const cabecalho = classe==="ex-mesmonome"
+      const cabecalho = colVariante==="GROOT"
         ? esc(c.rotulo) + ' <span class="ex-tag">'+c.variantes.length+' identificadores</span>'
         : 'GROOT ' + esc(c.rotulo) + ' <span class="ex-tag">'+c.variantes.length+' nomes</span>';
       const linhas = c.variantes.map(v => {
@@ -401,7 +424,7 @@
     if(casos.length > LIMITE_CASOS)
       h += '<p class="regra">…e mais '+(casos.length-LIMITE_CASOS)
          + ' caso'+(casos.length-LIMITE_CASOS===1?'':'s')+'. O relatório .xlsx traz todos.</p>';
-    return h + '</details>';
+    return h;
   }
 
   // ---------- exportação com a estética do SIGO ----------
@@ -486,103 +509,130 @@
   /* ---------- relatório de revisão ----------
      O painel na tela serve para decidir; o .xlsx serve para trabalhar: filtrar,
      ordenar, marcar o que já foi corrigido e devolver para quem cuida do
-     cadastro. Uma aba por tipo de problema, sempre com filial, data e os
-     campos que permitem achar a pessoa na origem. */
-  const COLS_CONTEXTO = ["FILIAL / OPERAÇÃO","DATA","EMPRESA","CARGO","ESCALA","SOLICITANTE"];
-  const W_CONTEXTO = [20,12,16,18,10,14];
+     cadastro.
 
-  function addRelSheet(wbx, nome, headers, widths, linhas){
+     A primeira aba é uma lista só, uma linha por problema, com as MESMAS
+     colunas para todos os tópicos — é ela que se filtra. As abas seguintes
+     são o mesmo conteúdo já separado por tópico, para quem prefere abrir e
+     ler. Cada linha diz o que é, quão grave é e o que fazer. */
+  const REL_COLS = [
+    {t:"GRAVIDADE",         w:14, v:t => GRAVIDADE_TXT[t.gravidade]},
+    {t:"TÓPICO",            w:30, v:t => t.topico},
+    {t:"NOME",              w:36, v:t => t.nome},
+    {t:"GROOT",             w:15, v:t => t.groot},
+    {t:"FILIAL / OPERAÇÃO", w:20, v:t => t.op},
+    {t:"DATA",              w:12, v:t => dataCell(t.date)},
+    {t:"EMPRESA",           w:16, v:t => t.empresa},
+    {t:"CARGO",             w:18, v:t => t.cargo},
+    {t:"ESCALA",            w:10, v:t => t.escala},
+    {t:"SOLICITANTE",       w:14, v:t => t.solicitante},
+    {t:"O QUE ACONTECEU",   w:72, v:t => t.diagnostico, wrap:true},
+    {t:"O QUE FAZER",       w:56, v:t => t.acao, wrap:true}
+  ];
+  // a cor diz a gravidade antes de qualquer leitura
+  const FILL_GRAV = {alta:"FFF8D7DA", media:"FFFDF0D5", baixa:"FFE8EEF7", info:"FFF0F0F0"};
+  const FONT_GRAV = {alta:"FF9B1C24", media:"FF8A5A00", baixa:"FF33507D", info:"FF666666"};
+
+  function estiloLinha(row, gravidade){
+    row.eachCell({includeEmpty:true}, (cell, col) => {
+      cell.border = thinBorder();
+      cell.font = {size:11, name:"Calibri"};
+      if(cell.value instanceof Date) cell.numFmt = "dd/mm/yyyy";
+      const wrap = !!(REL_COLS[col-1] && REL_COLS[col-1].wrap);
+      cell.alignment = {horizontal:(typeof cell.value === "number" || cell.value instanceof Date)
+        ? "right" : "left", vertical:"top", wrapText:wrap};
+    });
+    if(gravidade){
+      const c = row.getCell(1);
+      c.fill = {type:"pattern", pattern:"solid", fgColor:{argb:FILL_GRAV[gravidade]}};
+      c.font = {size:11, name:"Calibri", bold:true, color:{argb:FONT_GRAV[gravidade]}};
+      c.alignment = {horizontal:"center", vertical:"top"};
+    }
+  }
+
+  function addRelSheet(wbx, nome, headers, widths, linhas, gravidades){
     const ws = wbx.addWorksheet(nome.substring(0,31), {views:[{state:"frozen", ySplit:1}]});
     ws.columns = widths.map(w => ({width:w}));
     const head = ws.addRow(headers);
-    head.height = 28;
+    head.height = 30;
     head.eachCell(cell => {
       cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:STY.headerFill}};
       cell.font = {bold:true, color:{argb:STY.headerFont}, size:11, name:"Calibri"};
       cell.alignment = {horizontal:"center", vertical:"middle", wrapText:true};
       cell.border = thinBorder();
     });
-    linhas.forEach(vals => {
-      const row = ws.addRow(vals);
-      row.eachCell({includeEmpty:true}, (cell, col) => {
-        cell.border = thinBorder();
-        cell.font = {size:11, name:"Calibri"};
-        if(cell.value instanceof Date) cell.numFmt = "dd/mm/yyyy";
-        cell.alignment = {horizontal: (typeof cell.value === "number" || cell.value instanceof Date)
-          ? "right" : "left", vertical:"middle", wrapText:false};
-      });
-    });
+    linhas.forEach((vals, i) => estiloLinha(ws.addRow(vals), gravidades && gravidades[i]));
     if(linhas.length) ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:headers.length}};
     return ws;
   }
 
   // data vira Date de verdade para o Excel filtrar e ordenar; chave ilegível fica como texto
   const dataCell = k => /^\d{4}-\d{2}-\d{2}$/.test(String(k||"")) ? keyToUTCDate(k) : (k||"");
-  const ctxVals = o => [o.op, dataCell(o.date), o.empresa, o.cargo, o.escala, o.solicitante];
+
+  /* Aba de tópico: as mesmas colunas da lista geral, menos as duas que
+     seriam idênticas em toda linha (o próprio tópico) ou vazias. */
+  function addAbaTopico(wbx, nome, linhas){
+    const cols = REL_COLS.filter(c => c.t !== "TÓPICO"
+      && (c.t === "GRAVIDADE" || linhas.some(t => String(c.v(t) === 0 ? "0" : (c.v(t) || "")).trim() !== "")));
+    addRelSheet(wbx, nome, cols.map(c => c.t), cols.map(c => c.w),
+      linhas.map(t => cols.map(c => c.v(t))), linhas.map(t => t.gravidade));
+  }
+
+  // "Mesmo GROOT, nomes diferentes" → "2 Mesmo GROOT nomes difer" (31 caracteres, sem : \ / ? * [ ])
+  function nomeAba(i, topico){
+    return (i + " " + String(topico).replace(/[:\\\/?*\[\]]/g, " ")).substring(0, 31).trim();
+  }
 
   async function baixarRelatorio(){
-    const aud = lastAudit, ded = lastDedup;
+    const aud = lastAudit, ded = lastDedup, topicos = lastTopicos || [];
     if(!aud || !ded) return;
     const wbx = new ExcelJS.Workbook();
     const solicTxt = lastSolic === "ambos" ? "ID Logistics + MELI"
                    : (lastSolic === "id" ? "só ID Logistics" : "só MELI");
     const modoTxt = ded.resumo.modo === "dia" ? "uma linha por pessoa por dia"
                   : (ded.resumo.modo === "periodo" ? "uma linha por pessoa no período" : "sem remoção");
+    const baloes = resumirTopicos(topicos);
 
-    // ---- Resumo: o que cada aba quer dizer, para o relatório se explicar sozinho
-    addRelSheet(wbx, "Resumo", ["ITEM","VALOR","O QUE SIGNIFICA"], [34,14,96], [
+    // ---- 0 · Leia-me: o relatório se explicando sozinho, longe do app
+    const leiaMe = [
+      ["COMO USAR", "", ""],
+      ["Aba 'Todos os problemas'", "1 linha = 1 problema",
+       "É a aba de trabalho: filtre por GRAVIDADE ou TÓPICO, marque o que já corrigiu. As demais abas são o mesmo conteúdo separado por tópico."],
+      ["Coluna GRAVIDADE", "Grave / Revisar / Provável grafia / Informativo",
+       "Grave = pode ter apagado uma diária de verdade. Revisar = impede identificar a pessoa. Provável grafia = quase certamente a mesma pessoa escrita diferente. Informativo = comportamento esperado, listado para conferência."],
+      ["Coluna O QUE FAZER", "—", "O próximo passo concreto de cada linha. Quase sempre é corrigir o cadastro de origem."],
+      ["Nada foi corrigido automaticamente", "—",
+       "O aplicativo aponta; a correção é na origem. Sem outra fonte, o dado não diz qual das versões está certa, e unir por conta própria apagaria gente."],
+      ["", "", ""],
+      ["EXTRAÇÃO QUE GEROU ESTE RELATÓRIO", "", ""],
       ["Período", fmtBR(lastPeriod.ini)+" a "+fmtBR(lastPeriod.fim), "Recorte por data de solicitação."],
       ["Solicitante", solicTxt, "Filtro aplicado na extração."],
       ["Deduplicação", modoTxt, "Duplicado = mesmo GROOT normalizado + mesma data, valendo entre operações, abas e arquivos."],
       ["Registros no período", aud.resumo.registros, "Antes da deduplicação."],
-      ["Duplicados removidos", ded.resumo.duplicados, "Ficou sempre a primeira ocorrência encontrada. Aba 'Duplicados removidos'."],
-      ["Sem identificador", aud.resumo.semGroot, "Mantidos e fora da deduplicação — sem GROOT não existe pessoa-dia. Aba 'Sem identificador'."],
-      ["Mesmo nome, GROOTs difer.", aud.resumo.mesmoNome, "A dedup NÃO uniu. Se for a mesma pessoa cadastrada duas vezes, está contada em dobro."],
-      ["…destes, ids realmente distintos", aud.resumo.mesmoNomeIdsDistintos, "Os demais diferem só por zeros à esquerda (formatação)."],
-      ["Mesmo GROOT, nomes difer.", aud.resumo.mesmoGroot, "A dedup UNIU. Confira antes de aceitar o resultado."],
-      ["…destes, nomes realmente distintos", aud.resumo.mesmoGrootNomesDistintos, "O caso mais grave: uma diária pode ter sido descartada como repetida."],
+      ["Únicos pessoa-dia", aud.resumo.registros - ded.resumo.duplicados, "O que a extração entrega."],
       ["", "", ""],
-      ["Nada foi corrigido automaticamente", "—", "O aplicativo aponta; a correção é no cadastro de origem. Sem outra fonte, o dado não diz qual das versões está certa."]
-    ]);
+      ["O QUE FOI ENCONTRADO", "", ""]
+    ];
+    baloes.forEach(b => leiaMe.push([b.topico, b.total,
+      GRAVIDADE_TXT[b.gravidade] + " — ver a aba correspondente."]));
+    if(!baloes.length) leiaMe.push(["Nenhum problema encontrado", 0,
+      "Todos os registros têm identificador, nome legível e nenhum conflito entre eles."]);
+    addRelSheet(wbx, "0 Leia-me", ["ITEM","VALOR","O QUE SIGNIFICA"], [36,22,104], leiaMe);
+    // esta aba é texto corrido, não tabela: filtro atrapalharia
+    wbx.getWorksheet("0 Leia-me").autoFilter = undefined;
+    wbx.getWorksheet("0 Leia-me").getColumn(3).alignment = {wrapText:true, vertical:"top"};
 
-    // ---- Sem identificador
-    if(aud.semGroot.length){
-      addRelSheet(wbx, "Sem identificador",
-        ["NOME"].concat(COLS_CONTEXTO).concat(["GROOT (COMO ESTAVA)"]),
-        [38].concat(W_CONTEXTO).concat([20]),
-        aud.semGroot.map(o => [o.nome].concat(ctxVals(o)).concat([o.grootBruto])));
+    // ---- 1 · Todos os problemas: a aba que se filtra
+    if(topicos.length){
+      addRelSheet(wbx, "1 Todos os problemas", REL_COLS.map(c => c.t), REL_COLS.map(c => c.w),
+        topicos.map(t => REL_COLS.map(c => c.v(t))), topicos.map(t => t.gravidade));
     }
 
-    // ---- Mesmo nome, GROOTs diferentes
-    if(aud.mesmoNome.length){
-      const linhas = [];
-      aud.mesmoNome.forEach((c, i) => c.variantes.forEach(v => v.ocorrencias.forEach(o =>
-        linhas.push([i+1, c.rotulo, v.rotulo, v.vezes, c.explicacao].concat(ctxVals(o))))));
-      addRelSheet(wbx, "Mesmo nome · GROOT difere",
-        ["CASO","NOME","GROOT","VEZES","DIAGNÓSTICO"].concat(COLS_CONTEXTO),
-        [7,38,16,8,80].concat(W_CONTEXTO), linhas);
-    }
+    // ---- 2..n · uma aba por tópico, na mesma ordem dos balões
+    baloes.forEach((b, i) => addAbaTopico(wbx, nomeAba(i + 2, b.topico),
+      topicos.filter(t => t.topico === b.topico)));
 
-    // ---- Mesmo GROOT, nomes diferentes
-    if(aud.mesmoGroot.length){
-      const linhas = [];
-      aud.mesmoGroot.forEach((c, i) => c.variantes.forEach(v => v.ocorrencias.forEach(o =>
-        linhas.push([i+1, c.rotulo, v.rotulo, v.vezes, c.explicacao].concat(ctxVals(o))))));
-      addRelSheet(wbx, "Mesmo GROOT · nome difere",
-        ["CASO","GROOT","NOME","VEZES","DIAGNÓSTICO"].concat(COLS_CONTEXTO),
-        [7,16,38,8,80].concat(W_CONTEXTO), linhas);
-    }
-
-    // ---- Duplicados removidos
-    if(ded.descartados.length){
-      addRelSheet(wbx, "Duplicados removidos",
-        ["GROOT","NOME","DATA","OPERAÇÃO MANTIDA","OPERAÇÃO DESCARTADA"],
-        [16,38,12,22,22],
-        ded.descartados.map(d => [d.groot, d.nome,
-          dataCell(d.data), d.mantidaEm, d.descartadaDe]));
-    }
-
-    await saveWorkbook(wbx, "Diaristas - Revisão de identidade - " + periodoNome() + ".xlsx");
+    await saveWorkbook(wbx, "Diaristas - Revisão - " + periodoNome() + ".xlsx");
   }
 
   $("ex-btnCombined").addEventListener("click", async () => {
