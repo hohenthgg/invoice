@@ -6,13 +6,14 @@ perguntas diferentes sobre ela, uma em cada aba.
 Todo o processamento acontece no navegador. Nenhum dado sai da máquina: não há
 servidor, banco nem envio de arquivos.
 
-## As quatro abas
+## As cinco abas
 
 | Aba | Pergunta | Entrega |
 |---|---|---|
 | **Conciliação Faturas** | O que já foi cobrado está certo? | Ajustes projetados, ou a conferência de duas competências |
 | **Fusão de Linhas** | O arquivo bate com o alvo do MELI? | Labor equalizado dia a dia contra o retorno |
 | **Extração · Diarista** | Quem foram os diaristas do período? | Uma planilha por operação, no layout de origem |
+| **Calcular ABS** | O absenteísmo ficou dentro do range? | Absenteísmo antes e pós diaristas, com o Excel gerencial |
 | **Guia** | — | Resumo conceitual do que cada aba faz |
 
 A aba é escolhida pelo topo da página e também pela URL: `index.html#fusao` abre
@@ -79,6 +80,30 @@ de origem, nomeadas como `Varginha - Diaristas - Agosto.26.xlsx`.
 Soltar planilha  →  período + filtros  →  placar por operação  →  Baixar .xlsx
 ```
 
+### Calcular ABS
+
+Compara, dia a dia, o **Quadro S&OP (sem over)** com quem esteve **presente** no
+período da fatura, e compensa o déficit de cada dia com os **diaristas
+efetivamente solicitados naquele dia** — contados uma vez só, e apenas quando têm
+Groot ID. O abate é limitado ao próprio déficit: um dia nunca fica positivo por
+sobra de diarista.
+
+Devolve o absenteísmo **antes** e **pós compensação** contra o **range contratual
+de 2,5%**, a lista dos dias críticos e um Excel com a aba `Diaristas`, um
+`Unificado` por operação e um `Resumo` gerencial com fórmulas vivas — o
+`COUNTIFS` dos diaristas aponta para a própria aba `Diaristas`, então a planilha
+recalcula sozinha se alguém editar.
+
+Dias sem S&OP no headcount, ou sem lançamento na base de absenteísmo, ficam de
+fora do percentual em vez de entrar como zero.
+
+```
+4 bases  →  período  →  filiais e operações  →  antes × pós  →  Baixar .xlsx
+```
+
+Precisa de quatro bases: duas planilhas mensais de absenteísmo (abas por
+operação, ex. `PAXD Jul`), a base SIGO de diaristas e o headcount diário.
+
 ## A regra em uma frase
 
 O faturamento congela um retrato do quadro no dia 15 e **projeta** a cobrança de
@@ -122,8 +147,8 @@ O arquivo `.nojekyll` já está no repositório para o Pages servir tudo sem pro
 ## Estrutura
 
 ```
-index.html            as quatro abas e a ordem de carga dos scripts
-css/styles.css        estilos das quatro abas
+index.html            as cinco abas e a ordem de carga dos scripts
+css/styles.css        estilos das cinco abas
 js/config.js          nomes de abas, colunas aceitas, dia de corte
 js/dates.js           datas como inteiro AAAAMMDD, imune a fuso horário
 js/engine.js          motor de regras: valida, classifica, dedupe
@@ -139,6 +164,7 @@ js/reconciliation-ui.js     uploads duplos, apontamentos, decisões e prévia (I
 js/reconciliation-export.js clona a fatura N+1 e aplica só o que foi aceito
 js/fusao.js           aba Fusão de Linhas, inteira (IIFE)
 js/extracao.js        aba Extração · Diarista, inteira (IIFE)
+js/abs.js             aba Calcular ABS, inteira (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
@@ -153,8 +179,9 @@ As ferramentas nasceram como páginas independentes e colidiam ao dividir o mesm
 documento. O modo "projetar ajustes" está espalhado por sete arquivos que
 compartilham o escopo global e continua assim; os demais foram fechados em IIFEs.
 
-`js/fusao.js` precisava disso porque também define uma função `render`; publica em
-`window.Fusao` apenas o que os handlers inline do HTML chamam. `js/extracao.js` já
+`js/fusao.js` e `js/abs.js` precisavam disso porque também definem uma função
+`render`; a fusão publica em `window.Fusao` o que os handlers inline chamam, e a
+de ABS não publica nada, porque não tem handler inline. `js/extracao.js` já
 nascera isolado. `js/reconciliation-ui.js` segue a mesma regra e publica
 `window.Recon` — já `js/reconciliation.js` fica no escopo global de propósito,
 porque é motor puro e os testes o carregam junto de `engine.js`.
@@ -162,7 +189,9 @@ porque é motor puro e os testes o carregam junto de `engine.js`.
 Os `id` dos elementos levam prefixo — `fz-` na fusão, `ex-` na extração — porque
 as abas coexistem no mesmo documento: fusão e conciliação tinham as duas um
 `#result` e um `#btnExport`, e extração e conciliação tinham as duas um
-`#fileInput`.
+`#fileInput`. A aba de ABS usa `abs-` pela mesma razão, e suas classes genéricas
+(`.card`, `.top`, `.drop`, `.row`, `.note`) ficam sob `#panel-abs` porque existem
+em outras abas com intenção diferente.
 
 ### Bibliotecas
 
