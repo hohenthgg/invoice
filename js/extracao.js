@@ -15,7 +15,10 @@
     "Divinópolis",
     "Patos de Minas"
   ];
-  const OUT_HEADERS = ["MÊS\nSOLICITAÇÃO","DATA\nSOLICITAÇÃO","SOLICITANTE","EMPRESA\nDIARISTA","GROOT ID","NOME","CARGO","ESCALA"];
+  /* "ESCALA HORÁRIO" não vem do SIGO: é o padrão da operação, levantado nas
+     faturas 3PL (ver ESCALA_HORARIO_PADRAO em js/config.js). Entra como coluna
+     própria, ao lado da ESCALA do SIGO, que é outra coisa (6x1, 5x2…). */
+  const OUT_HEADERS = ["MÊS\nSOLICITAÇÃO","DATA\nSOLICITAÇÃO","SOLICITANTE","EMPRESA\nDIARISTA","GROOT ID","NOME","CARGO","ESCALA","ESCALA\nHORÁRIO"];
   const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 
   // Estética da planilha original (cabeçalho escuro, texto branco, bordas finas)
@@ -225,7 +228,13 @@
     lastSolic = solic;
     /* Um formato só para a tela e para a planilha: os balões contam estes
        tópicos e o Excel recebe exatamente estas linhas. */
-    lastTopicos = listarTopicos(lastAudit, mode === "nao" ? [] : dedup.descartados, leitura);
+    /* Só vale apontar a falta de horário onde há registro para preencher —
+       filial sem diarista no período não é problema nenhum. */
+    const semHorario = OPERATIONS
+      .filter(op => !escalaHorarioDe(op) && dedup.porOperacao[op].rows.length)
+      .map(op => ({op, registros: dedup.porOperacao[op].rows.length}));
+    lastTopicos = listarTopicos(lastAudit, mode === "nao" ? [] : dedup.descartados,
+                                leitura, semHorario);
     let tFilt=0, tDup=0, tFinal=0;
     for(const op of OPERATIONS){
       results[op] = dedup.porOperacao[op];
@@ -438,8 +447,9 @@
       views: [{state:"frozen", ySplit:1}]
     });
     ws.columns = [
-      {width:15},{width:15},{width:14},{width:13},{width:12},{width:38},{width:12},{width:9}
+      {width:15},{width:15},{width:14},{width:13},{width:12},{width:38},{width:12},{width:9},{width:24}
     ];
+    const horario = escalaHorarioDe(op);
 
     // Cabeçalho: fundo escuro, texto branco, negrito, centralizado (padrão SIGO)
     const head = ws.addRow(OUT_HEADERS);
@@ -454,20 +464,22 @@
     for(const r of results[op].rows){
       const c = r.cells;
       const idNum = (c[4] !== "" && !isNaN(Number(c[4]))) ? Number(c[4]) : c[4];
-      const row = ws.addRow([ c[0], keyToUTCDate(c[1]), c[2], c[3], idNum, c[5], c[6], c[7] ]);
+      const row = ws.addRow([ c[0], keyToUTCDate(c[1]), c[2], c[3], idNum, c[5], c[6], c[7], horario ]);
       row.eachCell({includeEmpty:true}, (cell, col) => {
         cell.border = thinBorder();
         cell.font = {size:11, name:"Calibri"};
         if(col === 1) cell.alignment = {horizontal:"right", vertical:"middle"};
         else if(col === 2){ cell.numFmt = "dd/mm/yyyy"; cell.alignment = {horizontal:"right", vertical:"middle"}; }
         else if(col === 5) cell.alignment = {horizontal:"right", vertical:"middle"};
-        else if(col === 7 || col === 8) cell.alignment = {horizontal:"center", vertical:"middle"};
+        else if(col === 7 || col === 8 || col === 9) cell.alignment = {horizontal:"center", vertical:"middle"};
         else cell.alignment = {horizontal:"left", vertical:"middle"};
       });
+      // horário é texto de horas: monoespaçado alinha as colunas de tempo na leitura
+      if(horario) row.getCell(9).font = {size:11, name:"Consolas"};
     }
 
     // Filtros no cabeçalho, como na planilha original
-    ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:8}};
+    ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:9}};
     return ws;
   }
 

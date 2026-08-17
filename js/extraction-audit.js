@@ -265,8 +265,10 @@ const GRAVIDADE_ORDEM = { alta:0, media:1, baixa:2, info:3 };
 /** Uma linha por problema encontrado, pronta para a tela e para o Excel.
  *  @param aud          resultado de auditarIdentidade
  *  @param descartados  os duplicados removidos pela deduplicação
- *  @param leitura      {semData, abas} — o que a leitura do arquivo não aproveitou */
-function listarTopicos(aud, descartados, leitura){
+ *  @param leitura      {semData, abas} — o que a leitura do arquivo não aproveitou
+ *  @param semHorario   operações sem escala horário levantada, com o total de
+ *                      registros afetados */
+function listarTopicos(aud, descartados, leitura, semHorario){
   const t = [];
   const ctx = r => ({op:r.op, date:r.date, empresa:r.empresa, cargo:r.cargo,
                      escala:r.escala, solicitante:r.solicitante});
@@ -280,6 +282,19 @@ function listarTopicos(aud, descartados, leitura){
     diagnostico: a.motivo + " Nenhum registro desta filial entrou na extração, "
                + "em nenhum período.",
     acao: "Conferir o nome da aba e o cabeçalho no arquivo de origem, e extrair de novo."
+  }, vazio)));
+
+  /* O horário não vem do SIGO — vem do padrão da operação, levantado na
+     fatura. Sem fatura da unidade não há padrão, e a coluna sai vazia. Chutar
+     o horário de outra filial seria pior do que a lacuna. */
+  (semHorario || []).forEach(s => t.push(Object.assign({
+    topico: "Sem escala horário", gravidade: GRAVIDADE.MEDIA,
+    nome: "", groot: "", op: s.op, date: "",
+    diagnostico: "Não há escala horário levantada para esta filial, então a coluna "
+               + "ESCALA HORÁRIO sai em branco em " + s.registros + " registro"
+               + (s.registros === 1 ? "" : "s") + ". O SIGO não informa horário: "
+               + "ele vem do padrão da operação, lido na fatura 3PL.",
+    acao: "Enviar uma fatura 3PL desta unidade para levantar o horário padrão do diarista."
   }, vazio)));
 
   ((leitura && leitura.semData) || []).forEach(l => t.push(Object.assign({
