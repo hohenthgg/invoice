@@ -9,9 +9,10 @@
    produzindo dupla contagem de diarista e compensação indevida de ABS. */
 "use strict";
 const { load } = require("./load");
-const ctx = load(["identity.js", "extraction-dedup.js"], ["DEDUP_MODOS"]);
-const { normalizeGroot, hasGroot, normalizeDateKey, personDayKey,
-        deduplicarPessoaDia, DEDUP_MODOS } = ctx;
+const ctx = load(["identity.js", "extraction-dedup.js", "extraction-audit.js"],
+                 ["DEDUP_MODOS", "AUDIT_MOTIVO"]);
+const { normalizeGroot, hasGroot, normalizeNome, normalizeDateKey, personDayKey,
+        deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO } = ctx;
 
 let pass = 0, fail = 0;
 function check(ok, label, extra) {
@@ -20,7 +21,7 @@ function check(ok, label, extra) {
 }
 
 /** registro de diarista, como a leitura do SIGO produz */
-const reg = (id, date, nome) => ({ id, date, nome: nome || "Diarista", solic: "id",
+const reg = (id, date, nome) => ({ id, date, nome: nome === undefined ? "Diarista" : nome, solic: "id",
                                    empresa: "Empresa X", cargo: "Auxiliar", escala: "6x1",
                                    solicitante: "ID Logistics" });
 /** roda a dedup sobre operações nomeadas */
@@ -193,6 +194,121 @@ console.log("\nModos e transparência");
   const r = dedup({ SVC: [reg("123456", "data ruim"), reg("123456", "data ruim")] });
   check(totalMantido(r) === 2 && r.resumo.duplicados === 0,
         "sem data legível não há pessoa-dia — os registros são preservados");
+}
+
+/* ================================================================
+   Auditoria de identidade — o identificador e o nome contam a mesma
+   história? A dedup responde "é a mesma pessoa-dia?"; isto responde a
+   pergunta anterior, e só APONTA: nada é unido nem separado sozinho. */
+console.log("\nAuditoria de identidade");
+
+const auditar = porOp => auditarIdentidade(
+  Object.entries(porOp).map(([op, rows]) => ({ op, rows })));
+
+console.log("\n  Normalização de nome (só para comparar, nunca para identificar)");
+check(normalizeNome("José  da Silva") === "JOSE DA SILVA", "acento, caixa e espaço duplo somem",
+      normalizeNome("José  da Silva"));
+check(normalizeNome("MARIA D'ÁVILA") === "MARIA D AVILA", "pontuação vira separador",
+      normalizeNome("MARIA D'ÁVILA"));
+check(normalizeNome(null) === "" && normalizeNome(undefined) === "", "nulo e indefinido viram vazio");
+
+console.log("\n  Mesmo nome, identificadores diferentes");
+{
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "ANA SOUZA"),
+                            reg("999999", "2026-08-11", "Ana  Souza")] });
+  check(r.mesmoNome.length === 1 && r.mesmoGroot.length === 0,
+        "grafias diferentes do mesmo nome com GROOTs distintos viram um caso",
+        `mesmoNome=${r.mesmoNome.length} mesmoGroot=${r.mesmoGroot.length}`);
+  check(r.mesmoNome[0].variantes.length === 2 && r.mesmoNome[0].motivo === AUDIT_MOTIVO.IDS,
+        "…com as duas variantes e o diagnóstico de ids realmente distintos",
+        JSON.stringify(r.mesmoNome[0].motivo));
+  /* O que varia sob um mesmo nome é o GROOT. Rotular a variante com o nome
+     repetiria a mesma informação em toda linha e esconderia o conflito. */
+  check(r.mesmoNome[0].rotulo === "ANA SOUZA"
+        && r.mesmoNome[0].variantes.map(v => v.rotulo).sort().join("|") === "123456|999999",
+        "…e a variante é rotulada pelo GROOT, não pelo nome do grupo",
+        r.mesmoNome[0].variantes.map(v => v.rotulo).join("|"));
+  check(r.mesmoNome[0].variantes[0].ocorrencias[0].op === "SVC"
+        && !!r.mesmoNome[0].variantes[0].ocorrencias[0].date,
+        "…e cada variante carrega onde e quando apareceu");
+}
+{
+  const r = auditar({ SVC: [reg("00123456", "2026-08-10", "ANA SOUZA")],
+                      XD:  [reg("123456",   "2026-08-11", "ANA SOUZA")] });
+  check(r.mesmoNome.length === 1 && r.mesmoNome[0].motivo === AUDIT_MOTIVO.ZEROS,
+        "GROOTs que só diferem por zeros à esquerda são diagnosticados como formatação",
+        JSON.stringify(r.mesmoNome[0] && r.mesmoNome[0].motivo));
+}
+{
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "ANA SOUZA"),
+                            reg("123456", "2026-08-11", "ANA SOUZA")] });
+  check(r.mesmoNome.length === 0, "mesmo nome com o MESMO GROOT não é conflito nenhum");
+}
+
+console.log("\n  Mesmo identificador, nomes diferentes");
+{
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "ANA SOUZA")],
+                      XD:  [reg("123456", "2026-08-11", "CARLOS PEREIRA")] });
+  check(r.mesmoGroot.length === 1 && r.mesmoGroot[0].motivo === AUDIT_MOTIVO.NOMES,
+        "duas pessoas sob o mesmo GROOT são apontadas como o caso grave",
+        JSON.stringify(r.mesmoGroot[0] && r.mesmoGroot[0].motivo));
+  check(r.mesmoGroot[0].rotulo === "123456"
+        && r.mesmoGroot[0].variantes.map(v => v.rotulo).sort().join("|") === "ANA SOUZA|CARLOS PEREIRA",
+        "…identificadas pelo nome como veio da planilha, não pela chave normalizada",
+        r.mesmoGroot[0].variantes.map(v => v.rotulo).join("|"));
+  check(r.resumo.mesmoGrootNomesDistintos === 1,
+        "…e contadas à parte no resumo, separadas das divergências de grafia");
+}
+{
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "ANA MARIA SOUZA")],
+                      XD:  [reg("123456", "2026-08-11", "ANA SOUZA")] });
+  check(r.mesmoGroot.length === 1 && r.mesmoGroot[0].motivo === AUDIT_MOTIVO.ABREVIACAO,
+        "nome contido no outro é diagnosticado como abreviação, não como duas pessoas",
+        JSON.stringify(r.mesmoGroot[0] && r.mesmoGroot[0].motivo));
+  check(r.resumo.mesmoGrootNomesDistintos === 0, "…e não infla a contagem do caso grave");
+}
+{
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "SOUZA ANA")],
+                      XD:  [reg("123456", "2026-08-11", "ANA SOUZA")] });
+  check(r.mesmoGroot[0].motivo === AUDIT_MOTIVO.ORDEM,
+        "mesmos nomes em ordem trocada são diagnosticados como grafia",
+        JSON.stringify(r.mesmoGroot[0].motivo));
+}
+{
+  // nome vazio não contradiz nome nenhum — senão todo registro incompleto viraria conflito
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "ANA SOUZA"),
+                            reg("123456", "2026-08-11", "")] });
+  check(r.mesmoGroot.length === 0, "nome em branco não é um 'nome diferente'");
+}
+{
+  // registro sem GROOT não entra na comparação, mas entra na lista de revisão
+  const r = auditar({ SVC: [reg("", "2026-08-10", "ANA SOUZA"), reg("", "2026-08-11", "ANA SOUZA")] });
+  check(r.mesmoNome.length === 0 && r.semGroot.length === 2,
+        "sem identificador não há o que confrontar — vai para a lista de revisão");
+  check(r.semGroot[0].nome === "ANA SOUZA" && r.semGroot[0].op === "SVC"
+        && r.semGroot[0].empresa === "Empresa X" && r.semGroot[0].cargo === "Auxiliar"
+        && r.semGroot[0].escala === "6x1" && r.semGroot[0].solicitante === "ID Logistics",
+        "…com todos os campos que permitem achar a pessoa na origem",
+        JSON.stringify(r.semGroot[0]));
+  check(r.semGroot[0].grootBruto === "", "…e o identificador exatamente como estava na célula");
+}
+{
+  const r = auditar({ SVC: [reg(0, "2026-08-10", "ANA SOUZA")] });
+  check(r.semGroot.length === 1 && r.semGroot[0].grootBruto === "0",
+        "GROOT '0' não identifica ninguém, mas o relatório mostra que era '0'",
+        JSON.stringify(r.semGroot[0] && r.semGroot[0].grootBruto));
+}
+
+console.log("\n  A auditoria não muda nada");
+{
+  const rows = [reg("123456", "2026-08-10", "ANA SOUZA"), reg("999999", "2026-08-10", "ANA SOUZA")];
+  const antes = JSON.stringify(rows);
+  const r = auditar({ SVC: rows });
+  check(JSON.stringify(rows) === antes && r.mesmoNome.length === 1,
+        "os registros de entrada saem intactos — a auditoria só aponta");
+  const d = dedup({ SVC: rows });
+  check(totalMantido(d) === 2,
+        "…e a deduplicação segue tratando GROOTs distintos como pessoas distintas");
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");

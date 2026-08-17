@@ -872,6 +872,7 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 #panel-extracao .ex-dedup .regra b{color:var(--ink)}
 #panel-extracao .ex-dedup .regra.alerta{border-top:none;color:var(--warn)}
 #panel-extracao .ex-dedup .regra.alerta b{color:var(--warn)}
+#panel-extracao .ex-dedup .regra .btn{margin-top:9px}
 #panel-extracao .ex-dedup table{width:100%;border-collapse:collapse;font-family:var(--mono);
   font-size:.72rem;margin-bottom:10px}
 #panel-extracao .ex-dedup th{text-align:left;font-size:.62rem;text-transform:uppercase;
@@ -889,3 +890,26 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 #panel-extracao .ex-semgroot > table{display:block;max-height:340px;overflow:auto;
   border:1px solid var(--line);border-radius:var(--radius-sm)}
 #panel-extracao .ex-semgroot > table thead th{position:sticky;top:0;background:var(--navy);z-index:1}
+
+/* conflitos de identidade: mesmo nome com ids diferentes, mesmo id com nomes diferentes */
+#panel-extracao .ex-conflito{border-top:1px solid var(--line);padding-bottom:8px}
+#panel-extracao .ex-conflito summary{padding:11px 0}
+#panel-extracao .ex-conflito summary::before{content:"▸ ";color:var(--amber)}
+#panel-extracao .ex-conflito[open] summary::before{content:"▾ "}
+#panel-extracao .ex-mesmogroot summary{color:var(--warn)}
+#panel-extracao .ex-mesmogroot summary::before{color:var(--warn)}
+#panel-extracao .ex-conflito .regra{border-top:none;padding-top:0}
+#panel-extracao .ex-caso{background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:10px}
+#panel-extracao .ex-mesmogroot .ex-caso{border-left:3px solid var(--warn)}
+#panel-extracao .ex-caso-ttl{font-family:var(--mono);font-size:.78rem;color:var(--ink);
+  font-weight:600;margin-bottom:4px}
+#panel-extracao .ex-tag{font-family:inherit;font-weight:500;font-size:.66rem;color:var(--mut2);
+  border:1px solid var(--line2);border-radius:99px;padding:1px 7px;margin-left:7px;
+  vertical-align:middle}
+#panel-extracao .ex-caso-why{font-size:.73rem;color:var(--mut);line-height:1.55;margin:0 0 8px}
+#panel-extracao .ex-caso table{margin-bottom:0}
+#panel-extracao .ex-caso td.var{font-weight:600;color:var(--ink);vertical-align:top;
+  border-right:1px solid var(--line);white-space:nowrap}
+#panel-extracao .ex-caso td.var .vezes{color:var(--mut2);font-weight:400;margin-left:6px}
+#panel-extracao .ex-caso td.mais{color:var(--mut2);font-style:italic}
