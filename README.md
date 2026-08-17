@@ -6,12 +6,13 @@ duas perguntas diferentes sobre ela, uma em cada aba.
 Todo o processamento acontece no navegador. Nenhum dado sai da máquina: não há
 servidor, banco nem envio de arquivos.
 
-## As três abas
+## As quatro abas
 
 | Aba | Pergunta | Entrega |
 |---|---|---|
 | **Conciliação Faturas** | O que já foi cobrado está certo? | Ajustes de desconto e acréscimo da próxima fatura |
 | **Fusão de Linhas** | O arquivo bate com o alvo do MELI? | Labor equalizado dia a dia contra o retorno |
+| **Extração · Diarista** | Quem foram os diaristas do período? | Uma planilha por operação, no layout de origem |
 | **Guia** | — | Resumo conceitual do que cada aba faz |
 
 A aba é escolhida pelo topo da página e também pela URL: `index.html#fusao` abre
@@ -36,6 +37,20 @@ e não tem cobertura nenhuma no Labor.
 
 ```
 Soltar planilha  →  conciliação dia a dia  →  plano aplicado  →  Baixar Labor ajustado
+```
+
+### Extração · Diarista
+
+Assistente de três passos sobre o controle de diaristas — o arquivo único com uma
+aba por operação (Pouso Alegre SVC e XD, Poços de Caldas, Varginha, Divinópolis,
+Patos de Minas). Filtra pela **data de solicitação**, opcionalmente por
+**solicitante** (ID Logistics ou MELI), e resolve os **Groot IDs repetidos** em um
+de três modos: uma linha por pessoa no período, uma por pessoa por dia, ou nenhuma
+remoção. Exporta uma planilha por operação — ou as seis num arquivo só — no layout
+de origem, nomeadas como `Varginha - Diaristas - Agosto.26.xlsx`.
+
+```
+Soltar planilha  →  período + filtros  →  placar por operação  →  Baixar .xlsx
 ```
 
 ## A regra em uma frase
@@ -91,6 +106,7 @@ js/ui.js              renderização da tabela e do detalhe
 js/export.js          geração do Excel herdando o estilo do arquivo original
 js/app.js             inicialização e eventos da aba de conciliação
 js/fusao.js           aba Fusão de Linhas, inteira (IIFE)
+js/extracao.js        aba Extração · Diarista, inteira (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
@@ -99,15 +115,20 @@ docs/REGRAS.md        regras de negócio detalhadas
 Os arquivos são carregados como scripts clássicos, na ordem declarada no
 `index.html`. Não há build, bundler nem instalação: é o código que roda.
 
-### Por que a aba 2 é uma IIFE
+### Por que as abas 2 e 3 são IIFEs
 
-As duas ferramentas nasceram como páginas independentes e cada uma define, entre
-outras coisas, uma função `render`. A de conciliação está espalhada por sete
-arquivos que compartilham o escopo global e continua assim; a de fusão foi
-fechada dentro de uma IIFE em `js/fusao.js` e publica em `window.Fusao` apenas o
-que os handlers do HTML precisam chamar. Os `id` dos seus elementos levam o
-prefixo `fz-` pelo mesmo motivo — as duas abas coexistem no mesmo documento e
-ambas tinham um `#result` e um `#btnExport`.
+As ferramentas nasceram como páginas independentes e colidiam ao dividir o mesmo
+documento. A de conciliação está espalhada por sete arquivos que compartilham o
+escopo global e continua assim; as outras duas foram fechadas em IIFEs.
+
+`js/fusao.js` precisava disso porque também define uma função `render`; publica em
+`window.Fusao` apenas o que os handlers inline do HTML chamam. `js/extracao.js` já
+nascera isolado.
+
+Os `id` dos elementos levam prefixo — `fz-` na fusão, `ex-` na extração — porque
+as abas coexistem no mesmo documento: fusão e conciliação tinham as duas um
+`#result` e um `#btnExport`, e extração e conciliação tinham as duas um
+`#fileInput`.
 
 ### Bibliotecas
 

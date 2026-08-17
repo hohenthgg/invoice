@@ -34,6 +34,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 3v6a3 3 0 0 0 3 3h4a3 3 0 0 1 3 3v6"/><path d="M17 3v6"/><circle cx="7" cy="3" r="0"/></svg>
     Fusão de Linhas
   </button>
+  <button class="apptab" data-panel="extracao">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+    Extração · Diarista
+  </button>
   <button class="apptab" data-panel="guia">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
     Guia
@@ -170,12 +174,116 @@
   </div>
 </div>
 
-<!-- ========================== ABA 3 — GUIA ========================== -->
+<!-- ==================== ABA 3 — EXTRAÇÃO · DIARISTA ==================== -->
+<div class="apppanel" id="panel-extracao">
+
+  <!-- PASSO 1 -->
+  <section class="step" id="ex-step1">
+    <div class="step-head">
+      <div class="step-num" id="ex-num1">1</div>
+      <h2>Enviar o arquivo</h2>
+      <span class="hint">SIGO_ControleDiaristas.xlsx (mesmo padrão)</span>
+    </div>
+    <div class="drop" id="ex-drop" tabindex="0" role="button" aria-label="Selecionar arquivo Excel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#ffc233" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <div class="big">Arraste o arquivo aqui ou clique para escolher</div>
+      <div class="small">.xlsx com as abas: Pouso Alegre SVC · Pouso Alegre XD · Poços de Caldas · Varginha · Divinópolis · Patos de Minas</div>
+    </div>
+    <input type="file" id="ex-fileInput" accept=".xlsx,.xlsm" hidden>
+    <div class="filechip" id="ex-filechip"></div>
+    <div class="warnbox" id="ex-warn1"></div>
+  </section>
+
+  <!-- PASSO 2 -->
+  <section class="step disabled" id="ex-step2">
+    <div class="step-head">
+      <div class="step-num" id="ex-num2">2</div>
+      <h2>Escolher período e filtros</h2>
+      <span class="hint">filtro pela DATA SOLICITAÇÃO</span>
+    </div>
+    <div class="period-row">
+      <div class="field">
+        <label for="ex-dtIni">Início</label>
+        <input type="date" id="ex-dtIni">
+      </div>
+      <div class="field">
+        <label for="ex-dtFim">Fim</label>
+        <input type="date" id="ex-dtFim">
+      </div>
+    </div>
+    <div class="range-note" id="ex-rangeNote"></div>
+
+    <div class="optgrid">
+      <fieldset>
+        <legend>Solicitante (coluna C)</legend>
+        <div class="seg" role="radiogroup" aria-label="Solicitante">
+          <input type="radio" name="solic" value="ambos" id="ex-solAmbos" checked>
+          <label for="ex-solAmbos">Ambos</label>
+          <input type="radio" name="solic" value="id" id="ex-solId">
+          <label for="ex-solId">ID Logistics</label>
+          <input type="radio" name="solic" value="meli" id="ex-solMeli">
+          <label for="ex-solMeli">MELI</label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Groot IDs duplicados</legend>
+        <label>
+          <input type="radio" name="dedup" value="periodo" checked>
+          <span><b>Uma linha por Groot ID no período</b><i>mantém a primeira ocorrência de cada ID (lista única de diaristas)</i></span>
+        </label>
+        <label>
+          <input type="radio" name="dedup" value="dia">
+          <span><b>Duplicado só se repetir na mesma data</b><i>remove apenas lançamentos em dobro no mesmo dia</i></span>
+        </label>
+        <label>
+          <input type="radio" name="dedup" value="nao">
+          <span><b>Não remover duplicados</b><i>mantém todas as linhas do período, como estão no arquivo</i></span>
+        </label>
+      </fieldset>
+    </div>
+
+    <div class="actions">
+      <button class="btn amber" id="ex-btnProcess">Gerar planilhas</button>
+    </div>
+    <div class="warnbox" id="ex-warn2"></div>
+  </section>
+
+  <!-- PASSO 3 -->
+  <section class="step disabled" id="ex-step3">
+    <div class="step-head">
+      <div class="step-num" id="ex-num3">3</div>
+      <h2>Baixar por operação</h2>
+      <span class="hint" id="ex-periodLabel"></span>
+    </div>
+    <div class="tablebox">
+      <table>
+        <thead>
+          <tr>
+            <th>Operação</th>
+            <th class="num">Linhas no período</th>
+            <th class="num">Duplicados removidos</th>
+            <th class="num">Linhas finais</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ex-resultBody"></tbody>
+      </table>
+    </div>
+    <div class="total-bar" id="ex-totalBar"></div>
+    <div class="all-actions">
+      <button class="btn" id="ex-btnAll">Baixar as 6 planilhas</button>
+      <button class="btn mini" id="ex-btnCombined">Baixar arquivo único (6 abas)</button>
+    </div>
+  </section>
+</div>
+
+<!-- ========================== ABA 4 — GUIA ========================== -->
 <div class="apppanel" id="panel-guia">
 
   <section>
     <h2>O que este app faz</h2>
-    <p class="guia-lead">Duas perguntas diferentes sobre o mesmo Labor: <b>a fatura está certa?</b> e <b>o arquivo bate com o que o MELI espera?</b> Cada aba responde uma delas e devolve um Excel pronto.</p>
+    <p class="guia-lead">Três perguntas diferentes sobre a mesma operação: <b>a fatura está certa?</b>, <b>o arquivo bate com o que o MELI espera?</b> e <b>quem foram os diaristas do período?</b> Cada aba responde uma delas e devolve um Excel pronto.</p>
 
     <div class="duo" style="margin-top:18px">
       <div class="concept c1">
@@ -191,6 +299,14 @@
         <p>Compara, <b>dia a dia</b>, quantas pessoas o seu Labor tem ativas contra a quantidade que o MELI aponta no retorno (Qtd. PREF / Q Pós Compensação).</p>
         <p>Onde sobra gente, monta um plano e <b>aplica</b>: retira linha, adia início, encurta fim ou pausa e retoma o contrato. Onde falta, lista o que incluir. O Labor corrigido sai no mesmo layout do original.</p>
       </div>
+    </div>
+
+    <div class="concept c3" style="margin-top:14px">
+      <span class="chiph">Aba 3 · Extração · Diarista</span>
+      <h3>Quem foram os diaristas do período, por operação?</h3>
+      <p>Parte do controle de diaristas — um arquivo único com uma aba por operação (Pouso Alegre SVC e XD, Poços de Caldas, Varginha, Divinópolis, Patos de Minas) — e recorta dele o que interessa.</p>
+      <p>Filtra pela <b>data de solicitação</b>, opcionalmente por <b>solicitante</b> (ID Logistics ou MELI), e resolve os <b>Groot IDs repetidos</b> do jeito que você escolher: uma linha por pessoa no período inteiro, uma por pessoa por dia, ou nenhuma remoção.</p>
+      <p>Devolve uma planilha por operação — ou as seis num arquivo só — no layout de origem, nomeadas como <code class="inline">Varginha - Diaristas - Agosto.26.xlsx</code>.</p>
     </div>
   </section>
 
@@ -230,6 +346,8 @@
 <script src="js/app.js"></script>
 <!-- Aba 2, isolada numa IIFE (ver js/fusao.js) -->
 <script src="js/fusao.js"></script>
+<!-- Aba 3, também isolada numa IIFE (ver js/extracao.js) -->
+<script src="js/extracao.js"></script>
 <script src="js/tabs.js"></script>
 </body>
 </html>
