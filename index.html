@@ -38,6 +38,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
     Extração · Diarista
   </button>
+  <button class="apptab" data-panel="abs">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
+    Calcular ABS
+  </button>
   <button class="apptab" data-panel="guia">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
     Guia
@@ -328,12 +332,103 @@
   </section>
 </div>
 
-<!-- ========================== ABA 4 — GUIA ========================== -->
+<!-- ====================== ABA 4 — CALCULAR ABS ====================== -->
+<div class="apppanel" id="panel-abs">
+
+  <p class="abs-intro">Confronta o <b>Quadro S&amp;OP diário (sem over)</b> com quem esteve presente e compensa o
+    déficit de cada dia com os diaristas efetivamente solicitados naquele dia. O abate é limitado ao próprio
+    déficit — um dia nunca fica positivo por excesso de diarista. <b>Range contratual: 2,5%.</b></p>
+
+  <!-- PASSO 1 -->
+  <div class="abs-step" id="abs-step1">
+    <div class="rail"><div class="n">1</div><div class="bar"></div></div>
+    <div class="abs-card">
+      <h3>Bases de dados</h3>
+      <div class="sub">Duas planilhas mensais de absenteísmo (abas por operação, ex. <code>PAXD Jul</code>),
+        a base SIGO de diaristas e o headcount diário com o Quadro S&amp;OP (sem over).</div>
+      <div class="drops">
+        <div class="abs-drop" id="abs-dropA">
+          <div class="ttl">Mês 1 — início do período</div>
+          <div class="fname" id="abs-fnA">Clique ou arraste o .xlsx</div>
+          <div class="hint">ex.: Absenteismo_Jul2026.xlsx</div>
+          <div class="st" id="abs-stA"></div>
+        </div>
+        <div class="abs-drop" id="abs-dropB">
+          <div class="ttl">Mês 2 — fim do período</div>
+          <div class="fname" id="abs-fnB">Clique ou arraste o .xlsx</div>
+          <div class="hint">ex.: Absenteismo_Ago2026.xlsx</div>
+          <div class="st" id="abs-stB"></div>
+        </div>
+        <div class="abs-drop" id="abs-dropS">
+          <div class="ttl">SIGO — Diaristas</div>
+          <div class="fname" id="abs-fnS">Clique ou arraste o .xlsx</div>
+          <div class="hint">abas por filial · somente Groot ID conta</div>
+          <div class="st" id="abs-stS"></div>
+        </div>
+        <div class="abs-drop" id="abs-dropH">
+          <div class="ttl">Headcount S&amp;OP</div>
+          <div class="fname" id="abs-fnH">Clique ou arraste (aceita vários)</div>
+          <div class="hint">headcount-diario-todas-as-filiais · 1 por mês</div>
+          <div class="st" id="abs-stH"></div>
+        </div>
+      </div>
+      <input type="file" id="abs-fileA" accept=".xlsx"><input type="file" id="abs-fileB" accept=".xlsx">
+      <input type="file" id="abs-fileS" accept=".xlsx"><input type="file" id="abs-fileH" accept=".xlsx" multiple>
+    </div>
+  </div>
+
+  <!-- PASSO 2 -->
+  <div class="abs-step" id="abs-step2">
+    <div class="rail"><div class="n">2</div><div class="bar"></div></div>
+    <div class="abs-card">
+      <h3>Período da fatura</h3>
+      <div class="sub">O período precisa estar coberto pelos meses das duas planilhas de absenteísmo.</div>
+      <div class="row">
+        <label class="fld">Início<input type="date" id="abs-dtIni" value="2026-07-16"></label>
+        <label class="fld">Fim<input type="date" id="abs-dtFim" value="2026-08-15"></label>
+        <span class="msg" id="abs-msgPeriodo"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PASSO 3 -->
+  <div class="abs-step" id="abs-step3">
+    <div class="rail"><div class="n">3</div><div class="bar"></div></div>
+    <div class="abs-card">
+      <h3>Filiais e operações</h3>
+      <div class="sub">Selecione as operações. A fonte do Quadro S&amp;OP vem do headcount (por operação ou TOTAL
+        da filial, sempre <b>sem over</b>); use Manual apenas se não houver headcount para a operação.</div>
+      <div class="opsgrid" id="abs-opsGrid"><span class="msg dim">Carregue as duas planilhas mensais para listar as operações.</span></div>
+      <div class="actions">
+        <button class="abs-btn go" id="abs-btnRun" disabled>Validar absenteísmo</button>
+        <span class="msg" id="abs-msgRun"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PASSO 4 -->
+  <div class="abs-step" id="abs-step4" style="display:none">
+    <div class="rail"><div class="n">4</div></div>
+    <div class="abs-card">
+      <h3>Resultado</h3>
+      <div class="sub" id="abs-resSub"></div>
+      <div class="res" id="abs-resArea"></div>
+      <div class="actions">
+        <button class="abs-btn dl" id="abs-btnXlsx">Baixar planilha unificada (.xlsx)</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="abs-rodape">S&amp;OP diário (sem over) vs presente · compensação por diaristas (somente Groot ID) ·
+    saída: Unificado + Resumo Gerencial por operação</p>
+</div>
+
+<!-- ========================== ABA 5 — GUIA ========================== -->
 <div class="apppanel" id="panel-guia">
 
   <section>
     <h2>O que este app faz</h2>
-    <p class="guia-lead">Três perguntas diferentes sobre a mesma operação: <b>a fatura está certa?</b>, <b>o arquivo bate com o que o MELI espera?</b> e <b>quem foram os diaristas do período?</b> Cada aba responde uma delas e devolve um Excel pronto.</p>
+    <p class="guia-lead">Quatro perguntas diferentes sobre a mesma operação: <b>a fatura está certa?</b>, <b>o arquivo bate com o que o MELI espera?</b>, <b>quem foram os diaristas do período?</b> e <b>o absenteísmo ficou dentro do range?</b> Cada aba responde uma delas e devolve um Excel pronto.</p>
 
     <div class="duo" style="margin-top:18px">
       <div class="concept c1">
@@ -360,6 +455,15 @@
       <p>Filtra pela <b>data de solicitação</b>, opcionalmente por <b>solicitante</b> (ID Logistics ou MELI), e resolve os <b>Groot IDs repetidos</b> do jeito que você escolher: uma linha por pessoa no período inteiro, uma por pessoa por dia, ou nenhuma remoção.</p>
       <p>Devolve uma planilha por operação — ou as seis num arquivo só — no layout de origem, nomeadas como <code class="inline">Varginha - Diaristas - Agosto.26.xlsx</code>.</p>
     </div>
+
+    <div class="concept c4" style="margin-top:14px">
+      <span class="chiph">Aba 4 · Calcular ABS</span>
+      <h3>O absenteísmo ficou dentro do range contratual?</h3>
+      <p>Compara, dia a dia, o <b>Quadro S&amp;OP (sem over)</b> com quem esteve <b>presente</b> no período da fatura — 16/N-1 a 15/N, o período de folha. A diferença negativa de cada dia é o déficit.</p>
+      <p>Esse déficit é então compensado pelos <b>diaristas efetivamente solicitados naquele dia</b>, contados uma única vez e só quando têm Groot ID. O abate é limitado ao próprio déficit: um dia nunca fica positivo por sobra de diarista.</p>
+      <p>O resultado sai em dois números — <b>antes</b> e <b>pós compensação</b> — medidos contra o <b>range contratual de 2,5%</b>, com a lista dos dias críticos. Dias sem S&amp;OP no headcount, ou sem lançamento na base de absenteísmo, ficam de fora do percentual em vez de virar zero.</p>
+      <p>Precisa de quatro bases: duas planilhas mensais de absenteísmo (que cobrem o período), a base SIGO de diaristas e o headcount diário.</p>
+    </div>
   </section>
 
   <section>
@@ -368,7 +472,7 @@
       <div class="step"><div class="n">01</div><b>Importar</b><p>Suba a planilha na aba desejada. Nada é enviado a lugar nenhum.</p></div>
       <div class="step"><div class="n">02</div><b>Conferir</b><p>O app detecta a competência (aba 1) ou o período do retorno (aba 2) sozinho.</p></div>
       <div class="step"><div class="n">03</div><b>Revisar</b><p>Cada linha traz o motivo. Desmarque o que não deve entrar.</p></div>
-      <div class="step"><div class="n">04</div><b>Exportar</b><p>Baixe o Excel — formatação herdada do arquivo de origem.</p></div>
+      <div class="step"><div class="n">04</div><b>Exportar</b><p>Baixe o Excel — com fórmulas vivas, quando a aba as gera.</p></div>
     </div>
     <div class="keyline">O app <b>não decide sozinho</b>: ele detecta, aponta, explica e sugere — a decisão de alterar uma fatura é sua. Na conciliação entre duas competências isso é literal: toda linha nasce em “manter como está”, você vê a prévia antes de qualquer coisa, e o arquivo gerado é sempre uma cópia nova. Regras completas em <code>docs/REGRAS.md</code>.</div>
     <div class="privacy">
@@ -406,6 +510,8 @@
 <script src="js/fusao.js"></script>
 <!-- Aba 3, também isolada numa IIFE (ver js/extracao.js) -->
 <script src="js/extracao.js"></script>
+<!-- Aba 4, também isolada numa IIFE (ver js/abs.js) -->
+<script src="js/abs.js"></script>
 <script src="js/tabs.js"></script>
 </body>
 </html>
