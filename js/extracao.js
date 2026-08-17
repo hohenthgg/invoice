@@ -15,10 +15,42 @@
     "Divinópolis",
     "Patos de Minas"
   ];
-  /* "ESCALA HORÁRIO" não vem do SIGO: é o padrão da operação, levantado nas
-     faturas 3PL (ver ESCALA_HORARIO_PADRAO em js/config.js). Entra como coluna
-     própria, ao lado da ESCALA do SIGO, que é outra coisa (6x1, 5x2…). */
-  const OUT_HEADERS = ["MÊS\nSOLICITAÇÃO","DATA\nSOLICITAÇÃO","SOLICITANTE","EMPRESA\nDIARISTA","GROOT ID","NOME","CARGO","ESCALA","ESCALA\nHORÁRIO"];
+  /* ================================================================
+     AS COLUNAS, LOCALIZADAS PELO PRÓPRIO CABEÇALHO
+     ----------------------------------------------------------------
+     A leitura antiga achava só o GROOT e contava posições a partir dele
+     (nome = groot+1, cargo = groot+2…). Em Varginha isso devolveu 119
+     linhas com GROOT, NOME, CARGO e ESCALA TODOS vazios: basta a coluna
+     estar em outro lugar para tudo escorregar junto, em silêncio.
+
+     Agora cada coluna procura o próprio nome. `nomes` são grafias
+     aceitas, em ordem de preferência; a resolução é feita das mais
+     específicas para as mais genéricas, para "ESCALA HORÁRIO" não ser
+     abocanhado por "ESCALA".
+
+     CHAVES_SAIDA marca o que a planilha sempre carrega, mesmo vazio:
+     sem essas colunas o registro não identifica ninguém, e escondê-las
+     esconderia o problema. As demais somem quando não têm nada.
+
+     `horario` existe porque Divinópolis já traz o horário na origem
+     (coluna "ESCALA NATURAL"). Quando o arquivo tem, vale o arquivo;
+     quando não tem, vale o padrão da operação. O cabeçalho de saída é o
+     mesmo nos dois casos, para as seis abas ficarem iguais. */
+  const COLUNAS_SIGO = [
+    {k:"horario",     titulo:"ESCALA\nHORÁRIO",     nomes:["escala horario","escala natural","horario","horario escala","turno"]},
+    {k:"mes",         titulo:"MÊS\nSOLICITAÇÃO",    nomes:["mes solicitacao","mes da solicitacao","mes"]},
+    {k:"data",        titulo:"DATA\nSOLICITAÇÃO",   nomes:["data solicitacao","data da solicitacao","data"]},
+    {k:"solicitante", titulo:"SOLICITANTE",         nomes:["solicitante","solicitado por"]},
+    {k:"empresa",     titulo:"EMPRESA\nDIARISTA",   nomes:["empresa diarista","empresa","fornecedor"]},
+    {k:"groot",       titulo:"GROOT ID",            nomes:["groot id","id groot","groot","id"]},
+    {k:"nome",        titulo:"NOME",                nomes:["nome","nome completo","colaborador"]},
+    {k:"cargo",       titulo:"CARGO",               nomes:["cargo","funcao","função"]},
+    {k:"escala",      titulo:"ESCALA",              nomes:["escala"]}
+  ];
+  // a ordem em que a saída é escrita (a de leitura acima é por especificidade)
+  const ORDEM_SAIDA = ["mes","data","solicitante","empresa","groot","nome","cargo","escala","horario"];
+  const COL = k => COLUNAS_SIGO.find(c => c.k === k);
+  const CHAVES_SAIDA = new Set(["mes","data","groot","nome","horario"]);
   const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 
   // Estética da planilha original (cabeçalho escuro, texto branco, bordas finas)
@@ -35,7 +67,7 @@
   const drop = $("ex-drop"), fileInput = $("ex-fileInput");
   let workbook = null;
   let parsed = null;   // {op: [{date, id, solic:'id'|'meli'|'', cells:[...]}]}
-  let leitura = {semData:[], abas:[]};   // o que a leitura do arquivo não conseguiu aproveitar
+  let leitura = {semData:[], abas:[], colunas:[]};   // o que a leitura do arquivo não aproveitou
   let results = null;
   let lastPeriod = null;
 
@@ -89,6 +121,55 @@
     return workbook.SheetNames.find(n => norm(n) === target) || null;
   }
 
+  /* Localiza o cabeçalho e cada coluna pelo próprio nome.
+     Duas defesas contra o que quebrou Varginha:
+       · o cabeçalho é a linha que reconhece MAIS colunas, não a primeira que
+         contém "groot" — um "GROOT" solto numa legenda não manda mais;
+       · entre dois candidatos para a mesma coluna, ganha o que tem dado
+         embaixo. Uma coluna certa e vazia é indistinguível de uma errada, e
+         escolher a vazia foi exatamente o que aconteceu. */
+  function localizarColunas(grid){
+    const limite = Math.min(grid.length, 25);
+    let melhor = null;
+    for(let i=0;i<limite;i++){
+      const row = grid[i] || [];
+      const col = {}, usadas = new Set();
+      COLUNAS_SIGO.forEach(c => {
+        const candidatos = [];
+        row.forEach((celula, j) => {
+          if(usadas.has(j)) return;
+          const h = norm(celula);
+          if(!h) return;
+          const exato = c.nomes.indexOf(h);
+          if(exato >= 0){ candidatos.push({j, peso: exato}); return; }
+          if(c.nomes.some(n => h.includes(n))) candidatos.push({j, peso: 100});
+        });
+        if(!candidatos.length) return;
+        // desempate: grafia mais exata, depois quem realmente tem dado embaixo
+        candidatos.forEach(x => { x.preenchidas = contarPreenchidas(grid, i, x.j); });
+        candidatos.sort((a,b) => (b.preenchidas>0) - (a.preenchidas>0)
+                              || a.peso - b.peso
+                              || b.preenchidas - a.preenchidas);
+        col[c.k] = candidatos[0].j;
+        usadas.add(candidatos[0].j);
+      });
+      const achadas = Object.keys(col).length;
+      if(col.data !== undefined && col.groot !== undefined
+         && (!melhor || achadas > melhor.achadas))
+        melhor = {headerIdx:i, col, achadas};
+    }
+    return melhor;
+  }
+
+  function contarPreenchidas(grid, headerIdx, j){
+    let n = 0;
+    for(let i=headerIdx+1;i<Math.min(grid.length, headerIdx+200);i++){
+      const c = grid[i] && grid[i][j];
+      if(c !== null && c !== undefined && String(c).trim() !== "") n++;
+    }
+    return n;
+  }
+
   function parseWorkbook(fileName){
     const warn = $("ex-warn1");
     parsed = {};
@@ -96,7 +177,7 @@
     /* O que a leitura descarta também é um problema — e era o mais invisível
        de todos: uma linha sem data legível não entrava nem no total de lidos,
        então nem a contagem denunciava a falta. */
-    leitura = {semData:[], abas:[]};
+    leitura = {semData:[], abas:[], colunas:[]};
     let globalMin = null, globalMax = null, totalRows = 0;
 
     for(const op of OPERATIONS){
@@ -109,29 +190,25 @@
       const ws = workbook.Sheets[sheetName];
       const grid = XLSX.utils.sheet_to_json(ws, {header:1, defval:null, blankrows:false});
 
-      let headerIdx = -1, colDate = 1, colId = 4;
-      for(let i=0;i<Math.min(grid.length,20);i++){
-        const row = grid[i]||[];
-        const idCol = row.findIndex(c => norm(c).includes("groot"));
-        if(idCol >= 0){
-          headerIdx = i; colId = idCol;
-          const dCol = row.findIndex(c => norm(c).includes("data"));
-          if(dCol >= 0) colDate = dCol;
-          break;
-        }
-      }
-      if(headerIdx < 0){
+      const mapa = localizarColunas(grid);
+      if(!mapa){
         missing.push(op + " (cabeçalho não encontrado)"); parsed[op] = [];
-        leitura.abas.push({op, motivo:"Aba encontrada, mas sem a coluna GROOT ID nas 20 primeiras linhas — "
-          + "o cabeçalho não pôde ser localizado e a aba inteira ficou de fora."});
+        leitura.abas.push({op, motivo:"Aba encontrada, mas sem um cabeçalho reconhecível nas 25 "
+          + "primeiras linhas (não achei DATA nem GROOT ID) — a aba inteira ficou de fora."});
         continue;
       }
+      // coluna que existe no padrão e não foi achada nesta aba: sai vazia, e isso se diz
+      COLUNAS_SIGO.forEach(c => {
+        if(c.k !== "horario" && mapa.col[c.k] === undefined)
+          leitura.colunas.push({op, coluna:c.titulo.replace("\n"," ")});
+      });
 
       const rows = [];
       const txt = v => (v === null || v === undefined) ? "" : String(v).trim();
-      for(let i=headerIdx+1;i<grid.length;i++){
+      const val = (r, k) => mapa.col[k] === undefined ? "" : txt(r[mapa.col[k]]);
+      for(let i=mapa.headerIdx+1;i<grid.length;i++){
         const r = grid[i]; if(!r) continue;
-        const dv = r[colDate];
+        const dv = mapa.col.data === undefined ? null : r[mapa.col.data];
         let key = null;
         if(dv instanceof Date && !isNaN(dv)) key = dateKey(dv);
         else if(typeof dv === "number" && dv > 20000 && dv < 80000) key = excelSerialToKey(dv);
@@ -139,36 +216,24 @@
           // linha em branco é formatação; linha COM conteúdo e sem data é perda de dado
           if(r.some(c => c !== null && c !== undefined && String(c).trim() !== ""))
             leitura.semData.push({op, linha:i+1, valor:txt(dv),
-                                  nome:txt(r[colId+1]), groot:txt(r[colId])});
+                                  nome:val(r,"nome"), groot:val(r,"groot")});
           continue;
         }
 
-        const idRaw = r[colId];
-        const id = (idRaw === null || idRaw === undefined || String(idRaw).trim()==="") ? null : String(idRaw).trim();
-        const solicRaw = r[colDate+1];
-
+        const idRaw = val(r, "groot");
         rows.push({
           date: key,
-          id: id,
-          solic: solicKind(solicRaw),
-          /* Campos nomeados além de `cells`: quando um registro precisa ser
-             mostrado ao usuário (ex.: sem GROOT, para revisão manual), quem
-             o exibe não deveria ter de conhecer a posição das colunas. */
-          nome:        txt(r[colId+1]),
-          cargo:       txt(r[colId+2]),
-          escala:      txt(r[colId+3]),
-          empresa:     txt(r[colDate+2]),
-          solicitante: txt(solicRaw),
-          cells: [
-            mesLabel(key),                            // MÊS SOLICITAÇÃO
-            key,                                      // DATA (chave; vira Date na exportação)
-            solicRaw != null ? solicRaw : "",         // SOLICITANTE
-            r[colDate+2] != null ? r[colDate+2] : "", // EMPRESA
-            idRaw != null ? idRaw : "",               // GROOT ID
-            r[colId+1] != null ? r[colId+1] : "",     // NOME
-            r[colId+2] != null ? r[colId+2] : "",     // CARGO
-            r[colId+3] != null ? r[colId+3] : ""      // ESCALA
-          ]
+          id: idRaw === "" ? null : idRaw,   // como estava na célula; a limpeza é na comparação
+          solic: solicKind(val(r, "solicitante")),
+          /* Campos nomeados: quem exibe ou exporta um registro não precisa
+             conhecer a posição das colunas na origem. */
+          mes:         mesLabel(key),
+          nome:        val(r, "nome"),
+          cargo:       val(r, "cargo"),
+          escala:      val(r, "escala"),
+          empresa:     val(r, "empresa"),
+          solicitante: val(r, "solicitante"),
+          horario:     val(r, "horario")     // vazio quando a origem não traz
         });
         if(!globalMin || key < globalMin) globalMin = key;
         if(!globalMax || key > globalMax) globalMax = key;
@@ -233,8 +298,13 @@
     const semHorario = OPERATIONS
       .filter(op => !escalaHorarioDe(op) && dedup.porOperacao[op].rows.length)
       .map(op => ({op, registros: dedup.porOperacao[op].rows.length}));
+    /* A saída é montada aqui, e não só na hora de baixar: o painel precisa
+       dizer que coluna saiu e que célula foi preenchida ANTES de a pessoa
+       abrir o arquivo. */
+    const saida = OPERATIONS.filter(op => dedup.porOperacao[op].rows.length)
+      .map(op => Object.assign({op}, montarSaida(op, dedup.porOperacao[op].rows)));
     lastTopicos = listarTopicos(lastAudit, mode === "nao" ? [] : dedup.descartados,
-                                leitura, semHorario);
+                                leitura, semHorario, saida);
     let tFilt=0, tDup=0, tFinal=0;
     for(const op of OPERATIONS){
       results[op] = dedup.porOperacao[op];
@@ -442,17 +512,63 @@
     return {top:s, left:s, bottom:s, right:s};
   }
 
+  const LARGURA = {mes:15, data:15, solicitante:14, empresa:13, groot:14,
+                   nome:38, cargo:14, escala:10, horario:24};
+
+  /* Monta os valores de saída de uma operação e decide o que vale a pena
+     escrever. Duas regras, ambas sobre não empurrar ruído para quem lê:
+
+       · coluna 100% vazia não vai para a planilha (a ESCALA de Patos de
+         Minas eram 169 células em branco com um título em cima);
+       · célula vazia numa coluna que só tem UM valor no arquivo inteiro é
+         preenchida com ele — 112 dos 169 CARGO de Patos estavam vazios e
+         os 57 preenchidos diziam todos "Diarista".
+
+     O preenchimento para onde a certeza acaba: havendo dois valores
+     distintos, a célula continua vazia. Escolher entre "Diarista" e
+     "Diarista Dom. e Feriados" seria inventar. */
+  function montarSaida(op, linhas){
+    const padrao = escalaHorarioDe(op);
+    const dados = linhas.map(r => ({
+      mes: r.mes,
+      data: keyToUTCDate(r.date),
+      solicitante: r.solicitante,
+      empresa: r.empresa,
+      groot: grootParaSaida(r.id),
+      nome: r.nome,
+      cargo: r.cargo,
+      escala: r.escala,
+      // o arquivo manda quando traz o horário; senão, o padrão da operação
+      horario: r.horario || padrao
+    }));
+
+    const preenchidas = [];
+    ORDEM_SAIDA.forEach(k => {
+      const valores = dados.map(d => String(d[k] == null ? "" : d[k]).trim());
+      const distintos = [...new Set(valores.filter(v => v !== ""))];
+      if(distintos.length === 1 && valores.some(v => v === "")){
+        const n = valores.filter(v => v === "").length;
+        dados.forEach(d => { if(String(d[k]||"").trim() === "") d[k] = distintos[0]; });
+        preenchidas.push({coluna:COL(k).titulo.replace("\n"," "), valor:distintos[0], celulas:n});
+      }
+    });
+
+    const colunas = ORDEM_SAIDA.filter(k => CHAVES_SAIDA.has(k)
+      || dados.some(d => String(d[k] == null ? "" : d[k]).trim() !== ""));
+    return {dados, colunas, preenchidas,
+            vazias: ORDEM_SAIDA.filter(k => colunas.indexOf(k) < 0).map(k => COL(k).titulo.replace("\n"," "))};
+  }
+
   function addStyledSheet(wbx, op){
     const ws = wbx.addWorksheet(op.substring(0,31), {
       views: [{state:"frozen", ySplit:1}]
     });
-    ws.columns = [
-      {width:15},{width:15},{width:14},{width:13},{width:12},{width:38},{width:12},{width:9},{width:24}
-    ];
-    const horario = escalaHorarioDe(op);
+    const saida = montarSaida(op, results[op].rows);
+    const cols = saida.colunas;
+    ws.columns = cols.map(k => ({width:LARGURA[k]}));
 
     // Cabeçalho: fundo escuro, texto branco, negrito, centralizado (padrão SIGO)
-    const head = ws.addRow(OUT_HEADERS);
+    const head = ws.addRow(cols.map(k => COL(k).titulo));
     head.height = 32;
     head.eachCell(cell => {
       cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:STY.headerFill}};
@@ -461,25 +577,26 @@
       cell.border = thinBorder();
     });
 
-    for(const r of results[op].rows){
-      const c = r.cells;
-      const idNum = (c[4] !== "" && !isNaN(Number(c[4]))) ? Number(c[4]) : c[4];
-      const row = ws.addRow([ c[0], keyToUTCDate(c[1]), c[2], c[3], idNum, c[5], c[6], c[7], horario ]);
-      row.eachCell({includeEmpty:true}, (cell, col) => {
+    const direita = new Set(["mes","data","groot"]);
+    const centro  = new Set(["cargo","escala","horario"]);
+    for(const d of saida.dados){
+      const row = ws.addRow(cols.map(k => {
+        // GROOT numérico entra como número, como na origem; alfanumérico fica texto
+        if(k === "groot") return (d.groot !== "" && !isNaN(Number(d.groot))) ? Number(d.groot) : d.groot;
+        return d[k];
+      }));
+      row.eachCell({includeEmpty:true}, (cell, i) => {
+        const k = cols[i-1];
         cell.border = thinBorder();
-        cell.font = {size:11, name:"Calibri"};
-        if(col === 1) cell.alignment = {horizontal:"right", vertical:"middle"};
-        else if(col === 2){ cell.numFmt = "dd/mm/yyyy"; cell.alignment = {horizontal:"right", vertical:"middle"}; }
-        else if(col === 5) cell.alignment = {horizontal:"right", vertical:"middle"};
-        else if(col === 7 || col === 8 || col === 9) cell.alignment = {horizontal:"center", vertical:"middle"};
-        else cell.alignment = {horizontal:"left", vertical:"middle"};
+        cell.font = {size:11, name: k === "horario" ? "Consolas" : "Calibri"};
+        if(k === "data") cell.numFmt = "dd/mm/yyyy";
+        cell.alignment = {vertical:"middle",
+          horizontal: direita.has(k) ? "right" : (centro.has(k) ? "center" : "left")};
       });
-      // horário é texto de horas: monoespaçado alinha as colunas de tempo na leitura
-      if(horario) row.getCell(9).font = {size:11, name:"Consolas"};
     }
 
     // Filtros no cabeçalho, como na planilha original
-    ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:9}};
+    ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:cols.length}};
     return ws;
   }
 

@@ -218,6 +218,12 @@ function auditarIdentidade(entradas){
   const registros = planificar(entradas);
   const semGroot = registros.filter(r => !r.groot);
 
+  /* Identificador embrulhado — `{2499441}`. A limpeza é automática e correta,
+     mas não é invisível: ela MUDA quem é duplicado de quem. Quem confere o
+     resultado precisa saber que isso aconteceu. */
+  const grootEmbrulhado = registros.filter(r =>
+    r.grootBruto && limparGroot(r.grootBruto) !== r.grootBruto.trim());
+
   /* Nome quebrado é um problema por si, com conserto próprio. Deixá-lo na
      comparação faria "ANA SOUZA vs #N/D" ser diagnosticado como duas pessoas
      sob o mesmo identificador — apontando a causa errada. */
@@ -236,11 +242,12 @@ function auditarIdentidade(entradas){
                                r => r.groot, (chave, ocs) => ocs[0].nome, relacaoEntreNomes);
 
   return {
-    semGroot, nomesQuebrados, mesmoNome, mesmoGroot,
+    semGroot, nomesQuebrados, grootEmbrulhado, mesmoNome, mesmoGroot,
     resumo: {
       registros: registros.length,
       semGroot: semGroot.length,
       nomesQuebrados: nomesQuebrados.length,
+      grootEmbrulhado: grootEmbrulhado.length,
       mesmoNome: mesmoNome.length,
       mesmoGroot: mesmoGroot.length,
       // o subconjunto que não dá para explicar por grafia — o que dói de verdade
@@ -267,8 +274,9 @@ const GRAVIDADE_ORDEM = { alta:0, media:1, baixa:2, info:3 };
  *  @param descartados  os duplicados removidos pela deduplicação
  *  @param leitura      {semData, abas} — o que a leitura do arquivo não aproveitou
  *  @param semHorario   operações sem escala horário levantada, com o total de
- *                      registros afetados */
-function listarTopicos(aud, descartados, leitura, semHorario){
+ *                      registros afetados
+ *  @param saida        o que a montagem da planilha ajustou por operação */
+function listarTopicos(aud, descartados, leitura, semHorario, saida){
   const t = [];
   const ctx = r => ({op:r.op, date:r.date, empresa:r.empresa, cargo:r.cargo,
                      escala:r.escala, solicitante:r.solicitante});
@@ -314,6 +322,23 @@ function listarTopicos(aud, descartados, leitura, semHorario){
     acao: "Preencher o GROOT ID na planilha de origem."
   }, ctx(r))));
 
+  ((leitura && leitura.colunas) || []).forEach(c => t.push(Object.assign({
+    topico: "Coluna não encontrada", gravidade: GRAVIDADE.ALTA,
+    nome: "", groot: "", op: c.op, date: "",
+    diagnostico: 'A coluna "' + c.coluna + '" não foi localizada pelo cabeçalho nesta aba, '
+               + "então sai vazia para todos os registros da filial.",
+    acao: "Conferir o nome do cabeçalho na aba de origem — ele mudou ou está fora do padrão das outras."
+  }, vazio)));
+
+  (aud.grootEmbrulhado || []).forEach(r => t.push(Object.assign({
+    topico: "Identificador entre delimitadores", gravidade: GRAVIDADE.INFO,
+    nome: r.nome, groot: r.grootBruto,
+    diagnostico: 'O GROOT veio embrulhado ("' + r.grootBruto + '") e foi lido como '
+               + r.groot + ". Isso muda quem é duplicado de quem: sem a limpeza, "
+               + "a mesma pessoa apareceria duas vezes.",
+    acao: "Nenhuma na extração — a saída já vai limpa. Padronizar na origem evita a divergência."
+  }, ctx(r))));
+
   aud.nomesQuebrados.forEach(r => t.push(Object.assign({
     topico: "Nome quebrado", gravidade: GRAVIDADE.MEDIA,
     nome: r.nome, groot: r.grootBruto,
@@ -340,6 +365,29 @@ function listarTopicos(aud, descartados, leitura, semHorario){
       ? "Conferir ANTES de usar o resultado: a deduplicação uniu estes registros."
       : "Padronizar a grafia do nome na origem."
   }, ctx(o))))));
+
+  /* O que a planilha de saída ganhou ou perdeu em relação à origem. É
+     informativo, mas nunca silencioso: mexer em coluna sem avisar é como
+     entregar um número diferente do que a pessoa conferiu na tela. */
+  (saida || []).forEach(s => {
+    (s.vazias || []).forEach(coluna => t.push(Object.assign({
+      topico: "Coluna vazia removida", gravidade: GRAVIDADE.INFO,
+      nome: "", groot: "", op: s.op, date: "",
+      diagnostico: 'A coluna "' + coluna + '" não tinha um único valor preenchido nesta '
+                 + "filial, então ficou fora da planilha em vez de sair como um título "
+                 + "sobre células em branco.",
+      acao: "Nenhuma, se a coluna realmente não se aplica aqui. Se deveria ter dado, o problema é na origem."
+    }, vazio)));
+    (s.preenchidas || []).forEach(p => t.push(Object.assign({
+      topico: "Coluna preenchida por dedução", gravidade: GRAVIDADE.INFO,
+      nome: "", groot: "", op: s.op, date: "",
+      diagnostico: p.celulas + " célula" + (p.celulas===1?"":"s") + ' vazia' + (p.celulas===1?"":"s")
+                 + ' da coluna "' + p.coluna + '" foram preenchidas com "' + p.valor
+                 + '", único valor que a coluna tem nesta filial. Havendo dois valores '
+                 + "diferentes, a célula continuaria vazia — escolher seria inventar.",
+      acao: "Conferir se o valor único vale mesmo para todos, e preencher na origem."
+    }, vazio)));
+  });
 
   (descartados || []).forEach(d => t.push({
     topico: "Duplicado removido", gravidade: GRAVIDADE.INFO,

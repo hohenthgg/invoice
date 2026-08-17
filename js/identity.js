@@ -23,9 +23,31 @@
  *  diferente de `123456` — não há como saber pelo dado. Na dúvida, o
  *  conservador é não unir: unir duas pessoas por engano é pior do que
  *  deixar de unir duas grafias da mesma. */
-function normalizeGroot(v){
+/** Tira do identificador o que é embalagem, não identidade.
+ *
+ *  A planilha traz o mesmo GROOT ora limpo, ora embrulhado: `{2499441}`,
+ *  `[2499441]`, `(2499441)`, `/2499441/`. É marcação de quem preencheu — em
+ *  Pouso Alegre XD, 12 pessoas apareciam como DUAS porque `{2499441}` e
+ *  `2499441` são chaves diferentes, e a deduplicação obedecia.
+ *
+ *  Só some o que envolve o valor inteiro ou os separadores internos: um
+ *  identificador que USE esses caracteres no meio (`AB-12/34`) não é tocado,
+ *  porque aí eles podem ser parte do id. */
+function limparGroot(v){
   if(v===null||v===undefined) return "";
   let s=String(v).trim();
+  if(!s) return "";
+  // embrulho completo, possivelmente repetido: {[123]} → 123
+  let antes;
+  do{
+    antes=s;
+    s=s.replace(/^[\s{}\[\]()<>\/\\|"'`]+/, "").replace(/[\s{}\[\]()<>\/\\|"'`]+$/, "").trim();
+  }while(s!==antes);
+  return s;
+}
+
+function normalizeGroot(v){
+  let s=limparGroot(v);
   if(!s) return "";
 
   // 123456.0 / 123456.00 → 123456   (o ".0" é ruído de float, não é o id)
@@ -39,6 +61,15 @@ function normalizeGroot(v){
 
   // Inteiro puro, alfanumérico, ou com zeros à esquerda: preservado como está.
   return s.toUpperCase();
+}
+
+/** O identificador como deve ser ESCRITO: limpo, mas sem forçar caixa alta —
+ *  a saída é para uso humano, não para comparação. */
+function grootParaSaida(v){
+  const s=limparGroot(v);
+  if(!s) return "";
+  if(/^-?\d+\.0+$/.test(s)) return s.replace(/\.0+$/,"");
+  return s;
 }
 
 /** Um GROOT que identifica alguém de fato. "0" e vazio não identificam. */
@@ -102,5 +133,6 @@ function personDayKey(groot, data){
 }
 
 if(typeof module!=="undefined"&&module.exports){
-  module.exports={normalizeGroot, hasGroot, normalizeNome, normalizeDateKey, personDayKey};
+  module.exports={limparGroot, normalizeGroot, grootParaSaida, hasGroot,
+                  normalizeNome, normalizeDateKey, personDayKey};
 }
