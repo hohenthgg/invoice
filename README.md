@@ -77,12 +77,29 @@ remoção. A deduplicação é **global** — a mesma pessoa-dia em duas operaç
 só, e o que foi descartado aparece num painel com GROOT, data e de onde veio. Exporta uma planilha por operação — ou as seis num arquivo só — no layout
 de origem, nomeadas como `Varginha - Diaristas - Agosto.26.xlsx`.
 
+As colunas são localizadas **pelo próprio cabeçalho**, não por posição a partir do
+GROOT. A leitura antiga travava na primeira linha que contivesse "groot" e contava
+offsets dali: em Varginha, uma legenda com `GROOT ID` numa coluna vazia acima do
+cabeçalho real fez 119 linhas saírem com GROOT, NOME, CARGO e ESCALA **todos**
+vazios. Agora o cabeçalho é a linha que reconhece mais colunas, e entre dois
+candidatos para a mesma coluna ganha o que tem dado embaixo.
+
+A saída sai **sem coluna vazia e sem célula obviamente preenchível**: coluna sem um
+único valor na filial não é escrita; célula em branco numa coluna que só tem um
+valor no arquivo é preenchida com ele — havendo dois valores distintos, fica em
+branco, porque escolher seria inventar. Identificadores saem limpos de chaves,
+colchetes e barras (`{2499441}` → `2499441`), o que **também corrige a
+deduplicação**: o embrulhado e o limpo passam a ser a mesma pessoa. Todos esses
+ajustes viram tópico no painel de revisão — nada é mexido em silêncio.
+
 A saída leva uma coluna a mais que a origem: **ESCALA HORÁRIO**
 (`03:00 07:00 08:00 12:48` — entrada, início e fim do intervalo, saída). Ela não
 existe no SIGO; é o **padrão de diarista da operação**, levantado na aba
 `DIARISTAS` da fatura 3PL, onde cada unidade tem um horário dominante. A tabela
 está em `ESCALA_HORARIO_PADRAO` (`js/config.js`), com a fonte de cada valor
-documentada — as seis operações estão levantadas nas faturas de julho/2026.
+documentada — as seis operações estão levantadas nas faturas de julho/2026. Quando
+a origem já traz o horário (Divinópolis, coluna `ESCALA NATURAL`), **vale o
+arquivo**; o padrão só entra quando o arquivo não diz nada.
 É um padrão, não uma verdade linha a linha: quatro unidades são uniformes, mas
 Varginha teve 30 de 138 e Divinópolis 6 de 37 em outros horários. Operação sem
 levantamento sai **em branco** e vira tópico de revisão: chutar o horário de outra

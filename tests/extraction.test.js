@@ -12,7 +12,8 @@ const { load } = require("./load");
 const ctx = load(["identity.js", "config.js", "extraction-dedup.js", "extraction-audit.js"],
                  ["DEDUP_MODOS", "AUDIT_MOTIVO", "NOME_PROBLEMA", "GRAVIDADE",
                   "ESCALA_HORARIO_PADRAO"]);
-const { normalizeGroot, hasGroot, normalizeNome, normalizeDateKey, personDayKey,
+const { normalizeGroot, limparGroot, grootParaSaida, hasGroot, normalizeNome,
+        normalizeDateKey, personDayKey,
         deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO,
         problemasDoNome, nomeQuebrado, NOME_PROBLEMA,
         listarTopicos, resumirTopicos, GRAVIDADE,
@@ -46,6 +47,32 @@ check(normalizeGroot("123456") === normalizeGroot(123456)
       && normalizeGroot("123456.0") === normalizeGroot(" 123456 "),
       "todas as grafias equivalentes colapsam no mesmo identificador");
 check(normalizeGroot("ABC123") === "ABC123", "identificador alfanumérico não é convertido");
+
+/* `{2499441}` — em Pouso Alegre XD, 12 pessoas apareciam como DUAS porque o
+   mesmo GROOT vinha ora embrulhado, ora limpo, e a dedup obedecia. */
+check(limparGroot("{2499441}") === "2499441" && limparGroot("[2499441]") === "2499441"
+      && limparGroot("(2499441)") === "2499441" && limparGroot("/2499441/") === "2499441"
+      && limparGroot("\\2499441\\") === "2499441" && limparGroot("<2499441>") === "2499441",
+      "chaves, colchetes, parênteses, barras e sinais de maior/menor são embalagem",
+      limparGroot("{2499441}"));
+check(limparGroot("{[2499441]}") === "2499441", "…inclusive embrulho duplo");
+check(normalizeGroot("{2499441}") === normalizeGroot("2499441"),
+      "o embrulhado e o limpo passam a ser A MESMA pessoa na comparação");
+check(normalizeGroot("{ 2499441 }") === "2499441", "espaço dentro do embrulho também sai");
+check(limparGroot("AB-12/34") === "AB-12/34",
+      "delimitador NO MEIO do identificador não é embalagem — pode ser parte do id",
+      limparGroot("AB-12/34"));
+check(limparGroot("{00123456}") === "00123456",
+      "…e a limpeza não come zeros à esquerda");
+check(grootParaSaida("{2499441}") === "2499441" && grootParaSaida("{abc12}") === "abc12",
+      "a saída sai limpa, mas sem forçar caixa alta — é para ler, não para comparar",
+      grootParaSaida("{abc12}"));
+{
+  const r = dedup({ XD: [reg("{2499441}", "2026-08-10"), reg("2499441", "2026-08-10")] });
+  check(totalMantido(r) === 1 && r.resumo.duplicados === 1,
+        "…e a mesma pessoa-dia embrulhada e limpa vira UM registro, não dois",
+        `mantidos=${totalMantido(r)}`);
+}
 check(normalizeGroot("00123456") === "00123456",
       "zeros à esquerda são preservados — podem ser parte do identificador",
       normalizeGroot("00123456"));
