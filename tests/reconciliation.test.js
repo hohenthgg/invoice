@@ -2,10 +2,12 @@
    Sem dependências externas: basta `node tests/reconciliation.test.js`. */
 "use strict";
 const { load } = require("./load");
-const ctx = load(["config.js", "dates.js", "engine.js", "competence.js", "reconciliation.js"],
-                 ["RECON_STATUS", "RECON_CONF", "RECON_META"]);
-const { ymd, fmtShort, buildCompetence, reconcile, sugerirCorrecao,
-        RECON_STATUS, RECON_CONF, normId, splitInvoiceLines, checkSequence } = ctx;
+const ctx = load(["config.js", "dates.js", "engine.js", "competence.js", "billing.js",
+                  "competence-source.js", "reconciliation.js"],
+                 ["RECON_STATUS", "RECON_CONF", "RECON_META", "LINE_CLASS", "COMP_SOURCE"]);
+const { ymd, fmtShort, fmtYmd, buildCompetence, reconcile, sugerirCorrecao,
+        RECON_STATUS, RECON_CONF, LINE_CLASS, COMP_SOURCE, normId, splitInvoiceLines,
+        checkSequence, classifyLine, originalBilling, parseCompetenceText, fromFileName } = ctx;
 
 let pass = 0, fail = 0;
 function check(ok, label, extra) {
@@ -95,8 +97,8 @@ console.log("\nCasos de conciliação");
   const maio  = [linha({ nome: "Caso3", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
   const junho = [linha({ nome: "Caso3", inicio: ymd(2026,5,22), fim: ymd(2026,5,31), rateio: -1 })];
   const it = itemDe(conciliar(maio, junho), "Caso3");
-  check(it && it.status === RECON_STATUS.PARCIAL && it.diffDias === -1,
-        "3 · esperado 21→31, encontrado 22→31 → AJUSTE PARCIAL, diferença de 1 dia",
+  check(it && it.status === RECON_STATUS.PERIODO && it.diffDias === -1,
+        "3 · esperado 21→31, encontrado 22→31 → PERÍODO DIVERGENTE, diferença de 1 dia",
         resumo(it) + " diff=" + (it && it.diffDias));
 }
 
@@ -144,8 +146,11 @@ console.log("\nCasos de conciliação");
   const it = itemDe(conciliar(maio, junho), "Caso8");
   check(it && it.status === RECON_STATUS.SEM_ORIGEM && it.confianca === RECON_CONF.REVISAO,
         "8 · retroativo em junho sem fato em maio → SEM ORIGEM / revisão", resumo(it));
-  check(it && /Informação insuficiente/.test(it.diagnostico),
-        "8 · o texto não afirma que a fatura está errada");
+  check(it && /sem origem identificada/i.test(it.diagnostico)
+        && /Requer validação/i.test(it.diagnostico)
+        && !/\berro\b/i.test(it.diagnostico) && !/est[áa] errad/i.test(it.diagnostico),
+        "8 · o texto pede validação e não chama o lançamento de erro",
+        it && it.diagnostico.slice(0, 90));
 }
 
 // Caso 9 — rateio divergente
@@ -154,10 +159,10 @@ console.log("\nCasos de conciliação");
   const junho = [linha({ nome: "Caso9", inicio: ymd(2026,5,21), fim: ymd(2026,5,31), rateio: -0.5 })];
   const it = itemDe(conciliar(maio, junho), "Caso9");
   const esperadoFte = -11/31, achadoFte = -11/31*0.5;
-  check(it && it.status === RECON_STATUS.RATEIO
+  check(it && it.status === RECON_STATUS.FTE
         && Math.abs(it.esperado.fte - esperadoFte) < 1e-9
         && Math.abs(it.achado.fte - achadoFte) < 1e-9,
-        "9 · mesmo período com rateio 50% → RATEIO/FTE DIVERGENTE", resumo(it));
+        "9 · mesmo período com rateio 50% → FTE DIVERGENTE", resumo(it));
 }
 
 /* ================================================================ */
@@ -190,11 +195,11 @@ console.log("\nSugestões por tipo de divergência");
   const it = itemDe(conciliar(maio, junho), "Sub");
   const sub = sugerirCorrecao(it, "SUBSTITUIR");
   check(sub && sub.acao === "SUBSTITUIR" && sub.alvoRow === 7 && sub.days === 11,
-        "parcial · substituir aponta a linha existente e o período completo");
+        "período divergente · substituir aponta a linha existente e o período completo");
   const comp = sugerirCorrecao(it, "COMPLEMENTAR");
   check(comp && comp.acao === "INCLUIR" && comp.start === ymd(2026,5,21)
         && comp.end === ymd(2026,5,21) && comp.days === 1,
-        "parcial · complementar cobre só o dia que faltou",
+        "período divergente · complementar cobre só o dia que faltou",
         comp && `${fmtShort(comp.start)}→${fmtShort(comp.end)} ${comp.days}d`);
 }
 {
@@ -261,6 +266,216 @@ console.log("\nContexto e resumo");
         "contexto traz a sequência e o total de retroativos lidos");
   check(res.items[0].status !== RECON_STATUS.CONCILIADO,
         "pendências aparecem antes dos conciliados");
+}
+
+/* ================================================================
+   RECONSTRUÇÃO DA COBRANÇA ORIGINAL
+   O snapshot congela a projeção conhecida; ele NÃO cobra mês cheio
+   de quem entrou no meio do mês.
+   ================================================================ */
+console.log("\nCobrança original — o corte não vira mês cheio");
+function cobranca(o){ return originalBilling(linha(o), MAIO); }
+{
+  // Caso A — admissão 01/05, ativa no corte
+  const a = cobranca({ inicio: ymd(2026,5,1), fim: null });
+  check(a.cobrado && a.start === ymd(2026,5,1) && a.end === ymd(2026,5,31) && a.days === 31,
+        "A · admissão 01/05 e ativa em 15/05 → cobrado 01/05 a 31/05 (31 dias)",
+        `${fmtYmd(a.start)}→${fmtYmd(a.end)} ${a.days}d`);
+
+  // Caso B — admissão 07/05, ativa no corte: 25 dias, NÃO 31
+  const b = cobranca({ inicio: ymd(2026,5,7), fim: null });
+  check(b.cobrado && b.start === ymd(2026,5,7) && b.end === ymd(2026,5,31) && b.days === 25,
+        "B · admissão 07/05 e ativa em 15/05 → cobrado 07/05 a 31/05 (25 dias), não 31/31",
+        `${fmtYmd(b.start)}→${fmtYmd(b.end)} ${b.days}d`);
+  check(Math.abs(b.fte - 25/31) < 1e-9, "B · FTE da cobrança original é 25/31",
+        b.fte.toFixed(4));
+
+  // Caso C — saída conhecida antes do corte
+  const c = cobranca({ inicio: ymd(2026,5,7), fim: ymd(2026,5,12) });
+  check(c.cobrado && c.start === ymd(2026,5,7) && c.end === ymd(2026,5,12) && c.days === 6,
+        "C · admissão 07/05 com saída 12/05 conhecida no corte → cobrado 07/05 a 12/05",
+        `${fmtYmd(c.start)}→${fmtYmd(c.end)} ${c.days}d`);
+
+  // Caso D — desligamento reconhecido depois do corte: cobrança segue integral
+  const d = cobranca({ inicio: ymd(2026,5,1), fim: ymd(2026,5,20) });
+  check(d.cobrado && d.end === ymd(2026,5,31) && d.days === 31,
+        "D · desligamento 20/05 reconhecido após o corte → maio ainda cobrou até 31/05",
+        `${fmtYmd(d.start)}→${fmtYmd(d.end)} ${d.days}d`);
+
+  // Caso E — admissão pós-corte não entra no snapshot
+  const e = cobranca({ inicio: ymd(2026,5,16), fim: null });
+  check(!e.cobrado && e.days === 0,
+        "E · admissão 16/05 não entra na fotografia do corte → nada cobrado em maio",
+        e.base);
+
+  // Caso F — entrada e saída entre cortes
+  const f = cobranca({ inicio: ymd(2026,5,16), fim: ymd(2026,5,20) });
+  check(!f.cobrado && f.days === 0,
+        "F · entrada 16/05 e saída 20/05 não aparecem em nenhum snapshot", f.base);
+}
+{
+  // O caso Michael, ponta a ponta
+  const maio  = [linha({ nome: "Michael", inicio: ymd(2026,5,7), fim: ymd(2026,5,17) })];
+  const junho = [linha({ nome: "Michael", inicio: ymd(2026,5,18), fim: ymd(2026,5,31), rateio: -1 })];
+  const it = itemDe(conciliar(maio, junho), "Michael");
+  check(it && it.cobrancaOriginal.days === 25 && it.esperado.days === 14
+        && it.status === RECON_STATUS.CONCILIADO,
+        "Michael · cobrado 25 dias em maio, desconto de 14 dias em junho → CONCILIADO",
+        it && `orig ${it.cobrancaOriginal.days}d, esperado ${it.esperado.days}d, ${it.status}`);
+  check(it && /17\/05/.test(it.movimentacaoInferida.texto)
+        && /inferido/i.test(it.movimentacaoInferida.texto),
+        "Michael · último dia faturável é apresentado como INFERIDO, não como fato",
+        it && it.movimentacaoInferida.texto);
+}
+
+/* ================================================================
+   CLASSIFICAÇÃO DE LINHA
+   ================================================================ */
+console.log("\nClassificação de linha na fatura de junho");
+function classe(o){ return classifyLine(linha(o), JUNHO); }
+{
+  const a = classe({ inicio: ymd(2026,5,28), fim: ymd(2026,5,31), rateio: 1 });
+  check(a.classe === LINE_CLASS.RETRO_ADD,
+        "retroativo POSITIVO de maio é acréscimo retroativo, não competência corrente", a.classe);
+  check(/pertence a Maio\/2026/.test(a.motivo), "…e explica por quê", a.motivo.slice(0,80));
+
+  const b = classe({ inicio: ymd(2026,5,18), fim: ymd(2026,5,31), rateio: -1 });
+  check(b.classe === LINE_CLASS.RETRO_DISC, "retroativo negativo é desconto retroativo", b.classe);
+
+  const c = classe({ inicio: ymd(2026,5,7), fim: null, rateio: 1 });
+  check(c.classe === LINE_CLASS.CURRENT,
+        "linha com admissão em maio e DATA FIM vazia é competência corrente de junho", c.classe);
+  check(/DATA FIM está vazia/.test(c.motivo), "…e explica que a admissão anterior não a torna retroativa");
+
+  const d = classe({ inicio: ymd(2026,6,1), fim: ymd(2026,6,30), rateio: 1 });
+  check(d.classe === LINE_CLASS.CURRENT, "período dentro de junho é competência corrente", d.classe);
+
+  const e = classe({ inicio: ymd(2026,6,5), fim: ymd(2026,6,20), rateio: -1 });
+  check(e.classe === LINE_CLASS.UNDETERMINED,
+        "negativo com período dentro da própria competência fica INDETERMINADO", e.classe);
+  check(/[Rr]evisão manual/.test(e.motivo), "…e pede revisão manual");
+}
+{
+  // retroativos não podem distorcer a competência detectada pelas linhas correntes
+  const junho = [
+    linha({ nome:"corrente1", groot:"1", matricula:"a", inicio: ymd(2026,6,1), fim: null }),
+    linha({ nome:"corrente2", groot:"2", matricula:"b", inicio: ymd(2026,6,3), fim: null }),
+    linha({ nome:"corrente3", groot:"3", matricula:"c", inicio: ymd(2026,6,8), fim: null }),
+    linha({ nome:"retroPos", groot:"4", matricula:"d", inicio: ymd(2026,5,28), fim: ymd(2026,5,31), rateio: 1 }),
+    linha({ nome:"retroNeg", groot:"5", matricula:"e", inicio: ymd(2026,5,18), fim: ymd(2026,5,31), rateio: -1 })
+  ];
+  const s = splitInvoiceLines(junho, JUNHO);
+  check(s.normais.length === 3 && s.retroativos.length === 2,
+        "retroativos positivo e negativo saem das linhas de competência corrente",
+        `normais=${s.normais.length} retro=${s.retroativos.length}`);
+}
+
+/* ================================================================
+   COMPETÊNCIA — ORIGEM DA EVIDÊNCIA
+   ================================================================ */
+console.log("\nCompetência: prioridade da evidência");
+check(parseCompetenceText("Junho/2026").m === 6, "texto 'Junho/2026' é lido");
+check(parseCompetenceText("FATURA_CONCILIADA_SMG3_Junho_2026").m === 6, "nome de arquivo com mês por extenso");
+check(parseCompetenceText("2026-06").m === 6, "formato AAAA-MM");
+check(parseCompetenceText("06/2026").m === 6, "formato MM/AAAA");
+check(parseCompetenceText("Junho") === null, "só o nome do mês, sem ano, não basta");
+{
+  const f = fromFileName("FATURA SMG3 Junho 2026.xlsx");
+  check(f && f.comp.y === 2026 && f.comp.m === 6, "competência extraída do nome do arquivo");
+  check(COMP_SOURCE.ARQUIVO.confianca === "ALTA" && COMP_SOURCE.HEURISTICA.confianca === "MEDIA",
+        "nome do arquivo tem confiança maior que heurística de datas");
+}
+
+/* ================================================================
+   ALERTAS MÚLTIPLOS E DIFERENÇA EXATA
+   ================================================================ */
+console.log("\nAlertas múltiplos e diferença exata");
+{
+  // período divergente E FTE divergente ao mesmo tempo
+  const maio  = [linha({ nome: "Multi", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
+  const junho = [linha({ nome: "Multi", inicio: ymd(2026,5,22), fim: ymd(2026,5,31), rateio: -0.5 })];
+  const it = itemDe(conciliar(maio, junho), "Multi");
+  check(it && it.alerts.includes(RECON_STATUS.PERIODO) && it.alerts.includes(RECON_STATUS.FTE),
+        "um mesmo registro pode acumular PERÍODO DIVERGENTE e FTE DIVERGENTE",
+        it && it.alerts.join(" + "));
+}
+{
+  // período menor com o MESMO rateio não deve gerar alerta de FTE: a diferença
+  // de FTE é consequência aritmética do período, não um segundo problema
+  const maio  = [linha({ nome: "SoPeriodo", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
+  const junho = [linha({ nome: "SoPeriodo", inicio: ymd(2026,5,22), fim: ymd(2026,5,31), rateio: -1 })];
+  const it = itemDe(conciliar(maio, junho), "SoPeriodo");
+  check(it && it.alerts.includes(RECON_STATUS.PERIODO) && !it.alerts.includes(RECON_STATUS.FTE),
+        "período divergente com rateio igual NÃO acumula alerta de FTE",
+        it && it.alerts.join(" + "));
+}
+{
+  const maio  = [linha({ nome: "Falta1", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
+  const junho = [linha({ nome: "Falta1", inicio: ymd(2026,5,22), fim: ymd(2026,5,31), rateio: -1 })];
+  const it = itemDe(conciliar(maio, junho), "Falta1");
+  check(it && it.faltantes.length === 1 && it.faltantes[0].start === ymd(2026,5,21)
+        && it.faltantes[0].days === 1,
+        "o trecho não conciliado é apontado com data exata (21/05)",
+        it && it.faltantes.map(f=>fmtYmd(f.start)+"→"+fmtYmd(f.end)).join(", "));
+  check(it && /21\/05/.test(it.diagnostico), "…e aparece no diagnóstico em texto");
+}
+{
+  const maio  = [linha({ nome: "Dims", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
+  const junho = [linha({ nome: "Dims", inicio: ymd(2026,5,21), fim: ymd(2026,5,31), rateio: -1 })];
+  const it = itemDe(conciliar(maio, junho), "Dims");
+  check(it && it.dimensoes.identidade && it.dimensoes.competencia && it.dimensoes.periodo
+        && it.dimensoes.sinal && it.dimensoes.fte,
+        "CONCILIADO informa quais dimensões bateram", it && JSON.stringify(it.dimensoes));
+  check(it && it.confiancaMotivo.length > 0, "…e de onde veio a confiança", it && it.confiancaMotivo);
+}
+
+/* ================================================================
+   IDENTIDADE DA LINHA CRIADA
+   ================================================================ */
+console.log("\nIdentidade da linha criada (estrutura N+1, identidade N)");
+{
+  const joao = linha({ nome: "JOÃO SILVA", groot: "123", matricula: "j1",
+                       inicio: ymd(2026,5,1), fim: ymd(2026,5,20) });
+  joao.raw = { groot: 123, nome: "JOÃO SILVA", matricula: "j1", cargo: "Auxiliar", regime: "CLT", escala: "5x2" };
+  const outro = linha({ nome: "OUTRA PESSOA", groot: "999", matricula: "z9", srcRow: 2,
+                        inicio: ymd(2026,6,1), fim: null });
+  const it = itemDe(conciliar([joao], [outro]), "JOÃO SILVA");
+  check(it && it.status === RECON_STATUS.AUSENTE, "João precisa de retroativo em junho");
+  check(it && it.modeloRow === null,
+        "sem linha de João em junho, não há template de estrutura da própria pessoa",
+        it && "modeloRow=" + it.modeloRow);
+  check(it && it.identidadeCampos && it.identidadeCampos.groot === "123"
+        && it.identidadeCampos.nome === "JOÃO SILVA",
+        "a identidade da linha nova vem do registro de João na fatura N",
+        it && JSON.stringify(it.identidadeCampos));
+  check(it && it.identidadeRaw && it.identidadeRaw.cargo === "Auxiliar",
+        "…inclusive cargo, regime e escala do cadastro correto");
+  check(it && it.groot !== "999" && it.nome !== "OUTRA PESSOA",
+        "nenhuma identidade de outro colaborador é reutilizada");
+}
+{
+  const p = linha({ nome: "ComLinha", groot: "555", matricula: "p5",
+                    inicio: ymd(2026,5,28), fim: null });
+  const junho = [linha({ nome: "Ruido", groot: "999", matricula: "z9", srcRow: 2,
+                         inicio: ymd(2026,6,1), fim: null }),
+                 linha({ nome: "ComLinha", groot: "555", matricula: "p5", srcRow: 7,
+                         inicio: ymd(2026,5,28), fim: null })];
+  const it = itemDe(conciliar([p], junho), "ComLinha");
+  check(it && it.modeloRow === 7,
+        "existindo linha da pessoa na N+1, ela é o template de estrutura",
+        it && "modeloRow=" + it.modeloRow);
+}
+
+/* ================================================================
+   IMPACTO FINANCEIRO
+   ================================================================ */
+console.log("\nImpacto financeiro");
+{
+  const maio  = [linha({ nome: "SemTarifa", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
+  const it = itemDe(conciliar(maio, []), "SemTarifa");
+  check(it && it.impacto.calculado === false && /não calculado/i.test(it.impacto.motivo),
+        "sem tarifa confiável, o impacto não é calculado nem inventado",
+        it && it.impacto.motivo.slice(0,60));
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");

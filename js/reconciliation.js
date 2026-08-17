@@ -7,39 +7,46 @@
 
      o ajuste que deveria ter surgido na fatura N+1 realmente surgiu?
 
-   O motor não decide nada. Ele detecta, compara, classifica e explica —
-   a decisão de alterar uma fatura pertence sempre ao usuário, e vive na
-   camada de interface (js/reconciliation-ui.js).
+   O confronto não é "linha N versus linha N+1". Para cada pessoa o
+   motor reconstrói uma pequena história de faturamento — o que foi
+   cobrado, o que o corte congelou, o que se infere ter acontecido
+   depois, que ajuste era devido e o que de fato apareceu — e só então
+   classifica. A aritmética de datas vem de dates.js, o ajuste esperado
+   de engine.js e a reconstrução da cobrança de billing.js: aqui não há
+   nenhuma segunda implementação da regra do dia 15.
 
-   Toda a aritmética de datas e o cálculo do ajuste esperado são
-   reaproveitados de dates.js e engine.js: aqui não há uma segunda
-   implementação da regra do dia 15.
+   O motor não decide nada. Detecta, compara, classifica e explica; a
+   decisão de alterar uma fatura pertence ao usuário.
    ================================================================ */
 "use strict";
 
 const RECON_STATUS = {
-  CONCILIADO: "CONCILIADO",
-  AUSENTE:    "AUSENTE",
-  PARCIAL:    "PARCIAL",
-  RATEIO:     "RATEIO_DIVERGENTE",
-  SINAL:      "SINAL_INCORRETO",
-  DUPLICADO:  "DUPLICADO",
-  SEM_ORIGEM: "SEM_ORIGEM",
-  REVISAO:    "REVISAO"
+  CONCILIADO:  "CONCILIADO",
+  AUSENTE:     "AUSENTE",
+  PERIODO:     "PERIODO_DIVERGENTE",
+  FTE:         "FTE_DIVERGENTE",
+  SINAL:       "SINAL_INCORRETO",
+  DUPLICADO:   "DUPLICADO",
+  SEM_ORIGEM:  "SEM_ORIGEM",
+  AMBIGUA:     "IDENTIDADE_AMBIGUA",
+  INDETERMINADO:"INDETERMINADO",
+  REVISAO:     "REVISAO"
 };
 const RECON_CONF = { ALTA:"ALTA", MEDIA:"MEDIA", REVISAO:"REVISAO" };
 
-/* Rótulos e semântica de cor. Vermelho só para ausência ou conflito
-   relevante; âmbar para o que é parcial ou precisa de olho humano. */
+/* Vermelho só para ausência ou conflito relevante; âmbar para o que é
+   parcial; azul/cinza para o que é informação e pede validação. */
 const RECON_META = {
-  CONCILIADO: {label:"Conciliado",            tone:"ok",   icon:"✓"},
-  AUSENTE:    {label:"Ajuste ausente",        tone:"bad",  icon:"✖"},
-  PARCIAL:    {label:"Ajuste parcial",        tone:"warn", icon:"⚠"},
-  RATEIO_DIVERGENTE:{label:"Rateio/FTE divergente", tone:"warn", icon:"⚠"},
-  SINAL_INCORRETO:{label:"Sinal incorreto",   tone:"bad",  icon:"✖"},
-  DUPLICADO:  {label:"Possível duplicidade",  tone:"bad",  icon:"✖"},
-  SEM_ORIGEM: {label:"Retroativo sem origem", tone:"info", icon:"?"},
-  REVISAO:    {label:"Revisão manual",        tone:"info", icon:"?"}
+  CONCILIADO:        {label:"Conciliado",              tone:"ok",   icon:"✓"},
+  AUSENTE:           {label:"Ajuste ausente",          tone:"bad",  icon:"✖"},
+  PERIODO_DIVERGENTE:{label:"Período divergente",      tone:"warn", icon:"⚠"},
+  FTE_DIVERGENTE:    {label:"FTE divergente",          tone:"warn", icon:"⚠"},
+  SINAL_INCORRETO:   {label:"Sinal incorreto",         tone:"bad",  icon:"✖"},
+  DUPLICADO:         {label:"Possível duplicidade",    tone:"bad",  icon:"✖"},
+  SEM_ORIGEM:        {label:"Retroativo sem origem",   tone:"info", icon:"?"},
+  IDENTIDADE_AMBIGUA:{label:"Identidade ambígua",      tone:"info", icon:"?"},
+  INDETERMINADO:     {label:"Indeterminado",           tone:"info", icon:"?"},
+  REVISAO:           {label:"Revisão manual",          tone:"info", icon:"?"}
 };
 
 const FTE_TOL = 1e-6;
@@ -47,9 +54,9 @@ const FTE_TOL = 1e-6;
 /* ================================================================
    1. IDENTIDADE DAS PESSOAS
 
-   O Excel devolve o mesmo identificador ora como texto, ora como
-   número: "123456", 123456 e 123456.0 são a mesma pessoa. Já nomes
-   NUNCA são chave — homônimos existem e grafia varia entre faturas.
+   Ordem: GROOT ID, depois matrícula. Nome NUNCA une registros — só
+   entra como reforço visual. O Excel devolve o mesmo identificador ora
+   como texto, ora como número: "123456", 123456 e 123456.0 são o mesmo.
    ================================================================ */
 function normId(v){
   if(v===null||v===undefined) return "";
@@ -57,18 +64,12 @@ function normId(v){
   if(!s) return "";
   if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)){
     const n=Number(s);
-    // 123456.0 → "123456"; preserva não-inteiros como estão
-    if(isFinite(n)) return Number.isInteger(n) ? String(n) : String(n);
+    if(isFinite(n)) return String(n);      // 123456.0 → "123456"
   }
   return s.toUpperCase();
 }
 function hasId(v){ const s=normId(v); return s!=="" && s!=="0"; }
 
-/** Índice de pessoas das duas faturas.
- *  GROOT é a chave preferida; matrícula só entra como ponte quando
- *  aponta para um único GROOT. Matrícula que aponta para dois GROOTs
- *  diferentes é conflito: as linhas ficam marcadas como ambíguas e
- *  NUNCA são unidas automaticamente. */
 function buildPersonIndex(lists){
   const midToGids=new Map(), gidToMids=new Map();
   lists.forEach(list=>list.forEach(e=>{
@@ -84,7 +85,6 @@ function buildPersonIndex(lists){
   midToGids.forEach((gids,m)=>{ if(gids.size>1) ambiguous.add("M:"+m); });
 
   return {
-    /** chave canônica da pessoa, ou "" quando a linha não tem identificador */
     keyOf(e){
       if(hasId(e.groot)) return "G:"+normId(e.groot);
       if(hasId(e.matricula)){
@@ -94,7 +94,11 @@ function buildPersonIndex(lists){
       }
       return "";
     },
-    /** a identificação desta linha comporta mais de uma leitura? */
+    fonteOf(e){
+      if(hasId(e.groot)) return "GROOT";
+      if(hasId(e.matricula)) return "MATRICULA";
+      return "NENHUMA";
+    },
     isAmbiguous(e){
       if(!hasId(e.groot) && hasId(e.matricula)) return ambiguous.has("M:"+normId(e.matricula));
       if(hasId(e.groot) && hasId(e.matricula)){
@@ -103,7 +107,6 @@ function buildPersonIndex(lists){
       }
       return false;
     },
-    /** GROOT que aparece com duas matrículas distintas: sinal de troca de contrato */
     hasSplitMatricula(e){
       if(!hasId(e.groot)) return false;
       const mids=gidToMids.get(normId(e.groot));
@@ -113,51 +116,38 @@ function buildPersonIndex(lists){
 }
 
 /* ================================================================
-   2. LINHA NORMAL × LINHA RETROATIVA
-
-   Esta separação é o coração do modo. Uma linha de ajuste retroativo
-   pode legitimamente ter % RATEIO negativo — o motor de projeção trata
-   rateio negativo como erro de dados, e está certo para uma linha de
-   competência, mas errado para um retroativo.
-
-   O discriminador NÃO é o sinal. É o período: uma linha cujo período
-   TERMINA antes do primeiro dia da competência do arquivo não pode
-   pertencer àquela competência — só pode ser retroativo. Isso importa
-   porque uma linha perfeitamente normal de junho costuma carregar a
-   DATA DE INÍCIO real da pessoa (a admissão em maio); o que a denuncia
-   como normal é a DATA FIM vazia ou dentro de junho.
-
-   O sinal do rateio entra como evidência adicional, nunca sozinho.
+   2. SEPARAÇÃO DAS LINHAS  (delega a classificação a billing.js)
    ================================================================ */
-function isRetroLine(e, comp){
-  const temFim=isValidYmd(e.fim);
-  // período fechado antes do início da competência do arquivo
-  if(temFim && e.fim < comp.first) return true;
-  // crédito/estorno: rateio negativo não pertence a uma linha de competência
-  if(typeof e.rateio==="number" && e.rateio < 0) return true;
-  return false;
-}
+function isRetroLine(e, comp){ return isRetroClass(classifyLine(e,comp).classe); }
 
-/** Separa as linhas de uma fatura entre as da própria competência e as retroativas. */
 function splitInvoiceLines(employees, comp){
-  const normais=[], retroativos=[];
-  employees.forEach(e=>{ (isRetroLine(e,comp)?retroativos:normais).push(e); });
-  return {normais, retroativos};
+  const normais=[], retroativos=[], indeterminados=[];
+  employees.forEach(e=>{
+    const c=classifyLine(e,comp);
+    e.lineClassification=c.classe;          // campo interno, usado pela interface
+    e.lineClassReason=c.motivo;
+    e.lineCompOrigem=c.compOrigem;
+    if(isRetroClass(c.classe)) retroativos.push(e);
+    else if(c.classe===LINE_CLASS.UNDETERMINED) indeterminados.push(e);
+    else normais.push(e);
+  });
+  return {normais, retroativos, indeterminados};
 }
 
-/** Descreve uma linha retroativa encontrada, já normalizada para comparação.
- *  `compAlvo` é a competência a que o período se refere (a fatura N). */
+/** Retroativo já normalizado para comparação com o esperado. */
 function describeRetro(e, compAlvo){
   if(!isValidYmd(e.inicio)||!isValidYmd(e.fim)) return null;
   const start=e.inicio, end=e.fim;
   if(end<start) return null;
   const days=diffDaysInclusive(start,end);
   const rateio=(typeof e.rateio==="number"&&isFinite(e.rateio))?e.rateio:1;
-  // O sinal do rateio diz o sentido do lançamento; o período diz a que mês pertence.
-  const kind=rateio<0?"DESCONTAR":"ACRESCENTAR";
+  const kind=e.lineClassification===LINE_CLASS.RETRO_DISC?"DESCONTAR"
+            :e.lineClassification===LINE_CLASS.RETRO_ADD?"ACRESCENTAR"
+            :(rateio<0?"DESCONTAR":"ACRESCENTAR");
   return {emp:e, kind, start, end, days,
     rateio:Math.abs(rateio),
-    fte:(days/compAlvo.days)*rateio,
+    fte:(days/compAlvo.days)*(kind==="DESCONTAR"?-Math.abs(rateio):Math.abs(rateio)),
+    classe:e.lineClassification, classeMotivo:e.lineClassReason,
     dentroDaCompetencia: start>=compAlvo.first && end<=compAlvo.last};
 }
 
@@ -168,7 +158,6 @@ function monthIndex(comp){ return comp.y*12+comp.m; }
 function competencesAreSequential(compA, compB){
   return monthIndex(compB)-monthIndex(compA)===1;
 }
-/** Diagnóstico da dupla de competências, para a interface decidir o que dizer. */
 function checkSequence(compA, compB){
   if(!compA||!compB) return {ok:false, kind:"incompleto", msg:"Carregue as duas faturas."};
   const d=monthIndex(compB)-monthIndex(compA);
@@ -182,18 +171,32 @@ function checkSequence(compA, compB){
 }
 
 /* ================================================================
-   4. MOTOR
+   4. DIFERENÇA ENTRE PERÍODOS
 
-   reconcile({origem, seguinte, movimentacoes?})
+   Devolve os trechos que existem no esperado e não no encontrado (e
+   vice-versa), para a interface dizer exatamente qual dia não fechou.
+   ================================================================ */
+function faltantes(exp, ach){
+  const out=[];
+  if(!ach) { if(exp) out.push({start:exp.start,end:exp.end,days:exp.days}); return out; }
+  if(ach.start>exp.start) out.push({start:exp.start, end:addDays(ach.start,-1),
+    days:diffDaysInclusive(exp.start,addDays(ach.start,-1))});
+  if(ach.end<exp.end) out.push({start:addDays(ach.end,1), end:exp.end,
+    days:diffDaysInclusive(addDays(ach.end,1),exp.end)});
+  return out;
+}
+function excedentes(exp, ach){
+  const out=[];
+  if(!ach||!exp) return out;
+  if(ach.start<exp.start) out.push({start:ach.start, end:addDays(exp.start,-1),
+    days:diffDaysInclusive(ach.start,addDays(exp.start,-1))});
+  if(ach.end>exp.end) out.push({start:addDays(exp.end,1), end:ach.end,
+    days:diffDaysInclusive(addDays(exp.end,1),ach.end)});
+  return out;
+}
 
-     origem    = {employees, comp}   fatura N
-     seguinte  = {employees, comp}   fatura N+1
-     movimentacoes (opcional, ainda não obrigatório) = fonte externa de
-       RH/HCM que, quando existir, corrobora retroativos sem origem.
-
-   Devolve {items, summary, contexto}. Cada item é um apontamento com
-   esperado, encontrado, diferença, confiança e uma explicação em texto.
-   Nenhum item vem com decisão tomada: `decisao` nasce "MANTER".
+/* ================================================================
+   5. MOTOR
    ================================================================ */
 function reconcile(input){
   const origem=input.origem, seguinte=input.seguinte;
@@ -202,19 +205,16 @@ function reconcile(input){
 
   const idx=buildPersonIndex([origem.employees, seguinte.employees]);
 
-  // --- 4.1 O que a fatura N obriga a ajustar na seguinte ---
   const splitN=splitInvoiceLines(origem.employees, compN);
-  const proj=analyze(splitN.normais, compN);       // reaproveita o motor de projeção
+  const proj=analyze(splitN.normais, compN);       // ajuste esperado = motor de projeção
   const esperados=proj.adjustments;
 
-  // --- 4.2 O que a fatura N+1 traz de retroativo referente a N ---
   const splitNext=splitInvoiceLines(seguinte.employees, compNext);
   const encontrados=[];
   splitNext.retroativos.forEach(e=>{
     const d=describeRetro(e, compN);
     if(!d) return;
-    // só interessam os retroativos que apontam para a competência N
-    if(d.end<compN.first || d.start>compN.last) return;
+    if(d.end<compN.first || d.start>compN.last) return;   // retroativo de outro mês
     d.consumido=false;
     encontrados.push(d);
   });
@@ -226,20 +226,24 @@ function reconcile(input){
     porPessoa.get(k).push(d);
   });
 
-  /* Linha da MESMA pessoa dentro da fatura N+1, para uma eventual inclusão
-     herdar estilo e campos cadastrais. Índice de linha só faz sentido dentro
-     do próprio arquivo: usar a linha da fatura N aqui produziria uma linha com
-     os dados de outra pessoa. Linha normal tem preferência sobre retroativa. */
+  /* Linha da MESMA pessoa dentro da fatura N+1: serve de TEMPLATE de
+     estrutura para uma eventual inclusão. A identidade nunca vem daqui
+     quando a pessoa não existe na N+1 — vem do registro dela na N. */
   const modeloPorPessoa=new Map();
   splitNext.normais.forEach(e=>{ const k=idx.keyOf(e);
     if(k&&!modeloPorPessoa.has(k)) modeloPorPessoa.set(k,e.srcRow); });
   splitNext.retroativos.forEach(e=>{ const k=idx.keyOf(e);
     if(k&&!modeloPorPessoa.has(k)) modeloPorPessoa.set(k,e.srcRow); });
 
+  const linhasNextPorPessoa=new Map();
+  seguinte.employees.forEach(e=>{ const k=idx.keyOf(e);
+    if(!linhasNextPorPessoa.has(k)) linhasNextPorPessoa.set(k,[]);
+    linhasNextPorPessoa.get(k).push(e); });
+
   const items=[];
   const overlap=(a,b)=>a.start<=b.end && b.start<=a.end;
 
-  // --- 4.3 Confronto: para cada ajuste esperado, procurar o aplicado ---
+  // --- 5.1 para cada ajuste devido, procurar o aplicado ---
   esperados.forEach(exp=>{
     const key=idx.keyOf(exp.emp);
     const cands=(porPessoa.get(key)||[]).filter(c=>!c.consumido);
@@ -248,98 +252,154 @@ function reconcile(input){
     const exatos=cands.filter(c=>c.start===exp.start&&c.end===exp.end);
     const sobrepostos=cands.filter(c=>overlap(c,exp));
 
-    let status, conf, achado=null, achados=[], diagnostico, diffDias=0, diffFte=0;
+    let status, alerts=[], conf, confMotivo, achado=null, achados=[], diagnostico;
+    let diffDias=0, diffFte=0;
+
+    const dim={identidade:true, competencia:true, periodo:null, sinal:null, fte:null};
 
     if(exatos.length>1){
-      status=RECON_STATUS.DUPLICADO; conf=RECON_CONF.ALTA;
+      status=RECON_STATUS.DUPLICADO; alerts=[status];
+      conf=RECON_CONF.ALTA; confMotivo="mesma pessoa e período idêntico em mais de uma linha";
       achados=exatos; achado=exatos[0];
       exatos.forEach(c=>c.consumido=true);
+      dim.periodo=true; dim.sinal=achado.kind===exp.kind; dim.fte=Math.abs(achado.fte-exp.fte)<=FTE_TOL;
       diagnostico="A fatura seguinte traz "+exatos.length+" lançamentos para o mesmo período ("
         +fmtShort(exp.start)+" a "+fmtShort(exp.end)+"). Possível "
         +(exp.kind==="DESCONTAR"?"desconto":"acréscimo")+" em duplicidade — confirme qual linha deve permanecer.";
     } else if(exatos.length===1){
       achado=exatos[0]; achado.consumido=true; achados=[achado];
       diffFte=achado.fte-exp.fte;
-      if(achado.kind!==exp.kind){
-        status=RECON_STATUS.SINAL; conf=RECON_CONF.ALTA;
-        diagnostico="O período confere, mas o lançamento está no sentido oposto: esperado "
-          +(exp.kind==="DESCONTAR"?"desconto":"acréscimo")+" e encontrado "
-          +(achado.kind==="DESCONTAR"?"desconto":"acréscimo")+".";
-      } else if(Math.abs(diffFte)>FTE_TOL){
-        status=RECON_STATUS.RATEIO; conf=RECON_CONF.ALTA;
-        diagnostico="Período correto, quantidade diferente: esperado FTE "+fmtFte(exp.fte)
-          +" (rateio "+fmtPct(exp.rateio)+") e encontrado "+fmtFte(achado.fte)
-          +" (rateio "+fmtPct(achado.rateio)+").";
-      } else {
+      dim.periodo=true;
+      dim.sinal=achado.kind===exp.kind;
+      dim.fte=Math.abs(diffFte)<=FTE_TOL;
+      if(!dim.sinal) alerts.push(RECON_STATUS.SINAL);
+      if(!dim.fte&&dim.sinal) alerts.push(RECON_STATUS.FTE);
+      if(!alerts.length){
         status=RECON_STATUS.CONCILIADO; conf=RECON_CONF.ALTA;
-        diagnostico="O ajuste esperado foi localizado na fatura seguinte, com o mesmo período e o mesmo FTE.";
+        confMotivo="mesmo "+(idx.fonteOf(exp.emp)==="GROOT"?"GROOT":"identificador")
+          +", competência de origem clara, período fechado e FTE idêntico";
+        diagnostico="Linha compatível encontrada na fatura seguinte: identidade, competência de origem, "
+          +"período, sinal e FTE conferem.";
+      } else {
+        status=alerts[0]; conf=RECON_CONF.ALTA;
+        confMotivo="identidade e período fecham; a divergência está "+(dim.sinal?"na quantidade":"no sentido do lançamento");
+        diagnostico=!dim.sinal
+          ?"O período confere, mas o lançamento está no sentido oposto: esperado "
+            +(exp.kind==="DESCONTAR"?"desconto":"acréscimo")+" e encontrado "
+            +(achado.kind==="DESCONTAR"?"desconto":"acréscimo")+"."
+          :"Período correto, quantidade diferente: esperado FTE "+fmtFte(exp.fte)
+            +" (rateio "+fmtPct(exp.rateio)+") e encontrado "+fmtFte(achado.fte)
+            +" (rateio "+fmtPct(achado.rateio)+").";
       }
     } else if(sobrepostos.length>1){
-      status=RECON_STATUS.REVISAO; conf=RECON_CONF.REVISAO;
+      status=RECON_STATUS.REVISAO; alerts=[status];
+      conf=RECON_CONF.REVISAO; confMotivo="mais de uma linha candidata sobrepondo o período esperado";
       achados=sobrepostos; achado=sobrepostos[0];
       sobrepostos.forEach(c=>c.consumido=true);
+      dim.periodo=false;
       diagnostico="Há mais de um lançamento retroativo sobrepondo o período esperado. "
         +"A correspondência comporta mais de uma leitura — requer conferência manual.";
     } else if(sobrepostos.length===1){
       achado=sobrepostos[0]; achado.consumido=true; achados=[achado];
       diffDias=achado.days-exp.days;
       diffFte=achado.fte-exp.fte;
-      if(achado.kind!==exp.kind){
-        status=RECON_STATUS.SINAL; conf=RECON_CONF.ALTA;
-        diagnostico="O lançamento encontrado cobre parte do período esperado, mas no sentido oposto.";
-      } else {
-        status=RECON_STATUS.PARCIAL; conf=RECON_CONF.MEDIA;
-        diagnostico="A fatura seguinte contém o "+(exp.kind==="DESCONTAR"?"desconto":"acréscimo")
-          +", mas o período não coincide: esperado "+fmtShort(exp.start)+" a "+fmtShort(exp.end)
-          +" ("+exp.days+" dia"+(exp.days===1?"":"s")+") e encontrado "+fmtShort(achado.start)+" a "
-          +fmtShort(achado.end)+" ("+achado.days+" dia"+(achado.days===1?"":"s")+"). Diferença de "
-          +Math.abs(diffDias)+" dia"+(Math.abs(diffDias)===1?"":"s")+".";
-      }
+      dim.periodo=false;
+      dim.sinal=achado.kind===exp.kind;
+      dim.fte=Math.abs(diffFte)<=FTE_TOL;
+      if(!dim.sinal){ alerts.push(RECON_STATUS.SINAL); }
+      alerts.push(RECON_STATUS.PERIODO);
+      /* FTE só vira alerta próprio quando o RATEIO difere. Um período menor já
+         produz FTE menor por aritmética — apontar isso à parte seria ruído. */
+      if(dim.sinal && Math.abs(achado.rateio-exp.rateio)>FTE_TOL) alerts.push(RECON_STATUS.FTE);
+      status=dim.sinal?RECON_STATUS.PERIODO:RECON_STATUS.SINAL;
+      conf=RECON_CONF.MEDIA;
+      confMotivo="identidade segura, período apenas parcialmente compatível";
+      const falta=faltantes(exp,achado), sobra=excedentes(exp,achado);
+      diagnostico="A fatura seguinte contém o "+(exp.kind==="DESCONTAR"?"desconto":"acréscimo")
+        +", mas o período não coincide: esperado "+fmtShort(exp.start)+" a "+fmtShort(exp.end)
+        +" ("+exp.days+" dia"+(exp.days===1?"":"s")+") e encontrado "+fmtShort(achado.start)+" a "
+        +fmtShort(achado.end)+" ("+achado.days+" dia"+(achado.days===1?"":"s")+")."
+        +(falta.length?" Não conciliado: "+falta.map(f=>descreverTrecho(f)).join(" e ")+".":"")
+        +(sobra.length?" Excedente: "+sobra.map(f=>descreverTrecho(f)).join(" e ")+".":"");
     } else {
-      status=RECON_STATUS.AUSENTE;
+      status=RECON_STATUS.AUSENTE; alerts=[status];
       conf=ambiguo?RECON_CONF.REVISAO:RECON_CONF.ALTA;
+      confMotivo=ambiguo?"identificação ambígua entre as faturas"
+        :"identidade segura e nenhuma linha candidata na fatura seguinte";
+      dim.periodo=false; dim.sinal=false; dim.fte=false;
       diffDias=-exp.days; diffFte=-exp.fte;
-      diagnostico="Ajuste esperado pela regra do snapshot não localizado na fatura "+compNext.label+". "
+      diagnostico="Ajuste esperado pela regra do corte não localizado na fatura "+compNext.label+". "
         +"Nenhuma linha retroativa desta pessoa referente a "+compN.label+" foi encontrada.";
     }
 
     if(ambiguo){
+      dim.identidade=false;
       conf=RECON_CONF.REVISAO;
+      confMotivo="identificação ambígua: a matrícula aparece ligada a mais de um GROOT";
+      if(!alerts.includes(RECON_STATUS.AMBIGUA)) alerts.push(RECON_STATUS.AMBIGUA);
       diagnostico+=" A identificação desta pessoa é ambígua entre as duas faturas — confirme GROOT e matrícula antes de agir.";
     } else if(idx.hasSplitMatricula(exp.emp) && conf===RECON_CONF.ALTA){
       conf=RECON_CONF.MEDIA;
+      confMotivo="GROOT aparece com mais de uma matrícula (possível troca de contrato)";
     }
 
-    items.push(makeItem({status, conf, esperado:exp, achado, achados, diagnostico,
-      diffDias, diffFte, compN, compNext, emp:exp.emp,
-      modeloRow:modeloPorPessoa.get(key)||null}));
+    items.push(makeItem({status, alerts, conf, confMotivo, esperado:exp, achado, achados,
+      diagnostico, diffDias, diffFte, compN, compNext, emp:exp.emp, dim, idx,
+      cobranca:originalBilling(exp.emp, compN),
+      faltantes:faltantes(exp,achado), excedentes:excedentes(exp,achado),
+      modeloRow:modeloPorPessoa.get(key)||null,
+      identidadeOrigem:exp.emp,
+      linhasNext:linhasNextPorPessoa.get(key)||[]}));
   });
 
-  // --- 4.4 Retroativos da N+1 que nenhum fato da N explica ---
+  // --- 5.2 retroativos da N+1 que nenhum fato da N explica ---
   encontrados.filter(c=>!c.consumido).forEach(c=>{
+    const key=idx.keyOf(c.emp);
     const corrobora=movimentacoes?buscarMovimentacao(movimentacoes,c,idx):null;
+    const naOrigem=origem.employees.find(e=>idx.keyOf(e)===key)||null;
     items.push(makeItem({
-      status:RECON_STATUS.SEM_ORIGEM,
+      status:RECON_STATUS.SEM_ORIGEM, alerts:[RECON_STATUS.SEM_ORIGEM],
       conf:corrobora?RECON_CONF.MEDIA:RECON_CONF.REVISAO,
+      confMotivo:corrobora?"movimentação externa compatível localizada"
+        :"nenhuma evidência nas duas faturas justifica o lançamento",
       esperado:null, achado:c, achados:[c],
-      diagnostico:"Retroativo encontrado sem origem identificável nas duas faturas: a fatura "
-        +compNext.label+" traz "+(c.kind==="DESCONTAR"?"um desconto":"um acréscimo")+" de "
-        +fmtShort(c.start)+" a "+fmtShort(c.end)+" referente a "+compN.label
-        +", mas nada na fatura de origem explica esse lançamento. "
-        +(corrobora?"Uma movimentação externa compatível foi localizada.":
-          "Informação insuficiente — requer validação da movimentação."),
-      diffDias:0, diffFte:0, compN, compNext, emp:c.emp,
-      modeloRow:modeloPorPessoa.get(idx.keyOf(c.emp))||null}));
+      diagnostico:"Retroativo sem origem identificada. A fatura "+compNext.label+" traz "
+        +(c.kind==="DESCONTAR"?"um desconto":"um acréscimo")+" de "+fmtShort(c.start)+" a "
+        +fmtShort(c.end)+" referente a "+compN.label+", mas não foi possível justificar este "
+        +"lançamento apenas com as duas faturas carregadas. "
+        +(corrobora?"Uma movimentação externa compatível foi localizada."
+          :"Pode existir movimentação externa não presente nos arquivos. Requer validação."),
+      diffDias:0, diffFte:0, compN, compNext, emp:c.emp, idx,
+      dim:{identidade:!idx.isAmbiguous(c.emp), competencia:true, periodo:null, sinal:null, fte:null},
+      cobranca:naOrigem?originalBilling(naOrigem, compN):null,
+      identidadeOrigem:naOrigem||c.emp,
+      modeloRow:modeloPorPessoa.get(key)||null,
+      linhasNext:linhasNextPorPessoa.get(key)||[]}));
   });
 
-  // --- 4.5 Linhas da fatura N que o motor não conseguiu ler ---
+  // --- 5.3 linhas que não deu para classificar ---
+  splitNext.indeterminados.forEach(e=>{
+    items.push(makeItem({
+      status:RECON_STATUS.INDETERMINADO, alerts:[RECON_STATUS.INDETERMINADO],
+      conf:RECON_CONF.REVISAO, confMotivo:"a linha não pôde ser classificada",
+      esperado:null, achado:null, achados:[],
+      diagnostico:"Linha da fatura "+compNext.label+" não classificada. "+(e.lineClassReason||""),
+      diffDias:0, diffFte:0, compN, compNext, emp:e, idx,
+      dim:{identidade:!idx.isAmbiguous(e), competencia:false, periodo:null, sinal:null, fte:null},
+      cobranca:null, identidadeOrigem:e, modeloRow:e.srcRow, linhasNext:[e]}));
+  });
+
+  // --- 5.4 linhas da fatura N que o motor não conseguiu ler ---
   proj.errors.forEach(err=>{
     items.push(makeItem({
-      status:RECON_STATUS.REVISAO, conf:RECON_CONF.REVISAO,
+      status:RECON_STATUS.REVISAO, alerts:[RECON_STATUS.REVISAO],
+      conf:RECON_CONF.REVISAO, confMotivo:"informação insuficiente na fatura de origem",
       esperado:null, achado:null, achados:[],
       diagnostico:"Informação insuficiente na fatura de origem: "+err.reason
         +". Sem isso não é possível afirmar qual ajuste seria devido.",
-      diffDias:0, diffFte:0, compN, compNext,
+      diffDias:0, diffFte:0, compN, compNext, idx,
+      dim:{identidade:false, competencia:true, periodo:null, sinal:null, fte:null},
+      cobranca:null, identidadeOrigem:null, modeloRow:null, linhasNext:[],
       emp:{nome:err.nome, groot:null, matricula:null}}));
   });
 
@@ -347,13 +407,18 @@ function reconcile(input){
   items.forEach((it,i)=>{ it.id=i; });
   return {items, summary:summarize(items), contexto:{compN, compNext,
     linhasOrigem:origem.employees.length, linhasSeguinte:seguinte.employees.length,
-    retroativosNaSeguinte:encontrados.length, esperados:esperados.length,
+    correntesNaSeguinte:splitNext.normais.length,
+    retroativosNaSeguinte:encontrados.length,
+    indeterminadosNaSeguinte:splitNext.indeterminados.length,
+    esperados:esperados.length,
     sequencia:checkSequence(compN,compNext)}};
 }
 
-/* Gancho para a terceira fonte (RH/HCM), ainda opcional: quando uma base
-   de movimentações for fornecida, um retroativo sem origem nas faturas
-   pode ser corroborado por ela em vez de cair direto em revisão. */
+function descreverTrecho(t){
+  return t.days===1?fmtShort(t.start):fmtShort(t.start)+" a "+fmtShort(t.end)
+    +" ("+t.days+" dias)";
+}
+
 function buscarMovimentacao(movs, achado, idx){
   if(!Array.isArray(movs)) return null;
   const k=idx.keyOf(achado.emp);
@@ -362,35 +427,68 @@ function buscarMovimentacao(movs, achado, idx){
      (isValidYmd(m.inicio)&&m.inicio===achado.start))) || null;
 }
 
+/** A história de faturamento da pessoa, que a interface narra de ponta a ponta. */
 function makeItem(o){
   const e=o.emp||{};
+  const ident=o.identidadeOrigem||null;
   return {
-    status:o.status, confianca:o.conf,
+    status:o.status, alerts:o.alerts&&o.alerts.length?o.alerts:[o.status],
+    confianca:o.conf, confiancaMotivo:o.confMotivo||"",
     nome:e.nome||"(sem nome)", groot:e.groot||null, matricula:e.matricula||null,
+    identidade:{fonte:o.idx?o.idx.fonteOf(e):"NENHUMA",
+      ambigua:o.idx?o.idx.isAmbiguous(e):false},
+    lineClassification:e.lineClassification||null,
+    lineClassReason:e.lineClassReason||null,
+    // história de faturamento
+    cobrancaOriginal:o.cobranca||null,
+    movimentacaoInferida:inferMovement(o.achado||o.esperado, o.compN),
     esperado:o.esperado?{kind:o.esperado.kind, start:o.esperado.start, end:o.esperado.end,
       days:o.esperado.days, fte:o.esperado.fte, rateio:o.esperado.rateio,
       motivo:o.esperado.motivo, sentence:o.esperado.sentence, mov:o.esperado.mov,
       emp:o.esperado.emp}:null,
     achado:o.achado?{kind:o.achado.kind, start:o.achado.start, end:o.achado.end,
       days:o.achado.days, fte:o.achado.fte, rateio:o.achado.rateio,
+      classe:o.achado.classe, classeMotivo:o.achado.classeMotivo,
       srcRow:o.achado.emp?o.achado.emp.srcRow:null, emp:o.achado.emp}:null,
     achados:(o.achados||[]).map(a=>({start:a.start, end:a.end, days:a.days, fte:a.fte,
       kind:a.kind, srcRow:a.emp?a.emp.srcRow:null})),
+    dimensoes:o.dim||{identidade:null,competencia:null,periodo:null,sinal:null,fte:null},
+    faltantes:o.faltantes||[], excedentes:o.excedentes||[],
     diffDias:o.diffDias||0, diffFte:o.diffFte||0,
     diagnostico:o.diagnostico,
     compOrigem:o.compN.label, compAplicacao:o.compNext.label,
-    compDias:o.compN.days,          // divisor do FTE, para recalcular sugestões
-    modeloRow:o.modeloRow||null,    // linha desta pessoa DENTRO da fatura N+1
-    compFirst:o.compN.first, compLast:o.compN.last,
+    compDias:o.compN.days, compFirst:o.compN.first, compLast:o.compN.last,
+    compSnapshot:o.compN.snapshot,
+    modeloRow:o.modeloRow||null,          // TEMPLATE de estrutura, dentro da N+1
+    identidadeRaw:ident&&ident.raw?ident.raw:null,   // IDENTIDADE, preferencialmente da N
+    identidadeCampos:ident?{groot:ident.groot, nome:ident.nome, matricula:ident.matricula}:null,
+    impacto:impactoFinanceiro(o),
     // decisão do usuário — nasce sempre pendente, nunca em "aceitar"
     decisao:"MANTER", sugestao:null, observacao:""
   };
 }
 
-/* Pendências primeiro; dentro do grupo, por nome. */
+/* Impacto financeiro só quando a tarifa é inequívoca. Sem ela, o app diz
+   que não calculou — nunca inventa valor. */
+function impactoFinanceiro(o){
+  const raw=o.identidadeOrigem&&o.identidadeOrigem.raw;
+  const tarifa=raw&&typeof raw.valor==="number"&&isFinite(raw.valor)&&raw.valor>0?raw.valor:null;
+  if(!tarifa){
+    return {calculado:false,
+      motivo:"Impacto financeiro não calculado: a planilha não traz uma tarifa que permita "
+        +"converter FTE em valor com segurança."};
+  }
+  const orig=o.cobranca&&o.cobranca.cobrado?o.cobranca.fte*tarifa:null;
+  const esp=o.esperado?o.esperado.fte*tarifa:null;
+  const ach=o.achado?o.achado.fte*tarifa:null;
+  return {calculado:true, tarifa, original:orig, esperado:esp, encontrado:ach,
+    diferenca:(esp!==null&&ach!==null)?ach-esp:null};
+}
+
 const ORDEM_STATUS=[RECON_STATUS.AUSENTE, RECON_STATUS.SINAL, RECON_STATUS.DUPLICADO,
-  RECON_STATUS.PARCIAL, RECON_STATUS.RATEIO, RECON_STATUS.SEM_ORIGEM,
-  RECON_STATUS.REVISAO, RECON_STATUS.CONCILIADO];
+  RECON_STATUS.PERIODO, RECON_STATUS.FTE, RECON_STATUS.SEM_ORIGEM,
+  RECON_STATUS.AMBIGUA, RECON_STATUS.INDETERMINADO, RECON_STATUS.REVISAO,
+  RECON_STATUS.CONCILIADO];
 function ordenar(items){
   items.sort((a,b)=>{
     const d=ORDEM_STATUS.indexOf(a.status)-ORDEM_STATUS.indexOf(b.status);
@@ -402,7 +500,7 @@ function ordenar(items){
 function summarize(items){
   const s={total:items.length, conciliados:0, pendencias:0,
     descontosAusentes:0, acrescimosAusentes:0, divergencias:0,
-    duplicados:0, semOrigem:0, revisao:0};
+    duplicados:0, semOrigem:0, revisao:0, indeterminados:0};
   items.forEach(it=>{
     if(it.status===RECON_STATUS.CONCILIADO){ s.conciliados++; return; }
     s.pendencias++;
@@ -410,22 +508,21 @@ function summarize(items){
       if(it.esperado&&it.esperado.kind==="DESCONTAR") s.descontosAusentes++;
       else s.acrescimosAusentes++;
     }
-    if(it.status===RECON_STATUS.PARCIAL||it.status===RECON_STATUS.RATEIO||
-       it.status===RECON_STATUS.SINAL) s.divergencias++;
+    if(it.alerts.includes(RECON_STATUS.PERIODO)||it.alerts.includes(RECON_STATUS.FTE)||
+       it.alerts.includes(RECON_STATUS.SINAL)) s.divergencias++;
     if(it.status===RECON_STATUS.DUPLICADO) s.duplicados++;
     if(it.status===RECON_STATUS.SEM_ORIGEM) s.semOrigem++;
-    if(it.status===RECON_STATUS.REVISAO) s.revisao++;
+    if(it.status===RECON_STATUS.INDETERMINADO) s.indeterminados++;
+    if(it.status===RECON_STATUS.REVISAO||it.status===RECON_STATUS.AMBIGUA) s.revisao++;
   });
   return s;
 }
 
 /* ================================================================
-   5. SUGESTÃO DE CORREÇÃO
+   6. SUGESTÃO DE CORREÇÃO
 
-   Gerada sob demanda, quando o usuário escolhe "Aceitar sugestão".
-   Nunca aplicada sozinha: descreve o que seria feito e permite edição
-   antes da prévia. Para o parcial, a decisão entre substituir a linha e
-   complementar a diferença é do usuário — as duas são oferecidas.
+   Calculada só quando o usuário escolhe "aceitar", e ainda assim é
+   proposta: pode ser editada antes de entrar na prévia.
    ================================================================ */
 function sugerirCorrecao(item, modo){
   const exp=item.esperado, ach=item.achado;
@@ -434,12 +531,9 @@ function sugerirCorrecao(item, modo){
       rateio:exp.rateio, days:exp.days, fte:exp.fte,
       motivo:exp.motivo||"Ajuste retroativo não localizado na fatura seguinte."};
   }
-  if(item.status===RECON_STATUS.PARCIAL && exp && ach){
+  if(item.alerts.includes(RECON_STATUS.PERIODO) && exp && ach){
     if(modo==="COMPLEMENTAR"){
-      // complementa só o trecho que faltou, preservando a linha existente
-      const faltaInicio = ach.start>exp.start ? {start:exp.start, end:addDays(ach.start,-1)} : null;
-      const faltaFim    = ach.end<exp.end     ? {start:addDays(ach.end,1), end:exp.end}     : null;
-      const trecho=faltaInicio||faltaFim;
+      const trecho=(item.faltantes&&item.faltantes[0])||null;
       if(!trecho) return null;
       return {acao:"INCLUIR", kind:exp.kind, start:trecho.start, end:trecho.end,
         rateio:exp.rateio, ...medir(trecho.start, trecho.end, exp.rateio, exp.kind, item.compDias),
@@ -447,25 +541,23 @@ function sugerirCorrecao(item, modo){
     }
     return {acao:"SUBSTITUIR", alvoRow:ach.srcRow, kind:exp.kind, start:exp.start, end:exp.end,
       rateio:exp.rateio, days:exp.days, fte:exp.fte,
-      motivo:"Período do lançamento existente ajustado para o esperado pela regra do snapshot."};
+      motivo:"Período do lançamento existente ajustado para o esperado pela regra do corte."};
   }
-  if((item.status===RECON_STATUS.RATEIO||item.status===RECON_STATUS.SINAL) && exp && ach){
+  if((item.status===RECON_STATUS.FTE||item.status===RECON_STATUS.SINAL) && exp && ach){
     return {acao:"SUBSTITUIR", alvoRow:ach.srcRow, kind:exp.kind, start:exp.start, end:exp.end,
       rateio:exp.rateio, days:exp.days, fte:exp.fte,
       motivo:item.status===RECON_STATUS.SINAL
         ?"Sentido do lançamento corrigido para o esperado."
-        :"Rateio/FTE ajustado para o esperado pela regra do snapshot."};
+        :"Rateio/FTE ajustado para o esperado pela regra do corte."};
   }
   if(item.status===RECON_STATUS.DUPLICADO && item.achados.length>1){
-    // oferece remover as repetições, mantendo a primeira — o usuário escolhe
     return {acao:"REMOVER", alvoRows:item.achados.slice(1).map(a=>a.srcRow),
       manterRow:item.achados[0].srcRow,
       motivo:"Lançamento repetido para o mesmo período."};
   }
   return null;
 }
-/** Dias e FTE de um período — a mesma conta do motor de projeção,
- *  usada quando o usuário edita a sugestão à mão. */
+
 function medir(start, end, rateio, kind, compDias){
   const days=diffDaysInclusive(start,end);
   const sinal=kind==="DESCONTAR"?-1:1;
@@ -475,9 +567,8 @@ function medir(start, end, rateio, kind, compDias){
 function fmtFte(v){ return (v>0?"+":"")+v.toFixed(4).replace(".",","); }
 function fmtPct(v){ return (v*100).toLocaleString("pt-BR",{maximumFractionDigits:1})+"%"; }
 
-/* Exportado para os testes (Node) sem atrapalhar o navegador. */
 if(typeof module!=="undefined"&&module.exports){
-  module.exports={RECON_STATUS, RECON_CONF, normId, buildPersonIndex,
+  module.exports={RECON_STATUS, RECON_CONF, RECON_META, normId, buildPersonIndex,
     isRetroLine, splitInvoiceLines, describeRetro, checkSequence,
-    competencesAreSequential, reconcile, sugerirCorrecao};
+    competencesAreSequential, reconcile, sugerirCorrecao, faltantes, excedentes};
 }

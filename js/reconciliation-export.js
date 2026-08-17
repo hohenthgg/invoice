@@ -42,14 +42,42 @@ function resumoPrevia(plano, totalLinhas){
 }
 
 const CONCIL_SHEET="CONCILIAÇÃO";
-const CONCIL_HEADERS=["GROOT ID","NOME","STATUS","ESPERADO","ENCONTRADO",
-  "DECISÃO DO USUÁRIO","ALTERAÇÃO APLICADA","MOTIVO"];
+const CONCIL_HEADERS=["GROOT ID","NOME","COMPETÊNCIA ORIGEM","COMPETÊNCIA DESTINO",
+  "CLASSIFICAÇÃO DA LINHA","STATUS","ALERTAS","CONFIANÇA","BASE DA CONFIANÇA",
+  "COBRANÇA ORIGINAL","AJUSTE ESPERADO","AJUSTE ENCONTRADO","DECISÃO DO USUÁRIO",
+  "PERÍODO FINAL","FTE FINAL","ALTERAÇÃO APLICADA","IMPACTO FINANCEIRO",
+  "OBSERVAÇÃO DO USUÁRIO","MOTIVO"];
 
 function descreverAjuste(a){
   if(!a) return "—";
   const sinal=a.kind==="DESCONTAR"?"−":"+";
   return sinal+fmtShort(a.start)+" a "+fmtShort(a.end)+" · "+a.days
     +" dia"+(a.days===1?"":"s")+" · FTE "+a.fte.toFixed(4).replace(".",",");
+}
+function descreverCobranca(c){
+  if(!c) return "—";
+  if(!c.cobrado) return "não cobrada — "+c.base;
+  return fmtShort(c.start)+" a "+fmtShort(c.end)+" · "+c.days+" dia"+(c.days===1?"":"s")
+    +" · FTE "+c.fte.toFixed(4).replace(".",",");
+}
+function descreverImpacto(i){
+  if(!i) return "—";
+  if(!i.calculado) return i.motivo;
+  const br=v=>v===null||v===undefined?"—":v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+  return "original "+br(i.original)+" · esperado "+br(i.esperado)
+    +" · encontrado "+br(i.encontrado)+" · diferença "+br(i.diferenca);
+}
+/* Período e FTE que o usuário de fato escolheu, quando aceitou a sugestão. */
+function periodoFinal(it){
+  if(it.decisao!=="ACEITAR"||!it.sugestao) return "—";
+  const s=it.sugestao;
+  if(s.acao==="REMOVER") return "linha "+s.manterRow+" mantida";
+  return fmtShort(s.start)+" a "+fmtShort(s.end)+" · "+s.days+" dia"+(s.days===1?"":"s");
+}
+function fteFinal(it){
+  if(it.decisao!=="ACEITAR"||!it.sugestao) return "—";
+  const s=it.sugestao;
+  return typeof s.fte==="number"?s.fte.toFixed(4).replace(".",","):"—";
 }
 const DECISAO_LABEL={MANTER:"Manter como está", ACEITAR:"Aceitar sugestão",
   IGNORAR:"Ignorar apontamento", REVISAR:"Revisar manualmente"};
@@ -115,11 +143,13 @@ async function gerarFaturaConciliada(ctx){
       // pessoa ausente desta fatura: só a aparência é herdada
       const visual=acharModeloVisual(ws, paraRemover);
       if(visual){
+        // só a APARÊNCIA é herdada — nenhum valor de outra pessoa acompanha
         visual.eachCell({includeEmpty:true},(cell,c)=>{
           novo.getCell(c).style=JSON.parse(JSON.stringify(cell.style||{}));
         });
         novo.height=visual.height;
       }
+      COLS_IDENTIDADE.forEach(k=>{ const c=map[k]; if(c!==undefined&&c>=0) novo.getCell(c+1).value=null; });
       preencherIdentificacao(novo, map, item);
     }
     if(cIni) escreverData(novo.getCell(cIni), sug.start);
@@ -160,17 +190,25 @@ function acharModeloVisual(ws, removidas){
   return null;
 }
 
+/** Identidade do colaborador na linha nova.
+ *  A ESTRUTURA (colunas, estilo, formatos) vem sempre da fatura N+1; a
+ *  IDENTIDADE vem do registro conciliado da pessoa, que quando ela não existe
+ *  na N+1 só existe na fatura N. Nunca se reaproveita a identidade de outra
+ *  pessoa da N+1 só porque a linha dela serviu de molde visual. */
 function preencherIdentificacao(row, map, item){
-  const set=(k,v)=>{ const c=map[k]; if(c!==undefined&&c>=0&&v!==null&&v!==undefined) row.getCell(c+1).value=v; };
-  const emp=(item.esperado&&item.esperado.emp)||(item.achado&&item.achado.emp)||{};
-  set("groot", emp.raw&&emp.raw.groot!==undefined?emp.raw.groot:item.groot);
-  set("nome", item.nome);
-  set("matricula", emp.raw&&emp.raw.matricula!==undefined?emp.raw.matricula:item.matricula);
-  if(emp.raw){
-    set("regime", emp.raw.regime); set("cargo", emp.raw.cargo);
-    set("diasFolga", emp.raw.diasFolga); set("escala", emp.raw.escala);
-  }
+  const set=(k,v)=>{ const c=map[k]; if(c!==undefined&&c>=0&&v!==null&&v!==undefined&&v!=="") row.getCell(c+1).value=v; };
+  const raw=item.identidadeRaw||{};
+  const campos=item.identidadeCampos||{};
+  set("groot", raw.groot!==undefined&&raw.groot!==null?raw.groot:(campos.groot||item.groot));
+  set("nome", raw.nome!==undefined&&raw.nome!==null?raw.nome:(campos.nome||item.nome));
+  set("matricula", raw.matricula!==undefined&&raw.matricula!==null?raw.matricula:(campos.matricula||item.matricula));
+  set("regime", raw.regime); set("cargo", raw.cargo);
+  set("diasFolga", raw.diasFolga); set("escala", raw.escala);
 }
+
+/** Colunas que carregam identidade — precisam ser reescritas quando o molde
+ *  visual veio de outra pessoa. */
+const COLS_IDENTIDADE=["groot","nome","matricula","regime","cargo","diasFolga","escala"];
 
 function escreverData(cell, v){
   cell.value=ymdToExcelDate(v);
@@ -189,7 +227,9 @@ function montarAbaConciliacao(wb, items){
   const antiga=wb.getWorksheet(CONCIL_SHEET);
   if(antiga) wb.removeWorksheet(antiga.id);
   const ws=wb.addWorksheet(CONCIL_SHEET,{views:[{state:"frozen",ySplit:1}]});
-  ws.columns=[{width:14},{width:34},{width:24},{width:34},{width:34},{width:20},{width:40},{width:52}];
+  ws.columns=[{width:14},{width:32},{width:16},{width:16},{width:22},{width:22},{width:28},
+    {width:18},{width:44},{width:34},{width:34},{width:34},{width:20},{width:26},{width:12},
+    {width:40},{width:44},{width:34},{width:60}];
 
   const hr=ws.addRow(CONCIL_HEADERS);
   hr.height=24;
@@ -199,14 +239,24 @@ function montarAbaConciliacao(wb, items){
     cell.alignment={horizontal:"center",vertical:"middle",wrapText:true};
   });
 
+  const CONF_LABEL={ALTA:"Alta",MEDIA:"Média",REVISAO:"Revisão necessária"};
   items.forEach(it=>{
     const meta=(typeof RECON_META!=="undefined"&&RECON_META[it.status])||{label:it.status};
+    const alertas=(it.alerts||[]).map(a=>
+      ((typeof RECON_META!=="undefined"&&RECON_META[a])||{label:a}).label).join(" + ");
+    const classe=(typeof LINE_CLASS_LABEL!=="undefined"&&LINE_CLASS_LABEL[it.lineClassification])
+      ||(it.achado&&typeof LINE_CLASS_LABEL!=="undefined"&&LINE_CLASS_LABEL[it.achado.classe])||"—";
     const row=ws.addRow([
-      it.groot||"", it.nome, meta.label,
+      it.groot||"", it.nome, it.compOrigem, it.compAplicacao,
+      classe, meta.label, alertas, CONF_LABEL[it.confianca]||it.confianca, it.confiancaMotivo||"",
+      descreverCobranca(it.cobrancaOriginal),
       descreverAjuste(it.esperado), descreverAjuste(it.achado),
       DECISAO_LABEL[it.decisao]||it.decisao,
+      periodoFinal(it), fteFinal(it),
       descreverAlteracao(it),
-      it.observacao?it.diagnostico+" | Observação: "+it.observacao:it.diagnostico
+      descreverImpacto(it.impacto),
+      it.observacao||"",
+      it.diagnostico
     ]);
     row.eachCell({includeEmpty:true},cell=>{
       cell.font={size:10,name:"Calibri"};

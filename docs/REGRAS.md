@@ -30,9 +30,23 @@ E (DATA FIM vazia OU DATA FIM ≥ dia 15)
 `DATA FIM` é **inclusiva**: é o último dia em que a pessoa permanece ativa. Quem
 tem data fim 20/08 esteve ativo em 20/08, e a ausência começa em 21/08.
 
-Estando ativa no dia 15, a pessoa entra por 100% da competência × % rateio. Não
-se calcula pró-rata de admissão anterior ao corte — o snapshot é uma regra de
-apuração, não um cálculo de folha.
+### O corte congela uma projeção, não cria mês cheio
+
+Estando ativa no dia 15, a pessoa é apurada da sua **data de início** até o fim
+da competência — não do dia 01. O snapshot congela o que se sabia naquele dia e
+**projeta** a cobrança até o fim do mês; ele não transforma todo mundo em
+31/31.
+
+| Situação em maio | Cobrança reconstruída |
+|---|---|
+| Início 01/05, ativa em 15/05 | 01/05 → 31/05 (31 dias) |
+| Início 07/05, ativa em 15/05 | **07/05 → 31/05 (25 dias)**, não 31/31 |
+| Início 07/05, saída 12/05 já conhecida no corte | 07/05 → 12/05 (6 dias) |
+| Início 01/05, desligamento 20/05 reconhecido depois do corte | 01/05 → 31/05 — e desconto de 21/05 a 31/05 na competência seguinte |
+| Início 16/05 | nada — não entrou na fotografia do corte |
+
+Não se calcula pró-rata de saída posterior ao corte dentro da própria
+competência: isso é justamente o que vira ajuste na seguinte.
 
 ## Os dois ajustes
 
@@ -115,6 +129,17 @@ O ajuste esperado é exatamente o que o motor de projeção calcula sobre a
 competência N. O trabalho novo é achar, na competência N+1, o lançamento que o
 corresponde.
 
+### Classificação de cada linha
+
+Toda linha recebe uma classificação explícita, com o motivo em texto:
+
+| Classificação | Significado |
+|---|---|
+| `CURRENT_COMPETENCE` | Competência corrente |
+| `RETROACTIVE_ADD` | Acréscimo retroativo |
+| `RETROACTIVE_DISCOUNT` | Desconto retroativo |
+| `UNDETERMINED` | Indeterminado — revisão manual |
+
 ### Linha de competência × linha retroativa
 
 Uma linha de ajuste retroativo pode legitimamente ter `% RATEIO` **negativo**.
@@ -123,14 +148,38 @@ sendo erro de dados.
 
 O que separa as duas **não é o sinal**, é o período. Uma linha cujo período
 termina antes do primeiro dia da competência do arquivo não pode pertencer àquela
-competência — só pode ser retroativa. O sinal entra como evidência adicional,
-nunca sozinho.
+competência — só pode ser retroativa. O sinal entra depois, só para separar
+acréscimo de desconto.
+
+Isso importa nos dois sentidos. Um retroativo pode ser **positivo**: uma linha de
+28/05 a 31/05 com rateio +1 dentro da fatura de junho é acréscimo retroativo de
+maio, não competência corrente. E um rateio negativo cujo período cai dentro da
+própria competência do arquivo não é classificado às pressas — fica
+**indeterminado** e vai para revisão.
 
 Isso importa porque uma linha perfeitamente normal costuma carregar a `DATA DE
 INÍCIO` real da pessoa, que pode ser de meses atrás. Quem foi admitido em 20/05 e
 segue ativo aparece na fatura de junho com início 20/05 e **`DATA FIM` vazia** —
 é linha de competência, não retroativo. O retroativo dessa mesma admissão é outra
 linha, fechada: 20/05 a 31/05.
+
+### De onde vem a competência de cada fatura
+
+Detectar competência por cluster de datas erra justamente na fatura N+1, que
+carrega os retroativos do mês anterior. A competência passa a ser buscada em
+ordem de força da evidência, e a fonte usada aparece na tela junto do nível de
+confiança:
+
+1. **Campo explícito da planilha** (aba `Resumo`, cabeçalho, rótulo
+   "Competência") — confiança alta;
+2. **Nome do arquivo** (`FATURA_..._Junho_2026`) — confiança alta;
+3. **Sequência com a outra fatura** já carregada — confiança média;
+4. **Heurística de datas**, calculada apenas sobre as linhas de competência
+   corrente — confiança média;
+5. **Confirmação manual** — sempre disponível.
+
+A competência detectada nunca é escondida: fonte e confiança ficam à vista, e o
+seletor de mês e ano está sempre habilitado.
 
 ### Identificação da pessoa
 
@@ -144,20 +193,37 @@ unidos**, e o apontamento cai em revisão manual.
 
 ### Classificações
 
+Para dar um caso por conciliado não basta achar uma linha parecida: são
+comparadas cinco dimensões — **identidade, competência de origem, período, sinal
+e FTE** — e a tela mostra quais bateram.
+
 | Situação | Status |
 |---|---|
-| Mesmo período, mesmo sentido, mesmo FTE | **Conciliado** |
+| As cinco dimensões conferem | **Conciliado** |
 | Nada correspondente na competência seguinte | **Ajuste ausente** |
-| Períodos se sobrepõem mas não coincidem | **Ajuste parcial** |
-| Período certo, quantidade diferente | **Rateio/FTE divergente** |
+| Períodos se sobrepõem mas não coincidem | **Período divergente** |
+| Período certo, rateio diferente | **FTE divergente** |
 | Período certo, sentido oposto | **Sinal incorreto** |
 | O mesmo período lançado mais de uma vez | **Possível duplicidade** |
 | Retroativo na N+1 sem fato na N que o explique | **Retroativo sem origem** |
-| Identificação ambígua ou mais de uma leitura possível | **Revisão manual** |
+| Matrícula ligada a mais de um GROOT | **Identidade ambígua** |
+| Linha que não pôde ser classificada | **Indeterminado** |
+| Mais de uma leitura possível | **Revisão manual** |
 
-Cada apontamento carrega ainda um nível de confiança: **alta** (mesma pessoa,
-mesmo período, mesmo FTE), **média** (correspondência parcial) e **revisão
-necessária** (identificação ambígua ou vários candidatos).
+Um mesmo registro pode acumular alertas — período divergente **e** sinal
+incorreto, por exemplo. FTE só vira alerta próprio quando o **rateio** difere:
+um período menor já produz FTE menor por aritmética, e apontar isso à parte
+seria ruído.
+
+Cada apontamento carrega um nível de confiança — **alta**, **média** ou
+**revisão necessária** — acompanhado da razão que o justifica.
+
+### Diferença exata
+
+Quando o período não fecha, o app não diz apenas "divergente": aponta o trecho.
+Esperado 21/05 a 31/05 e encontrado 22/05 a 31/05 vira *"não conciliado: 21/05"*,
+e as ações oferecidas são substituir a linha, complementar **somente 21/05**,
+manter o original ou revisar — nenhuma marcada de antemão.
 
 ### O limite da evidência
 
@@ -167,9 +233,21 @@ sabe: *ajuste esperado pela regra do snapshot não localizado*, *retroativo
 encontrado sem origem identificável nas duas faturas*, *informação insuficiente —
 requer validação da movimentação*.
 
+Pela mesma razão, uma data de desligamento deduzida de um retroativo é sempre
+apresentada como inferência, com a base à vista: *"último dia faturável inferido:
+17/05 — base da inferência: desconto encontrado de 18/05 a 31/05"*. O app não
+escreve "esta pessoa foi desligada em 17/05".
+
 Uma terceira fonte (base de movimentações de RH) pode, no futuro, corroborar um
 retroativo sem origem. O motor já aceita essa fonte como parâmetro opcional; ela
 não é necessária para o resto funcionar.
+
+### Impacto financeiro
+
+Quando a planilha traz uma tarifa inequívoca, o app converte FTE em valor e
+mostra original, esperado, encontrado e diferença. Quando não traz, diz
+exatamente isso — *"impacto financeiro não calculado: tarifa insuficiente ou
+ambígua"* — e nunca inventa um número.
 
 ### Quem decide
 
@@ -179,7 +257,24 @@ correção só é calculada quando o usuário pede, e ainda assim pode ser edita
 antes de valer. A exportação parte da competência N+1, gera um arquivo novo e
 preserva o restante do documento — abas, fórmulas, estilos e formatos. O que
 mudou, e o que o usuário decidiu não tratar, fica registrado numa aba
-`CONCILIAÇÃO` dentro da cópia.
+`CONCILIAÇÃO` dentro da cópia, com competências, classificação da linha, status,
+alertas, confiança e sua base, cobrança original, ajuste esperado e encontrado,
+decisão do usuário, período e FTE finais, alteração aplicada, impacto financeiro
+e observação.
+
+### Estrutura e identidade de uma linha criada
+
+Quando um ajuste ausente vira linha nova, as duas coisas vêm de lugares
+diferentes, e confundi-las já produziu linha com o nome de outra pessoa:
+
+- a **estrutura** — posição das colunas, estilos, formatos, fórmulas — vem
+  sempre da fatura N+1, que é o documento sendo gerado;
+- a **identidade** — GROOT, matrícula, nome, cargo, regime, escala — vem do
+  registro conciliado da pessoa, que quando ela não existe na N+1 só existe na
+  fatura N.
+
+Se uma linha de outra pessoa for usada como molde visual, os campos de
+identidade são limpos antes de receber os dados corretos.
 
 ## Datas
 
