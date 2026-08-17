@@ -429,12 +429,17 @@ check(escalaHorarioDe("Pouso Alegre SVC") === "03:00 07:00 08:00 12:48"
       "as duas unidades de Pouso Alegre têm horários diferentes (SMG3 madrugada, BRXMG3 tarde)",
       escalaHorarioDe("Pouso Alegre XD"));
 check(escalaHorarioDe("Poços de Caldas") === "03:00 07:00 08:00 12:48"
+      && escalaHorarioDe("Varginha") === "03:00 07:00 08:00 11:20"
       && escalaHorarioDe("Divinópolis") === "01:30 05:00 06:00 09:50"
       && escalaHorarioDe("Patos de Minas") === "00:00 05:00 06:00 09:20",
       "…e cada uma das demais tem o horário da sua fatura");
-check(escalaHorarioDe("Varginha") === "",
-      "Varginha fica em branco: sem fatura da unidade, chutar o horário de outra "
-      + "filial seria pior do que a lacuna");
+check(OPS.every(op => escalaHorarioDe(op) !== ""),
+      "as seis operações estão levantadas — nenhuma sai em branco",
+      OPS.filter(op => !escalaHorarioDe(op)).join());
+check(escalaHorarioDe("Varginha") !== escalaHorarioDe("Poços de Caldas"),
+      "Varginha tem horário próprio (11:20), não o de Poços de Caldas (12:48) — "
+      + "os dois começam 03:00 e é fácil confundir",
+      escalaHorarioDe("Varginha"));
 check(escalaHorarioDe("Filial Inexistente") === "",
       "operação desconhecida não inventa horário");
 check(OPS.filter(op => escalaHorarioDe(op))

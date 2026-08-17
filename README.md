@@ -80,11 +80,13 @@ de origem, nomeadas como `Varginha - Diaristas - Agosto.26.xlsx`.
 A saída leva uma coluna a mais que a origem: **ESCALA HORÁRIO**
 (`03:00 07:00 08:00 12:48` — entrada, início e fim do intervalo, saída). Ela não
 existe no SIGO; é o **padrão de diarista da operação**, levantado na aba
-`DIARISTAS` da fatura 3PL, onde cada unidade usa um horário só. A tabela está em
-`ESCALA_HORARIO_PADRAO` (`js/config.js`), com a fonte de cada valor documentada.
-É um padrão, não uma verdade linha a linha — em Divinópolis, 6 dos 37 diaristas de
-julho/2026 saíram em outros horários. Operação sem levantamento sai **em branco** e
-vira tópico de revisão: chutar o horário de outra filial seria pior que a lacuna.
+`DIARISTAS` da fatura 3PL, onde cada unidade tem um horário dominante. A tabela
+está em `ESCALA_HORARIO_PADRAO` (`js/config.js`), com a fonte de cada valor
+documentada — as seis operações estão levantadas nas faturas de julho/2026.
+É um padrão, não uma verdade linha a linha: quatro unidades são uniformes, mas
+Varginha teve 30 de 138 e Divinópolis 6 de 37 em outros horários. Operação sem
+levantamento sai **em branco** e vira tópico de revisão: chutar o horário de outra
+filial seria pior que a lacuna.
 
 ```
 Soltar planilha  →  período + filtros  →  placar por operação  →  Baixar .xlsx
