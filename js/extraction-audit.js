@@ -48,6 +48,80 @@ const AUDIT_MOTIVO_TXT = {
 /** tokens comparáveis de um nome */
 function tokensNome(v){ return normalizeNome(v).split(" ").filter(Boolean); }
 
+/* ================================================================
+   NOME QUEBRADO
+   ----------------------------------------------------------------
+   Um nome só serve para achar a pessoa. "#N/D", "A DEFINIR", "JOAO 2"
+   e "JoÃ£o" não acham ninguém — e, pior, passam despercebidos porque a
+   célula não está vazia. Cada um tem uma origem diferente e um conserto
+   diferente, então cada um recebe seu próprio motivo.
+
+   Nada é descartado por causa disso: o registro continua na extração.
+   ================================================================ */
+const NOME_PROBLEMA = {
+  VAZIO:        "vazio",
+  ERRO_PLANILHA:"erro_planilha",
+  CODIFICACAO:  "codificacao",
+  PLACEHOLDER:  "placeholder",
+  DIGITOS:      "digitos",
+  SIMBOLOS:     "simbolos",
+  CURTO:        "curto",
+  REPETICAO:    "repeticao",
+  UM_TOKEN:     "um_token"
+};
+
+const NOME_PROBLEMA_TXT = {
+  vazio:         "Sem nome — a célula está vazia.",
+  erro_planilha: "A célula traz um erro do Excel (#N/D, #REF!, …) no lugar do nome: a fórmula que buscava o nome não achou nada.",
+  codificacao:   "Acentuação corrompida — o arquivo passou por uma conversão que quebrou a codificação.",
+  placeholder:   "Texto genérico no lugar do nome (a definir, sem nome, teste…) — o cadastro nunca foi preenchido.",
+  digitos:       "Há números no meio do nome — provável matrícula, código ou contador colado na célula.",
+  simbolos:      "Há símbolos que não pertencem a um nome.",
+  curto:         "Curto demais para ser um nome.",
+  repeticao:     "Caractere repetido em sequência (xxxx, aaaa) — preenchimento de rascunho.",
+  um_token:      "Só uma palavra, sem sobrenome — pode ser cadastro incompleto."
+};
+
+/* Um único termo genérico não identifica pessoa alguma. Comparados já
+   normalizados (sem acento, sem pontuação, caixa alta). */
+const NOMES_GENERICOS = new Set([
+  "A DEFINIR","ADEFINIR","A CONFIRMAR","DEFINIR","SEM NOME","SEMNOME","SEM CADASTRO",
+  "NAO INFORMADO","NAO INFORMADA","NAO IDENTIFICADO","NAO IDENTIFICADA","INDEFINIDO",
+  "PENDENTE","FALTA","VAGA","VAGO","TESTE","TESTE 1","NOME","SEM","N D","N A","NA","ND",
+  "X","XX","XXX","XXXX","XXXXX","NULL","NONE","NULO","DIARISTA","COLABORADOR","FUNCIONARIO"
+]);
+
+/** Devolve a lista de problemas de um nome — vazia quando o nome está bem. */
+function problemasDoNome(bruto){
+  const s = String(bruto === null || bruto === undefined ? "" : bruto).trim();
+  const chave = normalizeNome(s);
+  if (!s || !chave) return [NOME_PROBLEMA.VAZIO];
+
+  const p = [];
+  if (/#(N\/?D|N\/?A|REF|VALOR|VALUE|NOME|NAME|DIV\/0|NUM|NULO|NULL)!?\??/i.test(s))
+    p.push(NOME_PROBLEMA.ERRO_PLANILHA);
+  // Ã©, Â , ï¿½, � — resíduo de UTF-8 lido como Latin-1 e vice-versa
+  if (/[\u00c3\u00c2][\u0080-\u00bf]|\ufffd|\u00ef\u00bf\u00bd/.test(s)) p.push(NOME_PROBLEMA.CODIFICACAO);
+  if (NOMES_GENERICOS.has(chave)) p.push(NOME_PROBLEMA.PLACEHOLDER);
+  if (/\d/.test(s)) p.push(NOME_PROBLEMA.DIGITOS);
+  // letras, espaço e o que aparece em nome de verdade (hífen, apóstrofo, ponto)
+  if (/[^\p{L}\s'’.\-]/u.test(s) && !p.includes(NOME_PROBLEMA.ERRO_PLANILHA)
+      && !p.includes(NOME_PROBLEMA.DIGITOS)) p.push(NOME_PROBLEMA.SIMBOLOS);
+  if (chave.replace(/[^A-Z]/g, "").length < 3) p.push(NOME_PROBLEMA.CURTO);
+  if (/(.)\1{3,}/i.test(chave.replace(/\s/g, ""))) p.push(NOME_PROBLEMA.REPETICAO);
+
+  /* Nome de uma palavra só é o único item que não é defeito garantido —
+     existe gente cadastrada assim. Vira aviso, e só quando o resto está bem. */
+  if (!p.length && tokensNome(s).length === 1) p.push(NOME_PROBLEMA.UM_TOKEN);
+  return p;
+}
+
+/** Só os problemas que impedem identificar a pessoa — exclui o aviso brando. */
+function nomeQuebrado(bruto){
+  const p = problemasDoNome(bruto);
+  return p.length > 0 && !(p.length === 1 && p[0] === NOME_PROBLEMA.UM_TOKEN);
+}
+
 /** `00123` e `123` são o mesmo número escrito diferente. */
 function semZerosAEsquerda(s){ return String(s).replace(/^0+(?=.)/, ""); }
 
@@ -76,12 +150,16 @@ function planificar(entradas){
   const out = [];
   (entradas || []).forEach(({op, rows}) => {
     (rows || []).forEach(r => {
+      const problemas = problemasDoNome(r.nome);
       out.push({
         op, date: r.date,
         grootBruto: (r.id === null || r.id === undefined) ? "" : String(r.id),
         groot: hasGroot(r.id) ? normalizeGroot(r.id) : "",
         nome: String(r.nome == null ? "" : r.nome).trim(),
         nomeChave: normalizeNome(r.nome),
+        problemasNome: problemas,
+        nomeQuebrado: problemas.length > 0
+                      && !(problemas.length === 1 && problemas[0] === NOME_PROBLEMA.UM_TOKEN),
         empresa: r.empresa || "", cargo: r.cargo || "",
         escala: r.escala || "", solicitante: r.solicitante || ""
       });
@@ -140,9 +218,14 @@ function auditarIdentidade(entradas){
   const registros = planificar(entradas);
   const semGroot = registros.filter(r => !r.groot);
 
-  /* Só entram na comparação registros que têm as DUAS pontas. Nome vazio não
-     contradiz nome nenhum, e sem GROOT não há o que confrontar. */
-  const comparaveis = registros.filter(r => r.groot && r.nomeChave);
+  /* Nome quebrado é um problema por si, com conserto próprio. Deixá-lo na
+     comparação faria "ANA SOUZA vs #N/D" ser diagnosticado como duas pessoas
+     sob o mesmo identificador — apontando a causa errada. */
+  const nomesQuebrados = registros.filter(r => r.nomeQuebrado);
+
+  /* Só entram na comparação registros que têm as DUAS pontas legíveis. Nome
+     vazio não contradiz nome nenhum, e sem GROOT não há o que confrontar. */
+  const comparaveis = registros.filter(r => r.groot && r.nomeChave && !r.nomeQuebrado);
 
   // sob um mesmo nome, o que varia é o GROOT
   const mesmoNome  = conflitos(comparaveis, r => r.nomeChave, r => r.groot,
@@ -153,10 +236,11 @@ function auditarIdentidade(entradas){
                                r => r.groot, (chave, ocs) => ocs[0].nome, relacaoEntreNomes);
 
   return {
-    semGroot, mesmoNome, mesmoGroot,
+    semGroot, nomesQuebrados, mesmoNome, mesmoGroot,
     resumo: {
       registros: registros.length,
       semGroot: semGroot.length,
+      nomesQuebrados: nomesQuebrados.length,
       mesmoNome: mesmoNome.length,
       mesmoGroot: mesmoGroot.length,
       // o subconjunto que não dá para explicar por grafia — o que dói de verdade
@@ -166,7 +250,112 @@ function auditarIdentidade(entradas){
   };
 }
 
+/* ================================================================
+   TÓPICOS
+   ----------------------------------------------------------------
+   A auditoria produz estruturas de formatos diferentes — uma lista de
+   registros aqui, grupos com variantes ali. Para a tela (os balões) e
+   para a planilha (uma linha por problema) o que serve é uma coisa só:
+   tópicos, cada um com gravidade, o que significa e o que fazer.
+   ================================================================ */
+const GRAVIDADE = { ALTA:"alta", MEDIA:"media", BAIXA:"baixa", INFO:"info" };
+const GRAVIDADE_TXT = { alta:"Grave", media:"Revisar", baixa:"Provável grafia", info:"Informativo" };
+const GRAVIDADE_ORDEM = { alta:0, media:1, baixa:2, info:3 };
+
+/** Uma linha por problema encontrado, pronta para a tela e para o Excel.
+ *  @param aud          resultado de auditarIdentidade
+ *  @param descartados  os duplicados removidos pela deduplicação
+ *  @param leitura      {semData, abas} — o que a leitura do arquivo não aproveitou */
+function listarTopicos(aud, descartados, leitura){
+  const t = [];
+  const ctx = r => ({op:r.op, date:r.date, empresa:r.empresa, cargo:r.cargo,
+                     escala:r.escala, solicitante:r.solicitante});
+  const vazio = {empresa:"", cargo:"", escala:"", solicitante:""};
+
+  /* Vem primeiro por ser o mais amplo: uma aba fora derruba a filial inteira,
+     e nenhum outro tópico consegue apontar o que nem foi lido. */
+  ((leitura && leitura.abas) || []).forEach(a => t.push(Object.assign({
+    topico: "Aba não lida", gravidade: GRAVIDADE.ALTA,
+    nome: "", groot: "", op: a.op, date: "",
+    diagnostico: a.motivo + " Nenhum registro desta filial entrou na extração, "
+               + "em nenhum período.",
+    acao: "Conferir o nome da aba e o cabeçalho no arquivo de origem, e extrair de novo."
+  }, vazio)));
+
+  ((leitura && leitura.semData) || []).forEach(l => t.push(Object.assign({
+    topico: "Linha sem data legível", gravidade: GRAVIDADE.MEDIA,
+    nome: l.nome, groot: l.groot, op: l.op, date: "",
+    diagnostico: "A linha " + l.linha + " da aba tem conteúdo, mas a data não pôde ser lida"
+               + (l.valor ? ' (a célula trazia "' + l.valor + '")' : " (célula vazia)")
+               + ". Ficou fora da extração inteira — não é filtro de período.",
+    acao: "Corrigir a data na origem. Enquanto isso, esta diária não é contada em lugar nenhum."
+  }, vazio)));
+
+  aud.semGroot.forEach(r => t.push(Object.assign({
+    topico: "Sem identificador", gravidade: GRAVIDADE.MEDIA,
+    nome: r.nome, groot: r.grootBruto,
+    diagnostico: "O registro existe, o GROOT não. Sem identificador não há pessoa-dia: "
+               + "este registro ficou fora da deduplicação e não pode ser confrontado com nenhum outro.",
+    acao: "Preencher o GROOT ID na planilha de origem."
+  }, ctx(r))));
+
+  aud.nomesQuebrados.forEach(r => t.push(Object.assign({
+    topico: "Nome quebrado", gravidade: GRAVIDADE.MEDIA,
+    nome: r.nome, groot: r.grootBruto,
+    diagnostico: r.problemasNome.map(p => NOME_PROBLEMA_TXT[p]).join(" "),
+    acao: "Corrigir o nome na origem — sem ele não dá para conferir de quem é o registro."
+  }, ctx(r))));
+
+  aud.mesmoNome.forEach(g => g.variantes.forEach(v => v.ocorrencias.forEach(o => t.push(Object.assign({
+    topico: "Mesmo nome, GROOTs diferentes",
+    gravidade: g.motivo === AUDIT_MOTIVO.IDS ? GRAVIDADE.MEDIA : GRAVIDADE.BAIXA,
+    nome: g.rotulo, groot: v.rotulo,
+    diagnostico: g.explicacao,
+    acao: g.motivo === AUDIT_MOTIVO.IDS
+      ? "Conferir se é homônimo ou cadastro duplicado. Se for a mesma pessoa, está sendo contada em dobro."
+      : "Padronizar a grafia do identificador na origem."
+  }, ctx(o))))));
+
+  aud.mesmoGroot.forEach(g => g.variantes.forEach(v => v.ocorrencias.forEach(o => t.push(Object.assign({
+    topico: "Mesmo GROOT, nomes diferentes",
+    gravidade: g.motivo === AUDIT_MOTIVO.NOMES ? GRAVIDADE.ALTA : GRAVIDADE.BAIXA,
+    nome: v.rotulo, groot: g.rotulo,
+    diagnostico: g.explicacao,
+    acao: g.motivo === AUDIT_MOTIVO.NOMES
+      ? "Conferir ANTES de usar o resultado: a deduplicação uniu estes registros."
+      : "Padronizar a grafia do nome na origem."
+  }, ctx(o))))));
+
+  (descartados || []).forEach(d => t.push({
+    topico: "Duplicado removido", gravidade: GRAVIDADE.INFO,
+    nome: d.nome, groot: d.groot, op: d.descartadaDe, date: d.data,
+    empresa:"", cargo:"", escala:"", solicitante:"",
+    diagnostico: "Mesma pessoa-dia já contada em " + d.mantidaEm
+               + ". Ficou a primeira ocorrência encontrada.",
+    acao: "Nenhuma — remoção esperada. Confira só se as operações estiverem erradas."
+  }));
+
+  t.sort((a, b) => GRAVIDADE_ORDEM[a.gravidade] - GRAVIDADE_ORDEM[b.gravidade]
+                || String(a.topico).localeCompare(String(b.topico))
+                || String(a.date).localeCompare(String(b.date)));
+  return t;
+}
+
+/** Os balões: um por tópico presente, na ordem de quem precisa de atenção antes. */
+function resumirTopicos(topicos){
+  const m = new Map();
+  topicos.forEach(t => {
+    if (!m.has(t.topico)) m.set(t.topico, {topico:t.topico, gravidade:t.gravidade, total:0});
+    const b = m.get(t.topico);
+    b.total++;
+    if (GRAVIDADE_ORDEM[t.gravidade] < GRAVIDADE_ORDEM[b.gravidade]) b.gravidade = t.gravidade;
+  });
+  return Array.from(m.values())
+    .sort((a, b) => GRAVIDADE_ORDEM[a.gravidade] - GRAVIDADE_ORDEM[b.gravidade] || b.total - a.total);
+}
+
 if (typeof module !== "undefined" && module.exports){
-  module.exports = {AUDIT_MOTIVO, AUDIT_MOTIVO_TXT, auditarIdentidade,
-                    relacaoEntreGroots, relacaoEntreNomes};
+  module.exports = {AUDIT_MOTIVO, AUDIT_MOTIVO_TXT, NOME_PROBLEMA, NOME_PROBLEMA_TXT,
+                    GRAVIDADE, GRAVIDADE_TXT, auditarIdentidade, problemasDoNome, nomeQuebrado,
+                    listarTopicos, resumirTopicos, relacaoEntreGroots, relacaoEntreNomes};
 }

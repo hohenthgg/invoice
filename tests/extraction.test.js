@@ -10,9 +10,11 @@
 "use strict";
 const { load } = require("./load");
 const ctx = load(["identity.js", "extraction-dedup.js", "extraction-audit.js"],
-                 ["DEDUP_MODOS", "AUDIT_MOTIVO"]);
+                 ["DEDUP_MODOS", "AUDIT_MOTIVO", "NOME_PROBLEMA", "GRAVIDADE"]);
 const { normalizeGroot, hasGroot, normalizeNome, normalizeDateKey, personDayKey,
-        deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO } = ctx;
+        deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO,
+        problemasDoNome, nomeQuebrado, NOME_PROBLEMA,
+        listarTopicos, resumirTopicos, GRAVIDADE } = ctx;
 
 let pass = 0, fail = 0;
 function check(ok, label, extra) {
@@ -309,6 +311,106 @@ console.log("\n  A auditoria não muda nada");
   const d = dedup({ SVC: rows });
   check(totalMantido(d) === 2,
         "…e a deduplicação segue tratando GROOTs distintos como pessoas distintas");
+}
+
+/* ================================================================
+   Nome quebrado — a célula não está vazia, mas também não identifica
+   ninguém. É o defeito que passa despercebido justamente por parecer
+   preenchido. */
+console.log("\nNome quebrado");
+const temProblema = (n, p) => problemasDoNome(n).includes(p);
+
+check(temProblema("", NOME_PROBLEMA.VAZIO) && temProblema("   ", NOME_PROBLEMA.VAZIO),
+      "célula vazia ou só com espaços");
+check(temProblema("#N/D", NOME_PROBLEMA.ERRO_PLANILHA)
+      && temProblema("#REF!", NOME_PROBLEMA.ERRO_PLANILHA)
+      && temProblema("#VALOR!", NOME_PROBLEMA.ERRO_PLANILHA),
+      "erro do Excel no lugar do nome (#N/D, #REF!, #VALOR!)");
+check(temProblema("JoÃ£o Silva", NOME_PROBLEMA.CODIFICACAO),
+      "acentuação corrompida", JSON.stringify(problemasDoNome("JoÃ£o Silva")));
+check(temProblema("A DEFINIR", NOME_PROBLEMA.PLACEHOLDER)
+      && temProblema("sem nome", NOME_PROBLEMA.PLACEHOLDER)
+      && temProblema("XXXXX", NOME_PROBLEMA.PLACEHOLDER),
+      "texto genérico no lugar do nome");
+check(temProblema("JOAO SILVA 2", NOME_PROBLEMA.DIGITOS), "números no meio do nome");
+check(temProblema("AB", NOME_PROBLEMA.CURTO), "curto demais");
+check(temProblema("AAAAA BBBB", NOME_PROBLEMA.REPETICAO), "caractere repetido em sequência");
+check(problemasDoNome("JOSÉ CARLOS DA SILVA").length === 0, "nome normal não tem problema nenhum",
+      JSON.stringify(problemasDoNome("JOSÉ CARLOS DA SILVA")));
+check(problemasDoNome("D'ÁVILA SOUZA-LIMA").length === 0,
+      "apóstrofo e hífen são parte de nome de verdade",
+      JSON.stringify(problemasDoNome("D'ÁVILA SOUZA-LIMA")));
+check(problemasDoNome("MARIA").join() === NOME_PROBLEMA.UM_TOKEN && !nomeQuebrado("MARIA"),
+      "nome de uma palavra só é aviso, não defeito — existe gente cadastrada assim");
+check(nomeQuebrado("#N/D") && nomeQuebrado("") && !nomeQuebrado("ANA SOUZA"),
+      "só o que impede identificar a pessoa conta como quebrado");
+{
+  const r = auditar({ SVC: [reg("123456", "2026-08-10", "ANA SOUZA")],
+                      XD:  [reg("123456", "2026-08-11", "#N/D")] });
+  check(r.nomesQuebrados.length === 1 && r.mesmoGroot.length === 0,
+        "nome quebrado sai da comparação: '#N/D' não é 'outra pessoa' sob o mesmo GROOT",
+        `quebrados=${r.nomesQuebrados.length} mesmoGroot=${r.mesmoGroot.length}`);
+  check(r.nomesQuebrados[0].problemasNome.includes(NOME_PROBLEMA.ERRO_PLANILHA),
+        "…e o motivo fica registrado no próprio registro");
+}
+
+/* ================================================================
+   Tópicos — o formato único que alimenta os balões da tela e as abas
+   do Excel. Se divergirem, a tela e a planilha contam histórias
+   diferentes do mesmo arquivo. */
+console.log("\nTópicos");
+{
+  const r = auditar({
+    SVC: [reg("", "2026-08-10", "FULANO SEM ID"),
+          reg("555001", "2026-08-11", "RENATO GOMES"),
+          reg("555001", "2026-08-12", "LUCIANA DIAS"),
+          reg("777002", "2026-08-13", "#N/D")]
+  });
+  const desc = [{groot:"123456", data:"2026-08-14", nome:"ANA SOUZA",
+                 mantidaEm:"SVC", descartadaDe:"XD"}];
+  const leitura = {abas:[{op:"Varginha", motivo:"Aba não encontrada no arquivo."}],
+                   semData:[{op:"SVC", linha:42, valor:"31/02", nome:"BENEDITA LIMA", groot:"9"}]};
+  const t = listarTopicos(r, desc, leitura);
+
+  /* 7 = 1 aba + 1 linha sem data + 1 nome quebrado + 1 sem identificador
+         + 2 ocorrências do conflito de GROOT + 1 duplicado.
+     O conflito rende UMA LINHA POR OCORRÊNCIA, não uma por caso: na planilha
+     é preciso enxergar cada registro afetado, não só que o caso existe. */
+  check(t.length === 7, "uma linha por registro afetado, sem perder nem duplicar nenhum",
+        `${t.length}: ` + t.map(x => x.topico).join(" | "));
+  check(t.filter(x => x.topico === "Mesmo GROOT, nomes diferentes")
+         .map(x => x.nome).sort().join("|") === "LUCIANA DIAS|RENATO GOMES",
+        "…e as duas pessoas do conflito aparecem nominalmente");
+  check(t.every(x => x.topico && x.gravidade && x.diagnostico && x.acao),
+        "toda linha diz o que é, quão grave é, o que aconteceu e o que fazer");
+  check(t[0].topico === "Aba não lida" && t[0].gravidade === GRAVIDADE.ALTA,
+        "a aba não lida vem primeiro — derruba a filial inteira e nenhum outro tópico a enxerga",
+        t[0].topico);
+  check(t.findIndex(x => x.topico === "Mesmo GROOT, nomes diferentes") <
+        t.findIndex(x => x.topico === "Duplicado removido"),
+        "o grave vem antes do informativo");
+
+  const b = resumirTopicos(t);
+  check(b.reduce((a, x) => a + x.total, 0) === t.length,
+        "os balões somam exatamente os problemas — nenhum fica fora da contagem",
+        JSON.stringify(b.map(x => x.topico + ":" + x.total)));
+  check(b[0].gravidade === GRAVIDADE.ALTA && b[b.length-1].gravidade === GRAVIDADE.INFO,
+        "…e vêm ordenados de quem precisa de atenção antes para quem é só informativo");
+  check(new Set(b.map(x => x.topico)).size === b.length, "um balão por tópico, sem repetição");
+
+  const semData = t.find(x => x.topico === "Linha sem data legível");
+  check(/linha 42/.test(semData.diagnostico) && /31\/02/.test(semData.diagnostico)
+        && semData.nome === "BENEDITA LIMA",
+        "a linha sem data legível diz qual linha é, o que estava na célula e de quem era",
+        semData.diagnostico);
+}
+{
+  // com a deduplicação desligada não há duplicados, mas o resto continua
+  const r = auditar({ SVC: [reg("", "2026-08-10", "FULANO")] });
+  const t = listarTopicos(r, [], null);
+  check(t.length === 1 && t[0].topico === "Sem identificador",
+        "sem duplicados e sem problemas de leitura, sobra só o que a auditoria achou");
+  check(resumirTopicos([]).length === 0, "nenhum problema, nenhum balão");
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
