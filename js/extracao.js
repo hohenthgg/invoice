@@ -25,40 +25,53 @@
 
      Agora cada coluna procura o próprio nome. `nomes` são grafias
      aceitas, em ordem de preferência; a resolução é feita das mais
-     específicas para as mais genéricas, para "ESCALA HORÁRIO" não ser
-     abocanhado por "ESCALA".
+     específicas para as mais genéricas, para "ESCALA NATURAL" não ser
+     abocanhada por "ESCALA".
 
-     CHAVES_SAIDA marca o que a planilha sempre carrega, mesmo vazio:
-     sem essas colunas o registro não identifica ninguém, e escondê-las
-     esconderia o problema. As demais somem quando não têm nada.
-
-     `horario` existe porque Divinópolis já traz o horário na origem
-     (coluna "ESCALA NATURAL"). Quando o arquivo tem, vale o arquivo;
-     quando não tem, vale o padrão da operação. O cabeçalho de saída é o
-     mesmo nos dois casos, para as seis abas ficarem iguais. */
+     `horario` é lido à parte porque Divinópolis já traz o horário na
+     origem, sob "ESCALA NATURAL". Quando o arquivo tem, vale o arquivo;
+     quando não tem, vale o padrão da operação. */
   const COLUNAS_SIGO = [
-    {k:"horario",     titulo:"ESCALA\nHORÁRIO",     nomes:["escala horario","escala natural","horario","horario escala","turno"]},
-    {k:"mes",         titulo:"MÊS\nSOLICITAÇÃO",    nomes:["mes solicitacao","mes da solicitacao","mes"]},
-    {k:"data",        titulo:"DATA\nSOLICITAÇÃO",   nomes:["data solicitacao","data da solicitacao","data"]},
-    {k:"solicitante", titulo:"SOLICITANTE",         nomes:["solicitante","solicitado por"]},
-    {k:"empresa",     titulo:"EMPRESA\nDIARISTA",   nomes:["empresa diarista","empresa","fornecedor"]},
-    {k:"groot",       titulo:"GROOT ID",            nomes:["groot id","id groot","groot","id"]},
-    {k:"nome",        titulo:"NOME",                nomes:["nome","nome completo","colaborador"]},
-    {k:"cargo",       titulo:"CARGO",               nomes:["cargo","funcao","função"]},
-    {k:"escala",      titulo:"ESCALA",              nomes:["escala"]}
+    {k:"horario",     nomes:["escala horario","escala natural","horario","horario escala","turno"]},
+    {k:"mes",         nomes:["mes solicitacao","mes da solicitacao","mes"]},
+    {k:"data",        nomes:["data solicitacao","data da solicitacao","data"]},
+    {k:"solicitante", nomes:["solicitante","solicitado por"]},
+    {k:"empresa",     nomes:["empresa diarista","empresa","fornecedor"]},
+    {k:"groot",       nomes:["groot id","id groot","groot","id"]},
+    {k:"nome",        nomes:["nome","nome completo","colaborador"]},
+    {k:"cargo",       nomes:["cargo","funcao","função"]},
+    {k:"escala",      nomes:["escala"]}
   ];
-  // a ordem em que a saída é escrita (a de leitura acima é por especificidade)
-  const ORDEM_SAIDA = ["mes","data","solicitante","empresa","groot","nome","cargo","escala","horario"];
-  const COL = k => COLUNAS_SIGO.find(c => c.k === k);
-  const CHAVES_SAIDA = new Set(["mes","data","groot","nome","horario"]);
+
+  /* ================================================================
+     O MODELO DA PLANILHA ENTREGUE
+     ----------------------------------------------------------------
+     Copiado de "Modelo diaristas.xlsx": oito colunas, e a ESCALA é o
+     HORÁRIO (`03:00 07:00 08:00 11:20`), não o 6x1 do SIGO. Larguras,
+     fontes, tons de cinza do cabeçalho e alinhamentos vêm de lá, célula
+     a célula — a ideia é que o arquivo gerado passe por um do modelo.
+
+     `sempre` marca o que a planilha carrega mesmo vazio: sem essas
+     colunas o registro não identifica ninguém, e escondê-las esconderia
+     o problema. As demais somem quando não têm um único valor. */
+  const CINZA_ESCURO = {theme:1, tint:0.249977111117893};
+  const CINZA_CLARO  = {theme:1, tint:0.499984740745262};
+  const MODELO = [
+    {k:"mes",         titulo:"MÊS\nSOLICITAÇÃO",  largura:12.09, fundo:CINZA_ESCURO, sempre:true},
+    {k:"data",        titulo:"DATA\nSOLICITAÇÃO", largura:16.36, fundo:CINZA_CLARO,  sempre:true, fmt:"mm-dd-yy"},
+    {k:"solicitante", titulo:"SOLICITANTE",       largura:8.36,  fundo:CINZA_CLARO,  tituloAl:"center", al:"center"},
+    {k:"empresa",     titulo:"EMPRESA DIARISTA",  largura:8.45,  fundo:CINZA_CLARO,  tituloAl:"center", al:"center"},
+    {k:"groot",       titulo:"GROOT ID",          largura:8.82,  fundo:CINZA_CLARO,  tituloAl:"left",   al:"center", sempre:true},
+    {k:"nome",        titulo:"NOME",              largura:42.63, fundo:CINZA_CLARO,  sempre:true},
+    {k:"cargo",       titulo:"CARGO",             largura:20.82, fundo:CINZA_ESCURO},
+    {k:"escala",      titulo:"ESCALA",            largura:17,    fundo:CINZA_CLARO,  al:"center", horario:true, sempre:true}
+  ];
+  const ORDEM_SAIDA = MODELO.map(c => c.k);
+  const COL = k => MODELO.find(c => c.k === k);
   const MESES = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 
-  // Estética da planilha original (cabeçalho escuro, texto branco, bordas finas)
-  const STY = {
-    headerFill: "FF141414",
-    headerFont: "FFFFFFFF",
-    border: "FF000000"
-  };
+  const FONTE = "Aptos Narrow";
+  const STY = {border: "FF000000"};
 
   const $ = id => document.getElementById(id);
   // conteúdo vindo da planilha vai para o HTML: escapar é obrigatório
@@ -80,7 +93,8 @@
   function fmtBR(key){ const [y,m,d]=key.split("-"); return d+"/"+m+"/"+y; }
   // chave inesperada não deve virar "undefined/undefined/" na tela
   function dataBR(key){ return /^\d{4}-\d{2}-\d{2}$/.test(String(key||"")) ? fmtBR(key) : (key||"—"); }
-  function mesLabel(key){ const [y,m]=key.split("-"); return MESES[+m-1]+"/"+y.slice(2); }
+  // "junho-26", como no modelo — com hífen, não com barra
+  function mesLabel(key){ const [y,m]=key.split("-"); return MESES[+m-1]+"-"+y.slice(2); }
   function keyToUTCDate(key){ const [y,m,d]=key.split("-").map(Number); return new Date(Date.UTC(y,m-1,d)); }
   function excelSerialToKey(n){ return dateKey(new Date(Math.round((n-25569)*86400*1000))); }
   function solicKind(v){
@@ -512,14 +526,11 @@
     return {top:s, left:s, bottom:s, right:s};
   }
 
-  const LARGURA = {mes:15, data:15, solicitante:14, empresa:13, groot:14,
-                   nome:38, cargo:14, escala:10, horario:24};
-
   /* Monta os valores de saída de uma operação e decide o que vale a pena
      escrever. Duas regras, ambas sobre não empurrar ruído para quem lê:
 
-       · coluna 100% vazia não vai para a planilha (a ESCALA de Patos de
-         Minas eram 169 células em branco com um título em cima);
+       · coluna sem um único valor não vai para a planilha (a ESCALA de
+         Patos de Minas eram 169 células em branco com um título em cima);
        · célula vazia numa coluna que só tem UM valor no arquivo inteiro é
          preenchida com ele — 112 dos 169 CARGO de Patos estavam vazios e
          os 57 preenchidos diziam todos "Diarista".
@@ -537,9 +548,9 @@
       groot: grootParaSaida(r.id),
       nome: r.nome,
       cargo: r.cargo,
-      escala: r.escala,
-      // o arquivo manda quando traz o horário; senão, o padrão da operação
-      horario: r.horario || padrao
+      /* No modelo, ESCALA é o HORÁRIO — não o 6x1 do SIGO. O arquivo manda
+         quando traz o horário (Divinópolis); senão vale o padrão da operação. */
+      escala: r.horario || padrao
     }));
 
     const preenchidas = [];
@@ -549,54 +560,56 @@
       if(distintos.length === 1 && valores.some(v => v === "")){
         const n = valores.filter(v => v === "").length;
         dados.forEach(d => { if(String(d[k]||"").trim() === "") d[k] = distintos[0]; });
-        preenchidas.push({coluna:COL(k).titulo.replace("\n"," "), valor:distintos[0], celulas:n});
+        preenchidas.push({coluna:tituloDe(k), valor:distintos[0], celulas:n});
       }
     });
 
-    const colunas = ORDEM_SAIDA.filter(k => CHAVES_SAIDA.has(k)
+    const colunas = ORDEM_SAIDA.filter(k => COL(k).sempre
       || dados.some(d => String(d[k] == null ? "" : d[k]).trim() !== ""));
     return {dados, colunas, preenchidas,
-            vazias: ORDEM_SAIDA.filter(k => colunas.indexOf(k) < 0).map(k => COL(k).titulo.replace("\n"," "))};
+            vazias: ORDEM_SAIDA.filter(k => colunas.indexOf(k) < 0).map(tituloDe)};
   }
+  const tituloDe = k => COL(k).titulo.replace("\n", " ");
 
+  /* Escreve a aba no formato de "Modelo diaristas.xlsx": mesmas larguras,
+     mesmos dois tons de cinza no cabeçalho, mesma fonte, mesmos
+     alinhamentos. Sem congelar linha e sem autofiltro, porque o modelo não
+     tem — o arquivo gerado tem que passar por um do modelo. */
   function addStyledSheet(wbx, op){
     const ws = wbx.addWorksheet(op.substring(0,31), {
-      views: [{state:"frozen", ySplit:1}]
+      views: [{state:"normal", showGridLines:true}]
     });
     const saida = montarSaida(op, results[op].rows);
-    const cols = saida.colunas;
-    ws.columns = cols.map(k => ({width:LARGURA[k]}));
+    const cols = saida.colunas.map(COL);
+    ws.columns = cols.map(c => ({width:c.largura}));
 
-    // Cabeçalho: fundo escuro, texto branco, negrito, centralizado (padrão SIGO)
-    const head = ws.addRow(cols.map(k => COL(k).titulo));
-    head.height = 32;
-    head.eachCell(cell => {
-      cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:STY.headerFill}};
-      cell.font = {bold:true, color:{argb:STY.headerFont}, size:11, name:"Calibri"};
-      cell.alignment = {horizontal:"center", vertical:"middle", wrapText:true};
+    const head = ws.addRow(cols.map(c => c.titulo));
+    head.height = 39;
+    head.eachCell((cell, i) => {
+      const c = cols[i-1];
+      cell.fill = {type:"pattern", pattern:"solid", fgColor:c.fundo};
+      cell.font = {bold:true, size:10, color:{theme:0}, name:FONTE, family:2, scheme:"minor"};
+      cell.alignment = {horizontal:c.tituloAl, vertical:"middle", wrapText:true};
       cell.border = thinBorder();
     });
 
-    const direita = new Set(["mes","data","groot"]);
-    const centro  = new Set(["cargo","escala","horario"]);
     for(const d of saida.dados){
-      const row = ws.addRow(cols.map(k => {
-        // GROOT numérico entra como número, como na origem; alfanumérico fica texto
-        if(k === "groot") return (d.groot !== "" && !isNaN(Number(d.groot))) ? Number(d.groot) : d.groot;
-        return d[k];
+      const row = ws.addRow(cols.map(c => {
+        // GROOT numérico entra como número, como no modelo; alfanumérico fica texto
+        if(c.k === "groot") return (d.groot !== "" && !isNaN(Number(d.groot))) ? Number(d.groot) : d.groot;
+        return d[c.k];
       }));
       row.eachCell({includeEmpty:true}, (cell, i) => {
-        const k = cols[i-1];
+        const c = cols[i-1];
         cell.border = thinBorder();
-        cell.font = {size:11, name: k === "horario" ? "Consolas" : "Calibri"};
-        if(k === "data") cell.numFmt = "dd/mm/yyyy";
-        cell.alignment = {vertical:"middle",
-          horizontal: direita.has(k) ? "right" : (centro.has(k) ? "center" : "left")};
+        cell.font = c.horario
+          ? {size:9, color:{theme:1}, name:"Calibri", family:2}
+          : {size:11, color:{theme:1}, name:FONTE, family:2, scheme:"minor"};
+        if(c.fmt) cell.numFmt = c.fmt;
+        if(c.horario) cell.fill = {type:"pattern", pattern:"solid", fgColor:{argb:"FFFFFFFF"}};
+        if(c.al) cell.alignment = c.horario ? {horizontal:c.al, vertical:"middle"} : {horizontal:c.al};
       });
     }
-
-    // Filtros no cabeçalho, como na planilha original
-    ws.autoFilter = {from:{row:1, column:1}, to:{row:1, column:cols.length}};
     return ws;
   }
 
