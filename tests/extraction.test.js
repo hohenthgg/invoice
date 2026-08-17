@@ -9,12 +9,14 @@
    produzindo dupla contagem de diarista e compensação indevida de ABS. */
 "use strict";
 const { load } = require("./load");
-const ctx = load(["identity.js", "extraction-dedup.js", "extraction-audit.js"],
-                 ["DEDUP_MODOS", "AUDIT_MOTIVO", "NOME_PROBLEMA", "GRAVIDADE"]);
+const ctx = load(["identity.js", "config.js", "extraction-dedup.js", "extraction-audit.js"],
+                 ["DEDUP_MODOS", "AUDIT_MOTIVO", "NOME_PROBLEMA", "GRAVIDADE",
+                  "ESCALA_HORARIO_PADRAO"]);
 const { normalizeGroot, hasGroot, normalizeNome, normalizeDateKey, personDayKey,
         deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO,
         problemasDoNome, nomeQuebrado, NOME_PROBLEMA,
-        listarTopicos, resumirTopicos, GRAVIDADE } = ctx;
+        listarTopicos, resumirTopicos, GRAVIDADE,
+        ESCALA_HORARIO_PADRAO, escalaHorarioDe } = ctx;
 
 let pass = 0, fail = 0;
 function check(ok, label, extra) {
@@ -411,6 +413,42 @@ console.log("\nTópicos");
   check(t.length === 1 && t[0].topico === "Sem identificador",
         "sem duplicados e sem problemas de leitura, sobra só o que a auditoria achou");
   check(resumirTopicos([]).length === 0, "nenhum problema, nenhum balão");
+}
+
+/* ================================================================
+   Escala horário — o SIGO não informa horário. Ele vem do padrão da
+   operação, levantado na aba DIARISTAS das faturas 3PL de julho/2026. */
+console.log("\nEscala horário por operação");
+const OPS = ["Pouso Alegre SVC","Pouso Alegre XD","Poços de Caldas",
+             "Varginha","Divinópolis","Patos de Minas"];
+check(OPS.every(op => op in ESCALA_HORARIO_PADRAO),
+      "toda operação da extração tem entrada na tabela — nenhuma cai no esquecimento",
+      OPS.filter(op => !(op in ESCALA_HORARIO_PADRAO)).join());
+check(escalaHorarioDe("Pouso Alegre SVC") === "03:00 07:00 08:00 12:48"
+      && escalaHorarioDe("Pouso Alegre XD") === "13:00 17:00 18:00 22:45",
+      "as duas unidades de Pouso Alegre têm horários diferentes (SMG3 madrugada, BRXMG3 tarde)",
+      escalaHorarioDe("Pouso Alegre XD"));
+check(escalaHorarioDe("Poços de Caldas") === "03:00 07:00 08:00 12:48"
+      && escalaHorarioDe("Divinópolis") === "01:30 05:00 06:00 09:50"
+      && escalaHorarioDe("Patos de Minas") === "00:00 05:00 06:00 09:20",
+      "…e cada uma das demais tem o horário da sua fatura");
+check(escalaHorarioDe("Varginha") === "",
+      "Varginha fica em branco: sem fatura da unidade, chutar o horário de outra "
+      + "filial seria pior do que a lacuna");
+check(escalaHorarioDe("Filial Inexistente") === "",
+      "operação desconhecida não inventa horário");
+check(OPS.filter(op => escalaHorarioDe(op))
+        .every(op => /^\d{2}:\d{2}( \d{2}:\d{2}){3}$/.test(escalaHorarioDe(op))),
+      "todos no formato da fatura: entrada, início e fim do intervalo, saída");
+{
+  const r = auditar({ SVC: [reg("1", "2026-08-10", "ANA SOUZA")] });
+  const t = listarTopicos(r, [], null, [{op:"Varginha", registros:12}]);
+  check(t.length === 1 && t[0].topico === "Sem escala horário"
+        && t[0].op === "Varginha" && /12 registros/.test(t[0].diagnostico),
+        "a filial sem horário vira tópico de revisão, com quantos registros ficam em branco",
+        JSON.stringify(t[0] && [t[0].topico, t[0].op]));
+  check(listarTopicos(r, [], null, []).length === 0,
+        "…e não aparece quando todas as filiais têm horário");
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
