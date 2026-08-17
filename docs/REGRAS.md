@@ -218,6 +218,25 @@ seria ruído.
 Cada apontamento carrega um nível de confiança — **alta**, **média** ou
 **revisão necessária** — acompanhado da razão que o justifica.
 
+### Identificador serve para achar, não para calcular
+
+Quem define o ajuste devido são as **datas**. `GROOT ID` e matrícula servem para
+**achar a pessoa na fatura seguinte**. Confundir as duas coisas custava caro: o
+motor de projeção exige os dois identificadores e, sem eles, devolve erro —
+descartando um ajuste que era perfeitamente calculável.
+
+Na conciliação isso passa a ser tratado por partes:
+
+| Linha na fatura de origem | O que acontece |
+|---|---|
+| Tem GROOT **ou** matrícula, falta o outro | Rastreável: ajuste calculado e conciliado normalmente |
+| Não tem nenhum dos dois, mas tem ajuste devido | Status **Sem identificador**: o ajuste é mostrado, e o texto diz que falta a chave de busca — não o dado do cálculo |
+| Não tem nenhum dos dois e não tem ajuste devido | Nada é dito — não há o que conferir |
+| Datas ilegíveis | **Revisão manual**: sem data não há como saber se havia ajuste |
+
+Nome nunca preenche essa lacuna: homônimo existe, e unir registros por nome
+produziria conciliação falsa.
+
 ### O que não vira apontamento
 
 Fatura real tem rodapé, subtotal e linha de formatação. Uma linha **sem nome, sem
