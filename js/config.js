@@ -24,31 +24,35 @@ const COLS = {
 
        entrada · início do intervalo · fim do intervalo · saída
 
-   e cada operação usa um único horário para diarista. Levantado nas
-   faturas de Julho/2026 (uma por unidade):
+   e cada operação tem um horário dominante para diarista. Levantado nas
+   seis faturas de Julho/2026, uma por unidade:
 
-     unidade   operação            escala horário            turno (BASE TURNO)   diaristas
+     unidade   operação            escala horário            turno (BASE TURNO)   no padrão
      SMG3      Pouso Alegre SVC    03:00 07:00 08:00 12:48   5 - Mista - 3º T     473 / 473
      BRXMG3    Pouso Alegre XD     13:00 17:00 18:00 22:45   11 - Mista - 3º T    110 / 110
      SMG5      Poços de Caldas     03:00 07:00 08:00 12:48   5 - Mista - 3º T      58 / 58
+     SMG9      Varginha            03:00 07:00 08:00 11:20   4 - Mista - 3º T     108 / 138
      SMG10     Divinópolis         01:30 05:00 06:00 09:50   65 - Mista - 3º T     31 / 37
      SMG11     Patos de Minas      00:00 05:00 06:00 09:20   54 - Mista - 3º T    109 / 109
 
-   É um PADRÃO, não uma verdade de cada linha: em Divinópolis, 6 dos 37
-   diaristas de julho saíram em outros horários (`05:30 12:00 13:00 15:18`
-   e `11:00 14:00 15:00 20:00`, ambos "1º e 2º Turno"). Por isso a coluna
-   é preenchida como sugestão e a exceção continua sendo conferida na
-   fatura — o SIGO não informa horário.
+   É um PADRÃO, não uma verdade de cada linha. Quatro unidades são
+   uniformes; duas não:
 
-   Varginha não tem valor porque não veio fatura da unidade. Fica em
-   branco de propósito: chutar o horário de outra filial seria pior do
-   que a lacuna, que ao menos se enxerga.
+     Varginha     30 de 138 em `10:00 15:00 16:00 19:48` ("1º e 2º Turno")
+     Divinópolis   6 de  37 em `05:30 12:00 13:00 15:18` e
+                              `11:00 14:00 15:00 20:00` (idem)
+
+   A exceção acompanha em parte o cargo "Diarista Dom. e Feriados", mas
+   NÃO dá para derivar dele: em Pouso Alegre e Patos de Minas esse mesmo
+   cargo usa o horário normal da unidade. Como o SIGO não informa
+   horário, a coluna sai com o padrão da operação e a exceção continua
+   sendo conferida na fatura.
    ================================================================ */
 const ESCALA_HORARIO_PADRAO = {
   "Pouso Alegre SVC": "03:00 07:00 08:00 12:48",
   "Pouso Alegre XD":  "13:00 17:00 18:00 22:45",
   "Poços de Caldas":  "03:00 07:00 08:00 12:48",
-  "Varginha":         "",
+  "Varginha":         "03:00 07:00 08:00 11:20",
   "Divinópolis":      "01:30 05:00 06:00 09:50",
   "Patos de Minas":   "00:00 05:00 06:00 09:20"
 };
