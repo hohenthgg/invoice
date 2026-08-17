@@ -92,14 +92,22 @@ colchetes e barras (`{2499441}` → `2499441`), o que **também corrige a
 deduplicação**: o embrulhado e o limpo passam a ser a mesma pessoa. Todos esses
 ajustes viram tópico no painel de revisão — nada é mexido em silêncio.
 
-A saída leva uma coluna a mais que a origem: **ESCALA HORÁRIO**
-(`03:00 07:00 08:00 12:48` — entrada, início e fim do intervalo, saída). Ela não
-existe no SIGO; é o **padrão de diarista da operação**, levantado na aba
-`DIARISTAS` da fatura 3PL, onde cada unidade tem um horário dominante. A tabela
-está em `ESCALA_HORARIO_PADRAO` (`js/config.js`), com a fonte de cada valor
-documentada — as seis operações estão levantadas nas faturas de julho/2026. Quando
-a origem já traz o horário (Divinópolis, coluna `ESCALA NATURAL`), **vale o
-arquivo**; o padrão só entra quando o arquivo não diz nada.
+O formato de saída é o de `Modelo diaristas.xlsx` — oito colunas, copiadas dele
+célula a célula (larguras, os dois tons de cinza do cabeçalho, fonte Aptos Narrow,
+alinhamentos, sem congelar linha e sem autofiltro, porque o modelo não tem):
+
+`MÊS SOLICITAÇÃO` · `DATA SOLICITAÇÃO` · `SOLICITANTE` · `EMPRESA DIARISTA` ·
+`GROOT ID` · `NOME` · `CARGO` · `ESCALA`
+
+**No modelo, `ESCALA` é o HORÁRIO** (`03:00 07:00 08:00 12:48` — entrada, início e
+fim do intervalo, saída), não o `6x1`/`XD` do SIGO, que não tem lugar na entrega.
+O horário vem do **padrão de diarista da operação**, levantado na aba `DIARISTAS`
+da fatura 3PL, onde cada unidade tem um horário dominante. A tabela está em
+`ESCALA_HORARIO_PADRAO` (`js/config.js`), com a fonte de cada valor documentada —
+as seis operações estão levantadas nas faturas de julho/2026. Quando a origem já
+traz o horário (Divinópolis, coluna `ESCALA NATURAL`), **vale o arquivo**; o padrão
+só entra quando o arquivo não diz nada.
+
 É um padrão, não uma verdade linha a linha: quatro unidades são uniformes, mas
 Varginha teve 30 de 138 e Divinópolis 6 de 37 em outros horários. Operação sem
 levantamento sai **em branco** e vira tópico de revisão: chutar o horário de outra
