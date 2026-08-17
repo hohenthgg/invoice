@@ -46,14 +46,64 @@
 
 <!-- ======================= ABA 1 — CONCILIAÇÃO ======================= -->
 <div class="apppanel active" id="panel-conciliacao">
-  <div class="top">
-    <button id="btnImport" class="primary">Importar planilha</button>
-    <input type="file" id="fileInput" accept=".xlsx,.xls">
-    <span class="file-name" id="fileName"></span>
+
+  <!-- seletor de modo: projetar (uma fatura) × conciliar (duas faturas) -->
+  <div class="rc-modos" id="rc-modos">
+    <button class="rc-modo active" data-modo="projetar" onclick="Recon.setModo('projetar')">Projetar ajustes</button>
+    <button class="rc-modo" data-modo="conciliar" onclick="Recon.setModo('conciliar')">Conciliar duas faturas</button>
   </div>
 
-  <div id="result">
-    <div class="hint">Importe a planilha com a aba <b>Labor enviado ao MELI</b>.<br>A competência é detectada e os ajustes calculados automaticamente.</div>
+  <!-- ---------------- MODO 1 — projetar ajustes (inalterado) ---------------- -->
+  <div class="rc-painel active" id="modo-projetar">
+    <div class="top">
+      <button id="btnImport" class="primary">Importar planilha</button>
+      <input type="file" id="fileInput" accept=".xlsx,.xls">
+      <span class="file-name" id="fileName"></span>
+    </div>
+
+    <div id="result">
+      <div class="hint">Importe a planilha com a aba <b>Labor enviado ao MELI</b>.<br>A competência é detectada e os ajustes calculados automaticamente.</div>
+    </div>
+  </div>
+
+  <!-- ---------------- MODO 2 — conciliar duas faturas ---------------- -->
+  <div class="rc-painel" id="modo-conciliar">
+
+    <p class="rc-intro">Confronta duas competências consecutivas para responder se o ajuste retroativo
+      devido pela fatura de origem realmente apareceu na seguinte. <b>Nenhuma linha é alterada na importação</b> —
+      o app aponta, explica e sugere; a decisão de mudar alguma coisa é sua.</p>
+
+    <div class="rc-slots">
+      <div class="rc-slot">
+        <div class="rc-slot-head"><span class="rc-slot-n">N</span> Fatura origem</div>
+        <label class="rc-slot-drop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>Escolher arquivo .xlsx</span>
+          <input type="file" accept=".xlsx,.xls" onchange="Recon.carregar('origem',event)">
+        </label>
+        <div class="rc-slot-info" id="rc-origem-info">Nenhum arquivo carregado.</div>
+      </div>
+
+      <div class="rc-slot">
+        <div class="rc-slot-head"><span class="rc-slot-n">N+1</span> Fatura seguinte</div>
+        <label class="rc-slot-drop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>Escolher arquivo .xlsx</span>
+          <input type="file" accept=".xlsx,.xls" onchange="Recon.carregar('seguinte',event)">
+        </label>
+        <div class="rc-slot-info" id="rc-seguinte-info">Nenhum arquivo carregado.</div>
+      </div>
+    </div>
+
+    <div class="rc-seq" id="rc-seq">
+      <span class="rc-seq-msg">Carregue as duas faturas para conferir a sequência.</span>
+    </div>
+
+    <div class="rc-acoes-topo">
+      <button class="rc-btn primaria" id="rc-btnConciliar" onclick="Recon.conciliar()" disabled>Conciliar faturas</button>
+    </div>
+
+    <div id="rc-resultado" class="hidden"></div>
   </div>
 </div>
 
@@ -292,6 +342,8 @@
         <p>O faturamento congela um retrato do quadro no <b>dia 15</b>. Quem está ativo nesse dia entra pela competência inteira.</p>
         <p>O que acontece <b>depois</b> do congelamento — uma saída no dia 20, uma entrada no dia 22 — não cabe mais naquela competência e vira ajuste na seguinte: <b>desconto</b> para quem saiu, <b>acréscimo</b> para quem entrou.</p>
         <code class="formula">FTE = dias do ajuste ÷ dias da competência × % rateio</code>
+        <p class="modo-nota"><b>Projetar ajustes</b> — uma fatura: descobre o que <i>deverá</i> aparecer no mês seguinte.</p>
+        <p class="modo-nota"><b>Conciliar duas faturas</b> — duas competências consecutivas: confere se o ajuste devido <i>realmente</i> apareceu. Classifica cada caso como conciliado, ausente, parcial, rateio divergente, sinal incorreto, duplicado, retroativo sem origem ou revisão manual — e nada é alterado sem a sua decisão.</p>
       </div>
       <div class="concept c2">
         <span class="chiph">Aba 2 · Fusão de Linhas</span>
@@ -318,7 +370,7 @@
       <div class="step"><div class="n">03</div><b>Revisar</b><p>Cada linha traz o motivo. Desmarque o que não deve entrar.</p></div>
       <div class="step"><div class="n">04</div><b>Exportar</b><p>Baixe o Excel — formatação herdada do arquivo de origem.</p></div>
     </div>
-    <div class="keyline">O app <b>não decide sozinho</b>: ele calcula, explica o porquê de cada linha e deixa a confirmação com você. Regras completas em <code>docs/REGRAS.md</code>.</div>
+    <div class="keyline">O app <b>não decide sozinho</b>: ele detecta, aponta, explica e sugere — a decisão de alterar uma fatura é sua. Na conciliação entre duas competências isso é literal: toda linha nasce em “manter como está”, você vê a prévia antes de qualquer coisa, e o arquivo gerado é sempre uma cópia nova. Regras completas em <code>docs/REGRAS.md</code>.</div>
     <div class="privacy">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       Sem servidor, sem banco, sem upload: a planilha é lida e escrita dentro do navegador.
@@ -344,6 +396,10 @@
 <script src="js/ui.js"></script>
 <script src="js/export.js"></script>
 <script src="js/app.js"></script>
+<!-- Modo 2 da aba 1: conciliação entre duas faturas subsequentes -->
+<script src="js/reconciliation.js"></script>
+<script src="js/reconciliation-export.js"></script>
+<script src="js/reconciliation-ui.js"></script>
 <!-- Aba 2, isolada numa IIFE (ver js/fusao.js) -->
 <script src="js/fusao.js"></script>
 <!-- Aba 3, também isolada numa IIFE (ver js/extracao.js) -->
