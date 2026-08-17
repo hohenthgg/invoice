@@ -44,6 +44,19 @@ function normalizeGroot(v){
 /** Um GROOT que identifica alguém de fato. "0" e vazio não identificam. */
 function hasGroot(v){ const s=normalizeGroot(v); return s!=="" && s!=="0"; }
 
+/** Normaliza um nome para COMPARAÇÃO — nunca para identificação.
+ *
+ *  Nome não é chave: homônimo existe, e a mesma pessoa aparece grafada de
+ *  jeitos diferentes. Isto serve só para perguntar "estes dois textos são o
+ *  mesmo nome escrito diferente?" — acentos, pontuação e espaços repetidos
+ *  somem, o resto fica. */
+function normalizeNome(v){
+  return String(v===null||v===undefined?"":v)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/[^A-Za-z0-9 ]/g," ")
+    .replace(/\s+/g," ").trim().toUpperCase();
+}
+
 /** Normaliza uma data para a chave `AAAA-MM-DD`, venha ela como for:
  *  objeto Date, serial do Excel, DD/MM/AAAA, AAAA-MM-DD ou inteiro AAAAMMDD. */
 function normalizeDateKey(v){
@@ -89,5 +102,5 @@ function personDayKey(groot, data){
 }
 
 if(typeof module!=="undefined"&&module.exports){
-  module.exports={normalizeGroot, hasGroot, normalizeDateKey, personDayKey};
+  module.exports={normalizeGroot, hasGroot, normalizeNome, normalizeDateKey, personDayKey};
 }

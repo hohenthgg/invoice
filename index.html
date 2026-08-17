@@ -455,6 +455,8 @@
       <p>Parte do controle de diaristas — um arquivo único com uma aba por operação (Pouso Alegre SVC e XD, Poços de Caldas, Varginha, Divinópolis, Patos de Minas) — e recorta dele o que interessa.</p>
       <p>Filtra pela <b>data de solicitação</b>, opcionalmente por <b>solicitante</b> (ID Logistics ou MELI), e resolve os <b>Groot IDs repetidos</b> do jeito que você escolher: uma linha por pessoa no período inteiro, uma por pessoa por dia, ou nenhuma remoção.</p>
       <p>Quem não tem Groot ID <b>nunca é removido por duplicidade</b> — sem identificador não dá para afirmar que dois registros são a mesma pessoa, e tratar todos os vazios como um só apagaria gente diferente. Eles aparecem numa <b>lista nominal expansível</b>, com filial, data, empresa, cargo e escala, para você achar a pessoa na origem e preencher o identificador.</p>
+      <p>A aba também <b>aponta os casos em que o identificador e o nome discordam</b>: <b>mesmo nome com Groot IDs diferentes</b> (a dedup não uniu — ou são homônimos, ou a pessoa está cadastrada duas vezes e contada em dobro) e <b>mesmo Groot ID com nomes diferentes</b> (a dedup uniu — se forem pessoas diferentes, uma diária pode ter sido descartada como repetida). Cada caso vem com um diagnóstico que separa o que é grafia — zeros à esquerda, nome abreviado, ordem trocada — do que é conflito real. <b>Nada é corrigido automaticamente:</b> sem outra fonte o dado não diz qual versão está certa, então o app só aponta e a correção é no cadastro de origem.</p>
+      <p>Tudo isso sai num <b>relatório .xlsx</b> — uma aba por tipo de problema, com filial, data e os campos para achar a pessoa — para filtrar, marcar o que já foi corrigido e devolver a quem cuida do cadastro.</p>
       <p>Devolve uma planilha por operação — ou as seis num arquivo só — no layout de origem, nomeadas como <code class="inline">Varginha - Diaristas - Agosto.26.xlsx</code>.</p>
     </div>
 
@@ -515,6 +517,7 @@
 <script src="js/extracao.js"></script>
 <!-- Aba 4, também isolada numa IIFE (ver js/abs.js) -->
 <script src="js/extraction-dedup.js"></script>
+<script src="js/extraction-audit.js"></script>
 <script src="js/abs.js"></script>
 <script src="js/tabs.js"></script>
 </body>
