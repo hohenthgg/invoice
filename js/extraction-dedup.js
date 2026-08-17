@@ -52,7 +52,11 @@ function deduplicarPessoaDia(entradas, modo){
          Ficam todas, sinalizadas para revisão. */
       if(!hasGroot(r.id)){
         mantidas.push(r); unicos++;
-        semGroot.push({op, date:r.date, nome:r.nome||""});
+        /* `reg` é o registro inteiro: quem revisa precisa saber QUEM é a
+           pessoa (nome, empresa, cargo, escala, solicitante), não só que
+           existe um vazio. Guardar só a contagem transforma um pedido de
+           revisão em um número que ninguém consegue conferir. */
+        semGroot.push({op, date:r.date, nome:r.nome||"", reg:r});
         return;
       }
 

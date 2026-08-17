@@ -26,6 +26,9 @@
   };
 
   const $ = id => document.getElementById(id);
+  // conteúdo vindo da planilha vai para o HTML: escapar é obrigatório
+  const esc = v => String(v==null?"":v).replace(/[&<>"]/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
   const drop = $("ex-drop"), fileInput = $("ex-fileInput");
   let workbook = null;
   let parsed = null;   // {op: [{date, id, solic:'id'|'meli'|'', cells:[...]}]}
@@ -117,11 +120,20 @@
         const idRaw = r[colId];
         const id = (idRaw === null || idRaw === undefined || String(idRaw).trim()==="") ? null : String(idRaw).trim();
         const solicRaw = r[colDate+1];
+        const txt = v => (v === null || v === undefined) ? "" : String(v).trim();
 
         rows.push({
           date: key,
           id: id,
           solic: solicKind(solicRaw),
+          /* Campos nomeados além de `cells`: quando um registro precisa ser
+             mostrado ao usuário (ex.: sem GROOT, para revisão manual), quem
+             o exibe não deveria ter de conhecer a posição das colunas. */
+          nome:        txt(r[colId+1]),
+          cargo:       txt(r[colId+2]),
+          escala:      txt(r[colId+3]),
+          empresa:     txt(r[colDate+2]),
+          solicitante: txt(solicRaw),
           cells: [
             mesLabel(key),                            // MÊS SOLICITAÇÃO
             key,                                      // DATA (chave; vira Date na exportação)
@@ -249,20 +261,54 @@
       + (semGroot.length? ' · '+semGroot.length+' sem GROOT':'') + ')</summary>'
       + '<p class="regra">'+regra+' Fica sempre a <b>primeira ocorrência encontrada</b>.</p>';
     if(descartados.length){
-      h += '<table><thead><tr><th>GROOT</th><th>Data</th><th>Operação mantida</th><th>Operação descartada</th></tr></thead><tbody>'
-        + descartados.slice(0,200).map(d=>'<tr><td>'+d.groot+'</td><td>'+d.data
-          +'</td><td>'+d.mantidaEm+'</td><td>'+d.descartadaDe+'</td></tr>').join("")
+      h += '<table><thead><tr><th>GROOT</th><th>Nome</th><th>Data</th><th>Operação mantida</th><th>Operação descartada</th></tr></thead><tbody>'
+        + descartados.slice(0,200).map(d=>'<tr><td>'+esc(d.groot)+'</td><td>'+(esc(d.nome)||'<i>—</i>')
+          +'</td><td>'+esc(d.data)+'</td><td>'+esc(d.mantidaEm)+'</td><td>'+esc(d.descartadaDe)+'</td></tr>').join("")
         + '</tbody></table>'
         + (descartados.length>200?'<p class="regra">…e mais '+(descartados.length-200)+'.</p>':'');
     }
-    if(semGroot.length){
-      h += '<p class="regra alerta"><b>GROOT ausente — revisar:</b> '+semGroot.length
-        + ' registro'+(semGroot.length===1?'':'s')+' sem identificador '
-        + (semGroot.length===1?'foi mantido':'foram mantidos')
-        + ' e não '+(semGroot.length===1?'entrou':'entraram')+' na deduplicação. Sem GROOT não há '
-        + 'pessoa-dia, e tratar todos os vazios como a mesma pessoa apagaria gente diferente.</p>';
-    }
+    if(semGroot.length) h += blocoSemGroot(semGroot);
     alvo.innerHTML = h + '</details>';
+  }
+
+  /* Sem GROOT não há pessoa-dia — mas o registro existe e alguém trabalhou.
+     Um número solto não é revisável: para conferir é preciso saber QUEM é a
+     pessoa e em qual filial ela está, para então buscar o identificador na
+     origem. Daí a lista nominal, recolhida por padrão. */
+  const LIMITE_SEM_GROOT = 300;
+  function blocoSemGroot(semGroot){
+    const n = semGroot.length, um = n===1;
+    let h = '<p class="regra alerta"><b>GROOT ausente — revisar:</b> ' + n
+      + ' registro'+(um?'':'s')+' sem identificador ' + (um?'foi mantido':'foram mantidos')
+      + ' e não '+(um?'entrou':'entraram')+' na deduplicação. Sem GROOT não há '
+      + 'pessoa-dia, e tratar todos os vazios como a mesma pessoa apagaria gente diferente. '
+      + 'Se algum desses nomes se repetir no mesmo dia, a duplicidade só pode ser '
+      + 'resolvida preenchendo o GROOT na origem.</p>';
+
+    // por filial primeiro: normalmente o problema está concentrado em uma operação
+    const porOp = new Map();
+    semGroot.forEach(s => porOp.set(s.op, (porOp.get(s.op)||0)+1));
+    h += '<p class="regra">Por filial: '
+      + Array.from(porOp).map(([op,c]) => '<b>'+esc(op)+'</b> '+c).join(' · ') + '</p>';
+
+    h += '<details class="ex-semgroot"><summary>Ver ' + (um?'o registro':'os '+n+' registros')
+      + ' sem identificador</summary>'
+      + '<table><thead><tr><th>Filial / operação</th><th>Data</th><th>Nome</th>'
+      + '<th>Empresa</th><th>Cargo</th><th>Escala</th><th>Solicitante</th></tr></thead><tbody>'
+      + semGroot.slice(0, LIMITE_SEM_GROOT).map(s => {
+          const r = s.reg || {};
+          const cel = v => '<td>' + (esc(v) || '<i>—</i>') + '</td>';
+          const dataBR = /^\d{4}-\d{2}-\d{2}$/.test(String(s.date||"")) ? fmtBR(s.date) : (s.date||"—");
+          return '<tr><td>'+esc(s.op)+'</td><td>'+esc(dataBR)+'</td>'
+            + cel(r.nome) + cel(r.empresa) + cel(r.cargo) + cel(r.escala) + cel(r.solicitante)
+            + '</tr>';
+        }).join("")
+      + '</tbody></table>'
+      + (n>LIMITE_SEM_GROOT
+          ? '<p class="regra">…e mais '+(n-LIMITE_SEM_GROOT)+'. A lista completa sai no .xlsx da operação.</p>'
+          : '')
+      + '</details>';
+    return h;
   }
 
   // ---------- exportação com a estética do SIGO ----------

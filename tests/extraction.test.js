@@ -20,7 +20,9 @@ function check(ok, label, extra) {
 }
 
 /** registro de diarista, como a leitura do SIGO produz */
-const reg = (id, date, nome) => ({ id, date, nome: nome || "Diarista", solic: "id" });
+const reg = (id, date, nome) => ({ id, date, nome: nome || "Diarista", solic: "id",
+                                   empresa: "Empresa X", cargo: "Auxiliar", escala: "6x1",
+                                   solicitante: "ID Logistics" });
 /** roda a dedup sobre operações nomeadas */
 function dedup(porOp, modo) {
   return deduplicarPessoaDia(Object.entries(porOp).map(([op, rows]) => ({ op, rows })),
@@ -133,6 +135,30 @@ console.log("\nDeduplicação pessoa-dia");
         `mantidos=${totalMantido(r)}`);
   check(r.resumo.semGroot === 3 && r.semGroot.length === 3,
         "…são contados e marcados para revisão", `semGroot=${r.resumo.semGroot}`);
+
+  /* Uma contagem não é revisável. Quem revisa precisa achar a pessoa na
+     origem para preencher o GROOT, e para isso precisa do nome, da filial e
+     da data — não de "119 registros". */
+  check(r.semGroot.every(s => s.op === "SVC" && s.date === "2026-08-10"),
+        "…com a filial e a data de cada um", JSON.stringify(r.semGroot[0]));
+  check(r.semGroot.map(s => s.nome).join("|") === "Fulano|Beltrano|Sicrano",
+        "…e o nome de cada pessoa, na ordem do arquivo",
+        r.semGroot.map(s => s.nome).join("|"));
+  check(r.semGroot.every(s => s.reg && s.reg.empresa === "Empresa X"
+                              && s.reg.cargo === "Auxiliar" && s.reg.escala === "6x1"
+                              && s.reg.solicitante === "ID Logistics"),
+        "…e o registro inteiro, para exibir empresa, cargo, escala e solicitante",
+        JSON.stringify(r.semGroot[0] && r.semGroot[0].reg));
+  check(r.semGroot[0].reg === r.porOperacao.SVC.rows[0],
+        "…apontando para o MESMO registro que ficou na saída, não para uma cópia");
+}
+{
+  // filiais diferentes: o painel precisa dizer onde o problema está concentrado
+  const r = dedup({ SVC: [reg("", "2026-08-10", "Fulano")],
+                    XD:  [reg("", "2026-08-10", "Beltrano"), reg(null, "2026-08-11", "Sicrano")] });
+  const porOp = r.semGroot.reduce((m, s) => (m[s.op] = (m[s.op] || 0) + 1, m), {});
+  check(porOp.SVC === 1 && porOp.XD === 2,
+        "…e dá para agrupar por filial a partir da lista", JSON.stringify(porOp));
 }
 
 /* ================================================================ */

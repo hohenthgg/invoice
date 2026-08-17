@@ -878,3 +878,14 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
   letter-spacing:.4px;color:var(--mut2);padding:6px 8px;border-bottom:1px solid var(--line);
   background:none;box-shadow:none;white-space:nowrap}
 #panel-extracao .ex-dedup td{padding:5px 8px;border-top:1px solid var(--line);text-align:left}
+#panel-extracao .ex-dedup td i{color:var(--mut2);font-style:normal}
+
+/* lista nominal dos registros sem GROOT — recolhida, e rolável quando é longa */
+#panel-extracao .ex-semgroot{border-top:1px solid var(--line);margin-bottom:12px}
+#panel-extracao .ex-semgroot summary{color:var(--warn);padding:10px 0}
+#panel-extracao .ex-semgroot summary::before{content:"▸ ";color:var(--warn)}
+#panel-extracao .ex-semgroot[open] summary::before{content:"▾ "}
+#panel-extracao .ex-semgroot summary:hover{color:var(--ink)}
+#panel-extracao .ex-semgroot > table{display:block;max-height:340px;overflow:auto;
+  border:1px solid var(--line);border-radius:var(--radius-sm)}
+#panel-extracao .ex-semgroot > table thead th{position:sticky;top:0;background:var(--navy);z-index:1}
