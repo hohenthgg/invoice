@@ -530,10 +530,69 @@ console.log("\nLinhas que não são colaborador");
                     inicio: ymd(2026,5,1), fim: ymd(2026,5,20), rateio: 1, raw: {} };
   const res2 = conciliar([comNome], []);
   const it = itemDe(res2, "Fulano Sem Groot");
+  check(it && it.status === RECON_STATUS.SEM_ID,
+        "pessoa identificável só pelo nome vira 'Sem identificador', com o ajuste calculado",
+        it && it.status);
+  check(it && /aparece aqui porque/.test(it.diagnostico) && it.esperado,
+        "…com explicação do porquê e o ajuste devido à vista",
+        it && it.diagnostico.slice(0, 100));
+}
+
+/* ================================================================
+   IDENTIFICADOR FALTANDO ≠ AJUSTE INDETERMINÁVEL
+   Quem define o ajuste são as datas. O identificador serve para achar
+   a pessoa na fatura seguinte.
+   ================================================================ */
+console.log("\nLinha sem identificador");
+{
+  // nome + datas, sem GROOT e sem matrícula: o ajuste É calculável
+  const p = { srcRow: 120, groot: null, nome: "ALDERINO DE JESUS", matricula: null,
+              inicio: ymd(2026,5,1), fim: ymd(2026,5,20), rateio: 1, raw: {} };
+  const it = itemDe(conciliar([p], []), "ALDERINO DE JESUS");
+  check(it && it.status === RECON_STATUS.SEM_ID,
+        "sem GROOT nem matrícula → status próprio 'Sem identificador', não 'Revisão manual'",
+        it && it.status);
+  check(it && it.esperado && it.esperado.kind === "DESCONTAR" && it.esperado.days === 11
+        && Math.abs(it.esperado.fte + 11/31) < 1e-9,
+        "o ajuste devido é calculado e mostrado (11 dias, FTE −0,3548), não escondido",
+        it && it.esperado && `${it.esperado.kind} ${it.esperado.days}d ${it.esperado.fte.toFixed(4)}`);
+  check(it && /não é usado como chave/.test(it.diagnostico)
+        && /procurá-lo/.test(it.diagnostico),
+        "o texto explica que falta a CHAVE de busca, não o dado do cálculo",
+        it && it.diagnostico.slice(0, 110));
+  check(it && it.cobrancaOriginal && it.cobrancaOriginal.days === 31,
+        "a cobrança original também é reconstruída para essa pessoa");
+}
+{
+  // sem identificador E sem ajuste devido → nada a dizer
+  const p = { srcRow: 121, groot: null, nome: "Sem Movimento", matricula: null,
+              inicio: ymd(2024,1,1), fim: null, rateio: 1, raw: {} };
+  const res = conciliar([p], []);
+  check(res.items.length === 0,
+        "sem identificador e sem ajuste devido não gera apontamento nenhum",
+        res.items.map(i => i.status + ":" + i.nome).join(", "));
+}
+{
+  // GROOT presente, matrícula vazia: é rastreável, entra no confronto normal
+  const p = { srcRow: 122, groot: "4242", nome: "Tem Groot", matricula: null,
+              inicio: ymd(2026,5,1), fim: ymd(2026,5,20), rateio: 1, raw: {} };
+  const junho = [{ srcRow: 5, groot: "4242", nome: "Tem Groot", matricula: null,
+                   inicio: ymd(2026,5,21), fim: ymd(2026,5,31), rateio: -1, raw: {} }];
+  const it = itemDe(conciliar([p], junho), "Tem Groot");
+  check(it && it.status === RECON_STATUS.CONCILIADO,
+        "GROOT presente e matrícula vazia continua rastreável e concilia normalmente",
+        it && it.status);
+}
+{
+  // erro que REALMENTE impede o cálculo continua em revisão, com texto correto
+  const p = { srcRow: 123, groot: "5555", nome: "Data Ruim", matricula: "m5",
+              inicio: null, fim: ymd(2026,5,20), rateio: 1, raw: {} };
+  const it = itemDe(conciliar([p], []), "Data Ruim");
   check(it && it.status === RECON_STATUS.REVISAO,
-        "erro de dados em pessoa identificável continua sendo apontado", it && it.status);
-  check(it && /aparece aqui porque/.test(it.diagnostico) && /Corrija a linha na origem/.test(it.diagnostico),
-        "…com explicação do porquê e do que fazer", it && it.diagnostico.slice(0, 100));
+        "DATA DE INÍCIO vazia continua sendo revisão manual", it && it.status);
+  check(it && /datas/.test(it.diagnostico) && !/identificador|GROOT|matrícula/.test(it.diagnostico),
+        "…e o texto atribui a causa às datas, nunca ao identificador",
+        it && it.diagnostico.slice(0, 110));
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");

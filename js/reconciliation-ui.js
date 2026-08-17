@@ -211,6 +211,7 @@ const FILTROS=[
   {k:"DIVERGENTE", rot:"Divergentes"},
   {k:"DUPLICADO",  rot:"Duplicados"},
   {k:"SEM_ORIGEM", rot:"Retroativos sem origem"},
+  {k:"SEM_IDENTIFICADOR", rot:"Sem identificador"},
   {k:"INDETERMINADO", rot:"Indeterminados"},
   {k:"REVISAO",    rot:"Revisão manual"}
 ];
@@ -280,6 +281,7 @@ const EXPLICA={
   SINAL_INCORRETO:"O período confere, mas o lançamento está invertido: desconto onde caberia acréscimo, ou o contrário.",
   DUPLICADO:"O mesmo período aparece mais de uma vez na fatura seguinte. O app nunca escolhe qual linha remover — isso é decisão sua.",
   SEM_ORIGEM:"Existe um retroativo na fatura seguinte que nenhuma movimentação das duas faturas explica. Não quer dizer que esteja errado: a causa pode estar numa base de RH que não foi carregada. Requer validação.",
+  SEM_IDENTIFICADOR:"A linha da fatura de origem não tem GROOT nem matrícula. As datas bastam para calcular o ajuste devido — ele é mostrado —, mas não há chave para procurá-lo na fatura seguinte, porque nome não é usado como chave. Confira na mão ou complete o cadastro na origem.",
   IDENTIDADE_AMBIGUA:"A mesma matrícula aparece ligada a mais de um GROOT entre as duas faturas. Os registros não são unidos automaticamente — confirme quem é quem antes de agir.",
   INDETERMINADO:"A linha tem um período que poderia ser retroativo, mas os sinais se contradizem. Enquanto não for esclarecida, ela fica fora de todas as comparações.",
   REVISAO:"A fatura de origem não traz um dado necessário para calcular o ajuste devido, ou há mais de uma leitura possível para a correspondência. O app prefere avisar a chutar."
@@ -295,7 +297,7 @@ function legenda(items){
     }).join("")}</dl></details>`;
 }
 const ORDEM_LEGENDA=["AUSENTE","SINAL_INCORRETO","DUPLICADO","PERIODO_DIVERGENTE","FTE_DIVERGENTE",
-  "SEM_ORIGEM","IDENTIDADE_AMBIGUA","INDETERMINADO","REVISAO","CONCILIADO"];
+  "SEM_ORIGEM","IDENTIDADE_AMBIGUA","SEM_IDENTIFICADOR","INDETERMINADO","REVISAO","CONCILIADO"];
 
 function linhaItem(it){
   const meta=RECON_META[it.status]||{label:it.status,tone:"info",icon:"·"};

@@ -29,6 +29,7 @@ const RECON_STATUS = {
   DUPLICADO:   "DUPLICADO",
   SEM_ORIGEM:  "SEM_ORIGEM",
   AMBIGUA:     "IDENTIDADE_AMBIGUA",
+  SEM_ID:      "SEM_IDENTIFICADOR",
   INDETERMINADO:"INDETERMINADO",
   REVISAO:     "REVISAO"
 };
@@ -45,11 +46,16 @@ const RECON_META = {
   DUPLICADO:         {label:"Possível duplicidade",    tone:"bad",  icon:"✖"},
   SEM_ORIGEM:        {label:"Retroativo sem origem",   tone:"info", icon:"?"},
   IDENTIDADE_AMBIGUA:{label:"Identidade ambígua",      tone:"info", icon:"?"},
+  SEM_IDENTIFICADOR: {label:"Sem identificador",        tone:"warn", icon:"⚠"},
   INDETERMINADO:     {label:"Indeterminado",           tone:"info", icon:"?"},
   REVISAO:           {label:"Revisão manual",          tone:"info", icon:"?"}
 };
 
 const FTE_TOL = 1e-6;
+
+/* Erros de validação que dizem respeito só ao cadastro, não ao cálculo. */
+const ERROS_DE_IDENTIFICADOR = new Set(["GROOT ID vazio","matrícula vazia"]);
+const PLACEHOLDER_ID = "§sem-id§";
 
 /* ================================================================
    1. IDENTIDADE DAS PESSOAS
@@ -210,8 +216,36 @@ function reconcile(input){
   const idx=buildPersonIndex([origem.employees, seguinte.employees]);
 
   const splitN=splitInvoiceLines(origem.employees, compN);
-  const proj=analyze(splitN.normais, compN);       // ajuste esperado = motor de projeção
-  const esperados=proj.adjustments;
+
+  /* O motor de projeção exige GROOT E matrícula e, sem os dois, devolve ERRO —
+     descartando o ajuste. Mas identificador não é o que DEFINE o ajuste: quem
+     define são as datas. O identificador serve para achar a pessoa na fatura
+     seguinte. Então quando o único problema da linha é identificador faltando,
+     o ajuste é calculado de todo modo; o que muda é a capacidade de conferir. */
+  const paraAnalisar=[], soFaltaId=[];
+  splitN.normais.forEach(e=>{
+    const errs=validateEmployee(e);
+    if(errs.length && errs.every(x=>ERROS_DE_IDENTIFICADOR.has(x))) soFaltaId.push(e);
+    else paraAnalisar.push(e);
+  });
+
+  const proj=analyze(paraAnalisar, compN);          // ajuste esperado = motor de projeção
+  const esperados=proj.adjustments.slice();
+
+  /* Recalcula os que só tropeçaram no identificador. Quem TEM ao menos um
+     identificador é rastreável e entra no confronto normal; quem não tem nenhum
+     vira apontamento próprio, porque não há como procurá-lo na fatura seguinte —
+     nome nunca é chave. Se não houver ajuste devido, nada é dito. */
+  const semIdComAjuste=[];
+  soFaltaId.forEach(e=>{
+    const suprido={...e, groot:e.groot||PLACEHOLDER_ID, matricula:e.matricula||PLACEHOLDER_ID};
+    const r=detectAdjustment(suprido, compN);
+    if(!r || r.kind==="ERRO") return;               // nada devido → nada a apontar
+    r.emp=e;                                        // identidade real, não a suprida
+    r.faltaIdentificador=true;
+    if(hasId(e.groot)||hasId(e.matricula)) esperados.push(r);
+    else semIdComAjuste.push(r);
+  });
 
   const splitNext=splitInvoiceLines(seguinte.employees, compNext);
   const encontrados=[];
@@ -404,6 +438,44 @@ function reconcile(input){
       cobranca:null, identidadeOrigem:e, modeloRow:e.srcRow, linhasNext:[e]}));
   });
 
+  /* --- 5.3b pessoas sem nenhum identificador, mas com ajuste devido ---
+     O ajuste é mostrado: ele é real e calculável. O que não é possível é
+     conferi-lo automaticamente na fatura seguinte. */
+  semIdComAjuste.forEach(r=>{
+    items.push(makeItem({
+      status:RECON_STATUS.SEM_ID, alerts:[RECON_STATUS.SEM_ID],
+      conf:RECON_CONF.REVISAO,
+      confMotivo:"a linha não tem GROOT nem matrícula — não há chave para procurar na fatura seguinte",
+      esperado:r, achado:null, achados:[],
+      diagnostico:"Esta pessoa aparece aqui porque a linha dela em "+compN.label+" não tem GROOT ID "
+        +"nem matrícula. As datas são suficientes para calcular o ajuste devido, e ele está aí ao "
+        +"lado — o que não dá para fazer é procurá-lo em "+compNext.label+": sem identificador a "
+        +"única chave restante seria o nome, e nome não é usado como chave porque homônimo existe. "
+        +"Confira este ajuste na mão, ou complete o cadastro na origem e reconcilie de novo.",
+      diffDias:0, diffFte:0, compN, compNext, emp:r.emp, idx,
+      dim:{identidade:false, competencia:true, periodo:null, sinal:null, fte:null},
+      cobranca:originalBilling(r.emp, compN), identidadeOrigem:r.emp,
+      modeloRow:null, linhasNext:[]}));
+  });
+
+  /* --- 5.3c pessoas da fatura N cujas datas não foram lidas ---
+     Ficavam de fora sem aviso: classifyLine as marcava indeterminadas e só as
+     linhas normais chegavam ao motor de projeção. Sem data legível não há como
+     dizer se havia ajuste devido, e é justamente isso que precisa ser dito. */
+  splitN.indeterminados.forEach(e=>{
+    items.push(makeItem({
+      status:RECON_STATUS.REVISAO, alerts:[RECON_STATUS.REVISAO],
+      conf:RECON_CONF.REVISAO, confMotivo:"as datas da linha de origem não foram lidas",
+      esperado:null, achado:null, achados:[],
+      diagnostico:"Esta pessoa aparece aqui porque a linha dela em "+compN.label+" não teve as "
+        +"datas lidas. "+(e.lineClassReason||"")+" São as datas que determinam o ajuste devido, "
+        +"então sem elas não é possível dizer se algo deveria ter surgido em "+compNext.label+". "
+        +"Corrija a linha na origem e reconcilie de novo.",
+      diffDias:0, diffFte:0, compN, compNext, emp:e, idx,
+      dim:{identidade:!idx.isAmbiguous(e), competencia:true, periodo:null, sinal:null, fte:null},
+      cobranca:null, identidadeOrigem:e, modeloRow:null, linhasNext:[]}));
+  });
+
   /* --- 5.4 linhas da fatura N que o motor não conseguiu ler ---
      Aparecem só quando dá para dizer DE QUEM é a linha. Um erro de dados numa
      linha anônima não é acionável: não há quem procurar na fatura seguinte. */
@@ -413,10 +485,10 @@ function reconcile(input){
       conf:RECON_CONF.REVISAO, confMotivo:"a fatura de origem não traz o dado necessário",
       esperado:null, achado:null, achados:[],
       diagnostico:"Esta pessoa aparece aqui porque a linha dela na fatura "+compN.label
-        +" tem um problema de preenchimento — "+err.reason+" — e é esse dado que define o "
-        +"ajuste devido. Sem ele o app não consegue dizer se algo deveria ter surgido em "
-        +compNext.label+", então prefere avisar a chutar. Corrija a linha na origem e "
-        +"reconcilie de novo.",
+        +" tem um problema nas datas ou no rateio — "+err.reason+" — e são justamente esses "
+        +"campos que determinam o ajuste devido. Sem eles não é possível dizer se algo deveria "
+        +"ter surgido em "+compNext.label+", então o app prefere avisar a chutar. Corrija a "
+        +"linha na origem e reconcilie de novo.",
       diffDias:0, diffFte:0, compN, compNext, idx,
       dim:{identidade:false, competencia:true, periodo:null, sinal:null, fte:null},
       cobranca:null, identidadeOrigem:null, modeloRow:null, linhasNext:[],
@@ -508,7 +580,7 @@ function impactoFinanceiro(o){
 
 const ORDEM_STATUS=[RECON_STATUS.AUSENTE, RECON_STATUS.SINAL, RECON_STATUS.DUPLICADO,
   RECON_STATUS.PERIODO, RECON_STATUS.FTE, RECON_STATUS.SEM_ORIGEM,
-  RECON_STATUS.AMBIGUA, RECON_STATUS.INDETERMINADO, RECON_STATUS.REVISAO,
+  RECON_STATUS.AMBIGUA, RECON_STATUS.SEM_ID, RECON_STATUS.INDETERMINADO, RECON_STATUS.REVISAO,
   RECON_STATUS.CONCILIADO];
 function ordenar(items){
   items.sort((a,b)=>{
@@ -521,7 +593,7 @@ function ordenar(items){
 function summarize(items){
   const s={total:items.length, conciliados:0, pendencias:0,
     descontosAusentes:0, acrescimosAusentes:0, divergencias:0,
-    duplicados:0, semOrigem:0, revisao:0, indeterminados:0};
+    duplicados:0, semOrigem:0, revisao:0, indeterminados:0, semIdentificador:0};
   items.forEach(it=>{
     if(it.status===RECON_STATUS.CONCILIADO){ s.conciliados++; return; }
     s.pendencias++;
@@ -534,6 +606,7 @@ function summarize(items){
     if(it.status===RECON_STATUS.DUPLICADO) s.duplicados++;
     if(it.status===RECON_STATUS.SEM_ORIGEM) s.semOrigem++;
     if(it.status===RECON_STATUS.INDETERMINADO) s.indeterminados++;
+    if(it.status===RECON_STATUS.SEM_ID) s.semIdentificador++;
     if(it.status===RECON_STATUS.REVISAO||it.status===RECON_STATUS.AMBIGUA) s.revisao++;
   });
   return s;
