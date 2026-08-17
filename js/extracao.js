@@ -173,30 +173,25 @@
 
     results = {};
     lastPeriod = {ini, fim};
-    let tFilt=0, tDup=0, tFinal=0;
-    for(const op of OPERATIONS){
+
+    /* Filtra por período e solicitante, mantendo a ordem das operações; a
+       deduplicação depois é GLOBAL — ver js/extraction-dedup.js. */
+    const entradas = OPERATIONS.map(op => {
       let inPeriod = parsed[op].filter(r => r.date >= ini && r.date <= fim);
       if(solic !== "ambos") inPeriod = inPeriod.filter(r => r.solic === solic);
+      return {op, rows: inPeriod};
+    });
 
-      let kept, dups = 0;
-      if(mode === "nao"){
-        kept = inPeriod;
-      }else{
-        const seen = new Set();
-        kept = [];
-        for(const r of inPeriod){
-          if(r.id === null){ kept.push(r); continue; }
-          const k = (mode === "dia") ? (r.id + "|" + r.date) : r.id;
-          if(seen.has(k)){ dups++; continue; }
-          seen.add(k);
-          kept.push(r);
-        }
-      }
-      results[op] = {filtered: inPeriod.length, dups, rows: kept, dedupOff: mode === "nao"};
-      tFilt += inPeriod.length; tDup += dups; tFinal += kept.length;
+    const dedup = deduplicarPessoaDia(entradas, mode);
+    lastDedup = dedup;
+    let tFilt=0, tDup=0, tFinal=0;
+    for(const op of OPERATIONS){
+      results[op] = dedup.porOperacao[op];
+      tFilt += results[op].filtered; tDup += results[op].dups; tFinal += results[op].rows.length;
     }
     renderResults(ini, fim, tFilt, tDup, tFinal, mode === "nao", solic);
   });
+  let lastDedup = null;
 
   function renderResults(ini, fim, tFilt, tDup, tFinal, dedupOff, solic){
     const body = $("ex-resultBody");
@@ -225,13 +220,49 @@
     }
     const solicTxt = solic === "ambos" ? "ID + MELI" : (solic === "id" ? "só ID Logistics" : "só MELI");
     $("ex-periodLabel").textContent = fmtBR(ini) + " → " + fmtBR(fim) + " · " + solicTxt;
+    const rs = lastDedup ? lastDedup.resumo : null;
     $("ex-totalBar").innerHTML =
-      "No período: <b>"+tFilt.toLocaleString("pt-BR")+"</b> linhas&nbsp;·&nbsp;" +
-      "Duplicados removidos: <b>"+(dedupOff ? "—" : tDup.toLocaleString("pt-BR"))+"</b>&nbsp;·&nbsp;" +
-      "Linhas finais: <b>"+tFinal.toLocaleString("pt-BR")+"</b>";
+      "Registros encontrados: <b>"+tFilt.toLocaleString("pt-BR")+"</b>&nbsp;·&nbsp;" +
+      "Únicos pessoa-dia: <b>"+tFinal.toLocaleString("pt-BR")+"</b>&nbsp;·&nbsp;" +
+      "Duplicados removidos: <b>"+(dedupOff ? "—" : tDup.toLocaleString("pt-BR"))+"</b>" +
+      (rs && rs.semGroot ? "&nbsp;·&nbsp;GROOT ausente: <b>"+rs.semGroot.toLocaleString("pt-BR")+"</b>" : "");
+    renderDetalheDedup(dedupOff);
     $("ex-num2").classList.add("done"); $("ex-num2").textContent="✓";
     $("ex-step3").classList.remove("disabled");
     $("ex-step3").scrollIntoView({behavior:"smooth",block:"nearest"});
+  }
+
+  /* Nada é removido em silêncio: quem foi descartado, de onde veio e onde a
+     ocorrência mantida ficou. Painel recolhido para não poluir a tela. */
+  function renderDetalheDedup(dedupOff){
+    const alvo = $("ex-detalheDedup");
+    if(!alvo) return;
+    if(dedupOff || !lastDedup){ alvo.innerHTML=""; alvo.classList.add("hidden"); return; }
+    const {descartados, semGroot, resumo} = lastDedup;
+    if(!descartados.length && !semGroot.length){ alvo.innerHTML=""; alvo.classList.add("hidden"); return; }
+    alvo.classList.remove("hidden");
+    const regra = resumo.modo==="dia"
+      ? "Duplicado = mesmo GROOT normalizado + mesma data, valendo entre operações, abas e arquivos."
+      : "Duplicado = mesmo GROOT normalizado no período inteiro, valendo entre operações, abas e arquivos.";
+    let h = '<details class="ex-dedup"><summary>O que foi removido ('
+      + descartados.length + ' duplicado' + (descartados.length===1?'':'s')
+      + (semGroot.length? ' · '+semGroot.length+' sem GROOT':'') + ')</summary>'
+      + '<p class="regra">'+regra+' Fica sempre a <b>primeira ocorrência encontrada</b>.</p>';
+    if(descartados.length){
+      h += '<table><thead><tr><th>GROOT</th><th>Data</th><th>Operação mantida</th><th>Operação descartada</th></tr></thead><tbody>'
+        + descartados.slice(0,200).map(d=>'<tr><td>'+d.groot+'</td><td>'+d.data
+          +'</td><td>'+d.mantidaEm+'</td><td>'+d.descartadaDe+'</td></tr>').join("")
+        + '</tbody></table>'
+        + (descartados.length>200?'<p class="regra">…e mais '+(descartados.length-200)+'.</p>':'');
+    }
+    if(semGroot.length){
+      h += '<p class="regra alerta"><b>GROOT ausente — revisar:</b> '+semGroot.length
+        + ' registro'+(semGroot.length===1?'':'s')+' sem identificador '
+        + (semGroot.length===1?'foi mantido':'foram mantidos')
+        + ' e não '+(semGroot.length===1?'entrou':'entraram')+' na deduplicação. Sem GROOT não há '
+        + 'pessoa-dia, e tratar todos os vazios como a mesma pessoa apagaria gente diferente.</p>';
+    }
+    alvo.innerHTML = h + '</details>';
   }
 
   // ---------- exportação com a estética do SIGO ----------

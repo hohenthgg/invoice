@@ -17,3 +17,7 @@ jobs:
         run: node tests/engine.test.js
       - name: Rodar testes da conciliação
         run: node tests/reconciliation.test.js
+      - name: Rodar testes da extração de diaristas
+        run: node tests/extraction.test.js
+      - name: Rodar testes da exportação conciliada
+        run: node tests/export.test.js

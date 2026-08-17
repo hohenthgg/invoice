@@ -2,7 +2,7 @@
    Sem dependências externas: basta `node tests/reconciliation.test.js`. */
 "use strict";
 const { load } = require("./load");
-const ctx = load(["config.js", "dates.js", "engine.js", "competence.js", "billing.js",
+const ctx = load(["identity.js", "config.js", "dates.js", "engine.js", "competence.js", "billing.js",
                   "competence-source.js", "reconciliation.js"],
                  ["RECON_STATUS", "RECON_CONF", "RECON_META", "LINE_CLASS", "COMP_SOURCE"]);
 const { ymd, fmtShort, fmtYmd, buildCompetence, reconcile, sugerirCorrecao,

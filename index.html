@@ -325,6 +325,7 @@
       </table>
     </div>
     <div class="total-bar" id="ex-totalBar"></div>
+    <div id="ex-detalheDedup" class="hidden"></div>
     <div class="all-actions">
       <button class="btn" id="ex-btnAll">Baixar as 6 planilhas</button>
       <button class="btn mini" id="ex-btnCombined">Baixar arquivo único (6 abas)</button>
@@ -492,6 +493,7 @@
 </footer>
 
 <!-- A ordem importa: configuração → datas → motor → detecção → importação → tela → exportação → eventos -->
+<script src="js/identity.js"></script>
 <script src="js/config.js"></script>
 <script src="js/dates.js"></script>
 <script src="js/engine.js"></script>
@@ -511,6 +513,7 @@
 <!-- Aba 3, também isolada numa IIFE (ver js/extracao.js) -->
 <script src="js/extracao.js"></script>
 <!-- Aba 4, também isolada numa IIFE (ver js/abs.js) -->
+<script src="js/extraction-dedup.js"></script>
 <script src="js/abs.js"></script>
 <script src="js/tabs.js"></script>
 </body>

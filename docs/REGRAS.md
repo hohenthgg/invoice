@@ -295,6 +295,41 @@ alertas, confiança e sua base, cobrança original, ajuste esperado e encontrado
 decisão do usuário, período e FTE finais, alteração aplicada, impacto financeiro
 e observação.
 
+### Pessoa-dia: a unidade de identidade do aplicativo
+
+`GROOT ID` representa **uma pessoa**. Logo:
+
+```
+pessoa-dia = GROOT normalizado + data normalizada
+```
+
+Se a mesma combinação aparece em duas operações, duas abas ou dois arquivos,
+não são duas pessoas nem duas diárias — é a mesma pessoa-dia repetida. Contá-la
+duas vezes produz dupla cobrança do diarista, dupla contabilização e compensação
+indevida de ABS.
+
+A normalização vive num lugar só, `js/identity.js`, e é usada por todas as abas.
+Duas implementações da mesma regra é como se cria a situação em que a
+Conciliação acha que são a mesma pessoa e a Extração acha que não.
+
+| Entrada | Normalizado |
+|---|---|
+| `123456`, `"123456"`, `123456.0`, `" 123456 "` | `123456` |
+| `ABC123` | `ABC123` — alfanumérico não é convertido |
+| `00123456` | `00123456` — zeros à esquerda preservados |
+
+Zeros à esquerda **não** são removidos: `00123456` pode ser um identificador
+diferente de `123456`, e não há como saber pelo dado. Unir duas pessoas por
+engano é pior do que deixar de unir duas grafias da mesma.
+
+Registro **sem GROOT nunca é deduplicado**. Tratar todos os vazios como a mesma
+chave apagaria pessoas diferentes de uma vez — o oposto do objetivo. Eles são
+preservados e marcados como *GROOT ausente — revisar*.
+
+Na deduplicação, fica sempre a **primeira ocorrência encontrada**, e o que foi
+descartado aparece num painel com GROOT, data, operação mantida e operação
+descartada. Nada sai em silêncio.
+
 ### Estrutura e identidade de uma linha criada
 
 Quando um ajuste ausente vira linha nova, as duas coisas vêm de lugares
@@ -306,8 +341,25 @@ diferentes, e confundi-las já produziu linha com o nome de outra pessoa:
   registro conciliado da pessoa, que quando ela não existe na N+1 só existe na
   fatura N.
 
-Se uma linha de outra pessoa for usada como molde visual, os campos de
-identidade são limpos antes de receber os dados corretos.
+O template **nunca** fornece valor de célula: dele se herda estilo, borda,
+formato e altura. Todos os valores vêm da identidade lógica da pessoa.
+
+Isso importa por causa de um detalhe do Excel: `spliceRows` **desloca os índices
+das linhas seguintes**. Um índice guardado antes de uma remoção passa a apontar
+para outra pessoa — e uma linha nova de João sairia com o GROOT, o nome e a
+matrícula de Maria, erro nominal de faturamento, silencioso.
+
+A defesa é dupla, de propósito:
+
+1. **Fase 0** — antes de qualquer operação estrutural, cada inclusão captura um
+   snapshot imutável do template (só aparência) e a identidade lógica da pessoa.
+   Depois disso nenhum índice antigo é consultado.
+2. **Identidade sempre reescrita** — ainda que o snapshot viesse da linha errada,
+   o que se herda é aparência.
+
+Antes de dar a linha por boa, os campos nominais gravados são conferidos contra
+os esperados, com o GROOT comparado normalizado. Divergiu, a inclusão é
+**abortada e registrada** — nunca gravada em silêncio.
 
 ## Datas
 

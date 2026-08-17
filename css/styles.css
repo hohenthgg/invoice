@@ -857,3 +857,24 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 #panel-conciliacao .rc-legenda dt.t-info{color:var(--mut)}
 #panel-conciliacao .rc-legenda dd{font-size:.75rem;color:var(--mut);line-height:1.6;margin:0}
 @media(max-width:640px){#panel-conciliacao .rc-legenda dl{grid-template-columns:1fr;gap:3px}}
+
+/* Extração · Diarista — detalhe do que foi deduplicado */
+#panel-extracao .ex-dedup{margin-top:12px;background:var(--navy);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:0 14px}
+#panel-extracao .ex-dedup summary{cursor:pointer;font-size:.76rem;color:var(--mut);
+  padding:11px 0;list-style:none;font-weight:600}
+#panel-extracao .ex-dedup summary::-webkit-details-marker{display:none}
+#panel-extracao .ex-dedup summary::before{content:"▸ ";color:var(--amber)}
+#panel-extracao .ex-dedup[open] summary::before{content:"▾ "}
+#panel-extracao .ex-dedup summary:hover{color:var(--ink)}
+#panel-extracao .ex-dedup .regra{font-size:.74rem;color:var(--mut);line-height:1.6;
+  border-top:1px solid var(--line);padding:10px 0}
+#panel-extracao .ex-dedup .regra b{color:var(--ink)}
+#panel-extracao .ex-dedup .regra.alerta{border-top:none;color:var(--warn)}
+#panel-extracao .ex-dedup .regra.alerta b{color:var(--warn)}
+#panel-extracao .ex-dedup table{width:100%;border-collapse:collapse;font-family:var(--mono);
+  font-size:.72rem;margin-bottom:10px}
+#panel-extracao .ex-dedup th{text-align:left;font-size:.62rem;text-transform:uppercase;
+  letter-spacing:.4px;color:var(--mut2);padding:6px 8px;border-bottom:1px solid var(--line);
+  background:none;box-shadow:none;white-space:nowrap}
+#panel-extracao .ex-dedup td{padding:5px 8px;border-top:1px solid var(--line);text-align:left}

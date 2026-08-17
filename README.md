@@ -73,7 +73,8 @@ aba por operação (Pouso Alegre SVC e XD, Poços de Caldas, Varginha, Divinópo
 Patos de Minas). Filtra pela **data de solicitação**, opcionalmente por
 **solicitante** (ID Logistics ou MELI), e resolve os **Groot IDs repetidos** em um
 de três modos: uma linha por pessoa no período, uma por pessoa por dia, ou nenhuma
-remoção. Exporta uma planilha por operação — ou as seis num arquivo só — no layout
+remoção. A deduplicação é **global** — a mesma pessoa-dia em duas operações é uma
+só, e o que foi descartado aparece num painel com GROOT, data e de onde veio. Exporta uma planilha por operação — ou as seis num arquivo só — no layout
 de origem, nomeadas como `Varginha - Diaristas - Agosto.26.xlsx`.
 
 ```
@@ -149,6 +150,7 @@ O arquivo `.nojekyll` já está no repositório para o Pages servir tudo sem pro
 ```
 index.html            as cinco abas e a ordem de carga dos scripts
 css/styles.css        estilos das cinco abas
+js/identity.js        normalização de GROOT e a chave pessoa-dia, para o app inteiro
 js/config.js          nomes de abas, colunas aceitas, dia de corte
 js/dates.js           datas como inteiro AAAAMMDD, imune a fuso horário
 js/engine.js          motor de regras: valida, classifica, dedupe
@@ -164,6 +166,7 @@ js/reconciliation-ui.js     uploads duplos, apontamentos, decisões e prévia (I
 js/reconciliation-export.js clona a fatura N+1 e aplica só o que foi aceito
 js/fusao.js           aba Fusão de Linhas, inteira (IIFE)
 js/extracao.js        aba Extração · Diarista, inteira (IIFE)
+js/extraction-dedup.js  deduplicação pessoa-dia, global e testável
 js/abs.js             aba Calcular ABS, inteira (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
@@ -213,6 +216,15 @@ Não há dependências para instalar. Os testes carregam os mesmos arquivos de
 `tests/engine.test.js` cobre os casos obrigatórios de regra, os limites da
 competência, a proteção contra ajuste duplicado e a detecção automática da
 competência.
+
+`tests/export.test.js` cobre a geração da Fatura Conciliada, com um stub de
+worksheet que reproduz o deslocamento de índices do `spliceRows`. Prova que uma
+linha nova nunca herda identidade de outra pessoa, mesmo depois de várias
+remoções acima dela.
+
+`tests/extraction.test.js` cobre a deduplicação pessoa-dia da Extração ·
+Diarista: mesmo GROOT normalizado e mesma data são uma única pessoa-dia,
+independentemente de operação, aba ou arquivo de origem.
 
 `tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
 classificações de status, a reconstrução da cobrança original (o corte projeta
