@@ -834,3 +834,26 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
   #panel-abs .rail .bar{display:none}
 }
 #panel-guia .concept.c4 .chiph{background:var(--ok);color:#06281a}
+
+/* arrastar e soltar as faturas */
+#panel-conciliacao .rc-slot-drop.over{border-color:var(--amber);background:rgba(255,194,51,.1);
+  color:var(--ink)}
+
+/* legenda dos status presentes no resultado */
+#panel-conciliacao .rc-legenda{margin-bottom:14px;background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:0 14px}
+#panel-conciliacao .rc-legenda summary{cursor:pointer;font-size:.76rem;color:var(--mut);
+  padding:11px 0;list-style:none;font-weight:600}
+#panel-conciliacao .rc-legenda summary::-webkit-details-marker{display:none}
+#panel-conciliacao .rc-legenda summary::before{content:"▸ ";color:var(--amber)}
+#panel-conciliacao .rc-legenda[open] summary::before{content:"▾ "}
+#panel-conciliacao .rc-legenda summary:hover{color:var(--ink)}
+#panel-conciliacao .rc-legenda dl{border-top:1px solid var(--line);padding:11px 0 13px;margin:0;
+  display:grid;grid-template-columns:auto 1fr;gap:7px 14px;align-items:baseline}
+#panel-conciliacao .rc-legenda dt{font-size:.74rem;font-weight:700;white-space:nowrap}
+#panel-conciliacao .rc-legenda dt.t-ok{color:var(--ok)}
+#panel-conciliacao .rc-legenda dt.t-warn{color:var(--warn)}
+#panel-conciliacao .rc-legenda dt.t-bad{color:var(--bad)}
+#panel-conciliacao .rc-legenda dt.t-info{color:var(--mut)}
+#panel-conciliacao .rc-legenda dd{font-size:.75rem;color:var(--mut);line-height:1.6;margin:0}
+@media(max-width:640px){#panel-conciliacao .rc-legenda dl{grid-template-columns:1fr;gap:3px}}

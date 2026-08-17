@@ -104,8 +104,38 @@ function renderSlot(qual){
     </span>`;
 }
 
+/* Arrastar e soltar nos dois slots. O <input type=file> continua ali para quem
+   prefere clicar; o drop só oferece o mesmo caminho por outra via. */
+function initDropZones(){
+  ["origem","seguinte"].forEach(qual=>{
+    const slot=document.querySelector(`#modo-conciliar .rc-slot[data-slot="${qual}"]`);
+    if(!slot) return;
+    const zona=slot.querySelector(".rc-slot-drop");
+    const parar=ev=>{ ev.preventDefault(); ev.stopPropagation(); };
+    ["dragenter","dragover"].forEach(t=>zona.addEventListener(t,ev=>{
+      parar(ev); ev.dataTransfer.dropEffect="copy"; zona.classList.add("over"); }));
+    ["dragleave","dragend"].forEach(t=>zona.addEventListener(t,ev=>{
+      parar(ev); zona.classList.remove("over"); }));
+    zona.addEventListener("drop",ev=>{
+      parar(ev); zona.classList.remove("over");
+      const f=ev.dataTransfer.files&&ev.dataTransfer.files[0];
+      if(f) receber(qual,f);
+    });
+  });
+  /* soltar fora da zona não deve fazer o navegador abrir o arquivo */
+  ["dragover","drop"].forEach(t=>document.addEventListener(t,ev=>{
+    if(ev.target.closest&&ev.target.closest("#modo-conciliar")) return;
+    if(ev.type==="drop") ev.preventDefault();
+  }));
+}
+
 function carregar(qual, ev){
-  const f=ev.target.files[0]; if(!f) return;
+  const f=ev.target.files[0];
+  ev.target.value="";
+  if(f) receber(qual,f);
+}
+
+function receber(qual, f){
   const box=$("rc-"+qual+"-info");
   box.className="rc-slot-info carregando";
   box.textContent="Lendo "+f.name+"…";
@@ -126,7 +156,6 @@ function carregar(qual, ev){
     R.result=null;
     renderSequencia();
     renderResultado();
-    ev.target.value="";
   };
   reader.readAsArrayBuffer(f);
 }
@@ -214,10 +243,12 @@ function renderResultado(){
       ${esc2(contexto.compN.label)} (${contexto.linhasOrigem} linhas) e lidos
       <b>${contexto.retroativosNaSeguinte}</b> lançamentos retroativos em
       ${esc2(contexto.compNext.label)} (${contexto.linhasSeguinte} linhas).
+      ${contexto.ignoradas?`<b>${contexto.ignoradas}</b> linha${contexto.ignoradas===1?"":"s"} sem nome,
+        sem identificador e sem período — rodapé, subtotal ou formatação — ${contexto.ignoradas===1?"foi ignorada":"foram ignoradas"}.`:""}
       Nada foi alterado — as decisões abaixo são suas.</p>
   </section>`;
 
-  html+=`<section><div class="rc-filtros">`+
+  html+=`<section>`+legenda(items)+`<div class="rc-filtros">`+
     FILTROS.map(f=>`<button class="rc-filtro${R.filtro===f.k?" active":""}" onclick="Recon.setFiltro('${f.k}')">
       ${f.rot} <span class="cnt">${contaFiltro(f.k)}</span></button>`).join("")+
     `</div>`;
@@ -238,6 +269,33 @@ function renderResultado(){
   html+=blocoPrevia();
   el.innerHTML=html;
 }
+
+/* Por que cada status existe e o que ele pede de você. Só aparecem os status
+   presentes no resultado — legenda de coisa que não está na tela é ruído. */
+const EXPLICA={
+  CONCILIADO:"O ajuste devido foi encontrado na fatura seguinte, fechando identidade, competência de origem, período, sinal e FTE. Nada a fazer.",
+  AUSENTE:"A fatura de origem obrigava um ajuste e nenhuma linha correspondente foi encontrada na seguinte. É a pendência mais direta: ou o lançamento faltou, ou aconteceu fora destas duas faturas.",
+  PERIODO_DIVERGENTE:"O lançamento existe e está no sentido certo, mas cobre um período diferente do devido. O trecho exato que não fechou é apontado no detalhe.",
+  FTE_DIVERGENTE:"Período e sentido corretos, rateio diferente do esperado. Só aparece quando o rateio realmente difere — um período menor produzindo FTE menor não conta como divergência.",
+  SINAL_INCORRETO:"O período confere, mas o lançamento está invertido: desconto onde caberia acréscimo, ou o contrário.",
+  DUPLICADO:"O mesmo período aparece mais de uma vez na fatura seguinte. O app nunca escolhe qual linha remover — isso é decisão sua.",
+  SEM_ORIGEM:"Existe um retroativo na fatura seguinte que nenhuma movimentação das duas faturas explica. Não quer dizer que esteja errado: a causa pode estar numa base de RH que não foi carregada. Requer validação.",
+  IDENTIDADE_AMBIGUA:"A mesma matrícula aparece ligada a mais de um GROOT entre as duas faturas. Os registros não são unidos automaticamente — confirme quem é quem antes de agir.",
+  INDETERMINADO:"A linha tem um período que poderia ser retroativo, mas os sinais se contradizem. Enquanto não for esclarecida, ela fica fora de todas as comparações.",
+  REVISAO:"A fatura de origem não traz um dado necessário para calcular o ajuste devido, ou há mais de uma leitura possível para a correspondência. O app prefere avisar a chutar."
+};
+function legenda(items){
+  const presentes=[...new Set(items.map(i=>i.status))]
+    .sort((a,b)=>ORDEM_LEGENDA.indexOf(a)-ORDEM_LEGENDA.indexOf(b));
+  if(!presentes.length) return "";
+  return `<details class="rc-legenda"><summary>O que cada status significa (${presentes.length} em uso)</summary>
+    <dl>${presentes.map(st=>{
+      const m=RECON_META[st]||{label:st,tone:"info",icon:"·"};
+      return `<dt class="t-${m.tone}">${m.icon} ${esc2(m.label)}</dt><dd>${esc2(EXPLICA[st]||"")}</dd>`;
+    }).join("")}</dl></details>`;
+}
+const ORDEM_LEGENDA=["AUSENTE","SINAL_INCORRETO","DUPLICADO","PERIODO_DIVERGENTE","FTE_DIVERGENTE",
+  "SEM_ORIGEM","IDENTIDADE_AMBIGUA","INDETERMINADO","REVISAO","CONCILIADO"];
 
 function linhaItem(it){
   const meta=RECON_META[it.status]||{label:it.status,tone:"info",icon:"·"};
@@ -560,6 +618,9 @@ function setModo(m){
   $("modo-conciliar").classList.toggle("active", m==="conciliar");
   document.body.dataset.modoConciliacao=m;
 }
+
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",initDropZones);
+else initDropZones();
 
 window.Recon={carregar, conciliar, trocarOrdem, setFiltro, toggle, decidir, modo, editar,
   gerar, setModo, manter, setComp:(qual,y,m)=>{

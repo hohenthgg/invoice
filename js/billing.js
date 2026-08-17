@@ -31,6 +31,18 @@ const LINE_CLASS_LABEL = {
   UNDETERMINED: "Indeterminado"
 };
 
+/** Uma linha que não identifica ninguém e não traz período nenhum não é um
+ *  colaborador: é sobra de planilha — rodapé, subtotal, linha de formatação.
+ *  Fatura real tem várias. Elas não devem virar apontamento de espécie alguma,
+ *  porque não há o que conciliar nem o que revisar. */
+function semSubstancia(e){
+  const temNome=String(e.nome??"").trim()!=="";
+  const temGroot=String(e.groot??"").trim()!==""&&String(e.groot).trim()!=="0";
+  const temMat=String(e.matricula??"").trim()!=="";
+  const temData=isValidYmd(e.inicio)||isValidYmd(e.fim);
+  return !temNome && !temGroot && !temMat && !temData;
+}
+
 /** Competência (ano/mês) a que um período pertence, quando ele cabe todo
  *  dentro de um único mês. Devolve null se o período cruza meses. */
 function competenceOfPeriod(start, end){
@@ -179,5 +191,5 @@ function inferMovement(achado, compOrigem){
 
 if(typeof module!=="undefined"&&module.exports){
   module.exports={LINE_CLASS, LINE_CLASS_LABEL, classifyLine, isRetroClass,
-    originalBilling, inferMovement, competenceOfPeriod};
+    originalBilling, inferMovement, competenceOfPeriod, semSubstancia};
 }

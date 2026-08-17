@@ -121,8 +121,12 @@ function buildPersonIndex(lists){
 function isRetroLine(e, comp){ return isRetroClass(classifyLine(e,comp).classe); }
 
 function splitInvoiceLines(employees, comp){
-  const normais=[], retroativos=[], indeterminados=[];
+  const normais=[], retroativos=[], indeterminados=[], ignoradas=[];
   employees.forEach(e=>{
+    /* Sobra de planilha não entra em nenhum bucket de análise: não é pessoa,
+       não tem período, não há o que conciliar. Só é contada, para que o total
+       de linhas lidas continue batendo com o arquivo. */
+    if(semSubstancia(e)){ ignoradas.push(e); return; }
     const c=classifyLine(e,comp);
     e.lineClassification=c.classe;          // campo interno, usado pela interface
     e.lineClassReason=c.motivo;
@@ -131,7 +135,7 @@ function splitInvoiceLines(employees, comp){
     else if(c.classe===LINE_CLASS.UNDETERMINED) indeterminados.push(e);
     else normais.push(e);
   });
-  return {normais, retroativos, indeterminados};
+  return {normais, retroativos, indeterminados, ignoradas};
 }
 
 /** Retroativo já normalizado para comparação com o esperado. */
@@ -377,26 +381,42 @@ function reconcile(input){
       linhasNext:linhasNextPorPessoa.get(key)||[]}));
   });
 
-  // --- 5.3 linhas que não deu para classificar ---
+  /* --- 5.3 linhas da N+1 que não deu para classificar ---
+     Só vale apontar quando a linha TEM um período: aí ela poderia ser um
+     retroativo e a dúvida é real. Sem período válido ela não pode ser
+     retroativo de nada — não é "indeterminada", é inaplicável, e vira ruído
+     numa fatura de centenas de linhas. */
+  const semPeriodoNaSeguinte=[];
   splitNext.indeterminados.forEach(e=>{
+    if(!isValidYmd(e.inicio)&&!isValidYmd(e.fim)){ semPeriodoNaSeguinte.push(e); return; }
     items.push(makeItem({
       status:RECON_STATUS.INDETERMINADO, alerts:[RECON_STATUS.INDETERMINADO],
-      conf:RECON_CONF.REVISAO, confMotivo:"a linha não pôde ser classificada",
+      conf:RECON_CONF.REVISAO,
+      confMotivo:"a linha tem período, mas a leitura dele comporta mais de uma interpretação",
       esperado:null, achado:null, achados:[],
-      diagnostico:"Linha da fatura "+compNext.label+" não classificada. "+(e.lineClassReason||""),
+      diagnostico:"Esta linha da fatura "+compNext.label+" aparece aqui porque tem um período "
+        +"que poderia ser um retroativo de "+compN.label+", mas os sinais se contradizem. "
+        +(e.lineClassReason||"")
+        +" Enquanto isso não for esclarecido, ela não entra em nenhuma comparação: nem conta "
+        +"como ajuste encontrado, nem como ajuste ausente.",
       diffDias:0, diffFte:0, compN, compNext, emp:e, idx,
       dim:{identidade:!idx.isAmbiguous(e), competencia:false, periodo:null, sinal:null, fte:null},
       cobranca:null, identidadeOrigem:e, modeloRow:e.srcRow, linhasNext:[e]}));
   });
 
-  // --- 5.4 linhas da fatura N que o motor não conseguiu ler ---
-  proj.errors.forEach(err=>{
+  /* --- 5.4 linhas da fatura N que o motor não conseguiu ler ---
+     Aparecem só quando dá para dizer DE QUEM é a linha. Um erro de dados numa
+     linha anônima não é acionável: não há quem procurar na fatura seguinte. */
+  proj.errors.filter(err=>String(err.nome||"").trim()&&err.nome!=="(sem nome)").forEach(err=>{
     items.push(makeItem({
       status:RECON_STATUS.REVISAO, alerts:[RECON_STATUS.REVISAO],
-      conf:RECON_CONF.REVISAO, confMotivo:"informação insuficiente na fatura de origem",
+      conf:RECON_CONF.REVISAO, confMotivo:"a fatura de origem não traz o dado necessário",
       esperado:null, achado:null, achados:[],
-      diagnostico:"Informação insuficiente na fatura de origem: "+err.reason
-        +". Sem isso não é possível afirmar qual ajuste seria devido.",
+      diagnostico:"Esta pessoa aparece aqui porque a linha dela na fatura "+compN.label
+        +" tem um problema de preenchimento — "+err.reason+" — e é esse dado que define o "
+        +"ajuste devido. Sem ele o app não consegue dizer se algo deveria ter surgido em "
+        +compNext.label+", então prefere avisar a chutar. Corrija a linha na origem e "
+        +"reconcilie de novo.",
       diffDias:0, diffFte:0, compN, compNext, idx,
       dim:{identidade:false, competencia:true, periodo:null, sinal:null, fte:null},
       cobranca:null, identidadeOrigem:null, modeloRow:null, linhasNext:[],
@@ -410,6 +430,7 @@ function reconcile(input){
     correntesNaSeguinte:splitNext.normais.length,
     retroativosNaSeguinte:encontrados.length,
     indeterminadosNaSeguinte:splitNext.indeterminados.length,
+    ignoradas:splitN.ignoradas.length+splitNext.ignoradas.length+semPeriodoNaSeguinte.length,
     esperados:esperados.length,
     sequencia:checkSequence(compN,compNext)}};
 }

@@ -218,6 +218,20 @@ seria ruído.
 Cada apontamento carrega um nível de confiança — **alta**, **média** ou
 **revisão necessária** — acompanhado da razão que o justifica.
 
+### O que não vira apontamento
+
+Fatura real tem rodapé, subtotal e linha de formatação. Uma linha **sem nome, sem
+identificador e sem período** não é um colaborador: não há o que conciliar nem o
+que revisar. Essas linhas são descartadas da análise e apenas **contadas**, para
+que o total continue batendo com o arquivo.
+
+Pela mesma razão, uma linha da competência seguinte sem período válido não é
+classificada como "indeterminada" — ela simplesmente não pode ser um retroativo,
+e apontá-la numa fatura de centenas de linhas seria ruído. `Indeterminado` fica
+reservado para a linha que **tem** período e cujos sinais se contradizem. E um
+erro de preenchimento em linha anônima não vira `Revisão manual`: sem saber de
+quem é a linha, não há o que procurar na fatura seguinte.
+
 ### Diferença exata
 
 Quando o período não fecha, o app não diz apenas "divergente": aponta o trecho.
