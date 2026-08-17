@@ -173,13 +173,189 @@ button.primary:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:
 #panel-conciliacao .errors li:last-child{border-bottom:none}
 #panel-conciliacao .errors li b{font-weight:600;color:var(--ink)}
 
-/* rodapé fixo de seleção — só existe na aba de conciliação */
+/* rodapé fixo de seleção — pertence só ao modo "projetar" da aba 1 */
 footer{position:fixed;left:0;right:0;bottom:0;background:rgba(10,24,48,.94);
   backdrop-filter:blur(8px);border-top:1px solid var(--line);padding:12px 18px;display:none;z-index:10}
 footer.on{display:block}
 footer .inner{max-width:1120px;margin:0 auto;display:flex;align-items:center;gap:16px}
 footer .sel{font-size:.82rem;color:var(--mut);font-family:var(--mono)}
 body:not([data-tab="conciliacao"]) footer{display:none!important}
+body[data-modo-conciliacao="conciliar"] footer{display:none!important}
+
+/* ---------------- modo 1 × modo 2 ---------------- */
+#panel-conciliacao .rc-modos{display:inline-flex;border:1px solid var(--line);border-radius:9px;
+  overflow:hidden;margin-bottom:22px}
+#panel-conciliacao .rc-modo{background:var(--panel);border:none;color:var(--mut);font-size:.82rem;
+  font-weight:600;padding:9px 18px;cursor:pointer;transition:.15s;border-right:1px solid var(--line)}
+#panel-conciliacao .rc-modo:last-child{border-right:none}
+#panel-conciliacao .rc-modo:hover{color:var(--ink)}
+#panel-conciliacao .rc-modo.active{background:var(--amber);color:#0d1f3c}
+#panel-conciliacao .rc-painel{display:none}
+#panel-conciliacao .rc-painel.active{display:block}
+#panel-conciliacao .rc-intro{font-size:.82rem;color:var(--mut);line-height:1.6;max-width:760px;margin-bottom:20px}
+#panel-conciliacao .rc-intro b{color:var(--ink)}
+
+/* ---------------- as duas faturas ---------------- */
+#panel-conciliacao .rc-slots{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+#panel-conciliacao .rc-slot{background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-md);padding:16px}
+#panel-conciliacao .rc-slot-head{display:flex;align-items:center;gap:9px;font-size:.86rem;
+  font-weight:700;margin-bottom:12px}
+#panel-conciliacao .rc-slot-n{font-family:var(--mono);font-size:.66rem;background:var(--panel);
+  border:1px solid var(--line);color:var(--amber);border-radius:20px;padding:2px 9px;font-weight:700}
+#panel-conciliacao .rc-slot-drop{display:flex;align-items:center;justify-content:center;gap:9px;
+  border:2px dashed var(--line);border-radius:var(--radius-sm);padding:18px 14px;cursor:pointer;
+  font-size:.82rem;color:var(--mut);transition:.15s;background:var(--navy)}
+#panel-conciliacao .rc-slot-drop:hover{border-color:var(--amber);color:var(--ink)}
+#panel-conciliacao .rc-slot-drop svg{width:18px;height:18px;color:var(--amber)}
+#panel-conciliacao .rc-slot-info{margin-top:11px;font-size:.78rem;color:var(--mut);line-height:1.6}
+#panel-conciliacao .rc-slot-info.ok b{display:block;color:var(--ink);font-family:var(--mono);
+  font-size:.76rem;word-break:break-all}
+#panel-conciliacao .rc-slot-info.ok .rc-linhas{display:block;margin-top:5px;font-family:var(--mono);font-size:.74rem}
+#panel-conciliacao .rc-comp-linha{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;
+  font-size:.72rem;text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
+#panel-conciliacao .rc-comp-linha select{background:var(--panel);border:1px solid var(--line);
+  color:var(--amber);border-radius:7px;padding:5px 8px;font-size:.78rem;font-weight:600;cursor:pointer;
+  text-transform:none;letter-spacing:0}
+#panel-conciliacao .rc-comp-linha select:focus{border-color:var(--amber)}
+#panel-conciliacao .rc-incerta{color:var(--warn);font-style:normal;text-transform:none;letter-spacing:0}
+#panel-conciliacao .rc-slot-info.erro{color:#ffb3b3}
+#panel-conciliacao .rc-slot-info.carregando{color:var(--amber)}
+
+#panel-conciliacao .rc-seq{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px;
+  padding:12px 16px;border-radius:var(--radius-sm);background:var(--navy2);
+  border:1px solid var(--line);border-left:4px solid var(--line2);font-size:.82rem;color:var(--mut)}
+#panel-conciliacao .rc-seq.ok{border-left-color:var(--ok)}
+#panel-conciliacao .rc-seq.warn{border-left-color:var(--warn)}
+#panel-conciliacao .rc-seq-par{font-weight:700;color:var(--ink);font-size:.92rem}
+#panel-conciliacao .rc-seq-par i{color:var(--mut);font-style:normal;margin:0 4px}
+#panel-conciliacao .rc-seq.ok .rc-seq-msg{color:var(--ok)}
+#panel-conciliacao .rc-seq.warn .rc-seq-msg{color:var(--warn)}
+#panel-conciliacao .rc-seq-nota{color:var(--mut);font-size:.76rem}
+#panel-conciliacao .rc-inline-btn{background:var(--panel);border:1px solid var(--amber);color:var(--amber);
+  border-radius:7px;padding:5px 12px;font-size:.76rem;font-weight:600;cursor:pointer}
+#panel-conciliacao .rc-inline-btn:hover{background:rgba(255,194,51,.14)}
+#panel-conciliacao .rc-acoes-topo{margin-top:18px}
+
+#panel-conciliacao .rc-btn{border:1px solid var(--line);border-radius:9px;background:var(--panel);
+  color:var(--ink);font-size:.86rem;font-weight:700;padding:11px 22px;cursor:pointer;transition:.15s}
+#panel-conciliacao .rc-btn:hover{border-color:var(--amber)}
+#panel-conciliacao .rc-btn.primaria{background:linear-gradient(135deg,var(--amber),#ff9d00);
+  color:#0d1f3c;border-color:transparent;box-shadow:0 4px 14px rgba(255,194,51,.25)}
+#panel-conciliacao .rc-btn.primaria:hover{transform:translateY(-1px)}
+#panel-conciliacao .rc-btn.ghost{background:none}
+#panel-conciliacao .rc-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+
+/* ---------------- resultado ---------------- */
+#panel-conciliacao .rc-contexto{margin-top:14px;font-size:.78rem;color:var(--mut);line-height:1.6}
+#panel-conciliacao .rc-contexto b{color:var(--ink);font-family:var(--mono)}
+#panel-conciliacao .rc-filtros{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+#panel-conciliacao .rc-filtro{background:none;border:1px solid var(--line);border-radius:20px;
+  color:var(--mut);font-size:.76rem;font-weight:600;padding:6px 13px;cursor:pointer;transition:.15s}
+#panel-conciliacao .rc-filtro:hover{color:var(--ink);border-color:var(--line2)}
+#panel-conciliacao .rc-filtro.active{background:var(--amber);color:#0d1f3c;border-color:var(--amber)}
+#panel-conciliacao .rc-filtro .cnt{font-family:var(--mono);opacity:.75;margin-left:3px}
+#panel-conciliacao .rc-vazio{padding:28px;text-align:center;color:var(--mut);font-size:.82rem;
+  border:1px dashed var(--line);border-radius:var(--radius-md)}
+
+#panel-conciliacao table.rc-tabela{width:100%;border-collapse:collapse;font-size:.8rem}
+#panel-conciliacao .rc-tabela thead th{background:var(--panel);color:var(--mut);text-transform:uppercase;
+  font-size:.64rem;letter-spacing:.5px;padding:10px;text-align:left;white-space:nowrap;
+  box-shadow:0 1px 0 var(--line)}
+#panel-conciliacao .rc-tabela tbody td{padding:10px;border-top:1px solid var(--line);vertical-align:top}
+#panel-conciliacao .rc-linha{cursor:pointer}
+#panel-conciliacao .rc-linha:hover td{background:rgba(255,255,255,.03)}
+#panel-conciliacao .rc-linha.aberta td{background:rgba(255,255,255,.04)}
+#panel-conciliacao .rc-linha td:first-child{box-shadow:inset 3px 0 0 var(--line2)}
+#panel-conciliacao .rc-linha.t-ok td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+#panel-conciliacao .rc-linha.t-warn td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+#panel-conciliacao .rc-linha.t-bad td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+#panel-conciliacao .rc-status{display:block;font-weight:700;font-size:.78rem;white-space:nowrap}
+#panel-conciliacao .rc-status.t-ok{color:var(--ok)}
+#panel-conciliacao .rc-status.t-warn{color:var(--warn)}
+#panel-conciliacao .rc-status.t-bad{color:var(--bad)}
+#panel-conciliacao .rc-status.t-info{color:var(--mut)}
+#panel-conciliacao .rc-conf{display:block;font-size:.66rem;margin-top:3px;text-transform:uppercase;
+  letter-spacing:.4px;color:var(--mut2)}
+#panel-conciliacao .rc-conf.c-REVISAO{color:var(--warn)}
+#panel-conciliacao .rc-nome{font-weight:600}
+#panel-conciliacao .rc-nome small{display:block;font-weight:400;color:var(--mut);font-size:.7rem;
+  font-family:var(--mono);margin-top:2px}
+#panel-conciliacao .rc-per{font-family:var(--mono);font-size:.76rem;white-space:nowrap}
+#panel-conciliacao .rc-per small{display:block;color:var(--mut);font-size:.68rem;margin-top:2px}
+#panel-conciliacao .rc-sinal{font-weight:700;margin-right:2px}
+#panel-conciliacao .rc-sinal.neg{color:var(--bad)}
+#panel-conciliacao .rc-sinal.pos{color:var(--ok)}
+#panel-conciliacao .rc-dif{font-family:var(--mono);white-space:nowrap;color:var(--warn)}
+#panel-conciliacao .rc-decisao{background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:7px;padding:6px 8px;font-size:.75rem;cursor:pointer;max-width:170px}
+#panel-conciliacao .rc-decisao.d-ACEITAR{border-color:var(--amber);color:var(--amber)}
+#panel-conciliacao .rc-decisao.d-IGNORAR{color:var(--mut)}
+
+/* ---------------- detalhe comparativo ---------------- */
+#panel-conciliacao .rc-detalhe td{background:var(--navy);padding:16px}
+#panel-conciliacao .rc-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+#panel-conciliacao .rc-col{background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:13px}
+#panel-conciliacao .rc-col h4{font-size:.66rem;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--amber);margin-bottom:9px;font-weight:700}
+#panel-conciliacao .rc-col p{font-size:.76rem;color:var(--mut);line-height:1.6;margin-bottom:3px}
+#panel-conciliacao .rc-col b{color:var(--ink);font-weight:600}
+#panel-conciliacao .rc-forte{font-family:var(--mono);font-weight:700;color:var(--ink)!important;font-size:.82rem!important}
+#panel-conciliacao .rc-mut{color:var(--mut2)!important;font-style:italic}
+#panel-conciliacao .rc-diag{margin-top:13px;background:var(--panel);border-left:3px solid var(--line2);
+  border-radius:var(--radius-sm);padding:12px 14px}
+#panel-conciliacao .rc-diag b{font-size:.66rem;text-transform:uppercase;letter-spacing:.6px;color:var(--mut)}
+#panel-conciliacao .rc-diag p{font-size:.8rem;line-height:1.65;margin-top:5px}
+#panel-conciliacao .rc-proposta{margin-top:12px;font-size:.78rem;color:var(--mut);display:flex;
+  flex-direction:column;gap:3px;border:1px dashed var(--line);border-radius:var(--radius-sm);padding:11px 14px}
+#panel-conciliacao .rc-proposta b{color:var(--amber);font-size:.7rem;text-transform:uppercase;letter-spacing:.5px}
+#panel-conciliacao .rc-nada{margin-top:12px;font-size:.76rem;color:var(--mut2);font-style:italic}
+
+/* ---------------- ajuste fino ---------------- */
+#panel-conciliacao .rc-ajuste{margin-top:13px;background:var(--panel);border:1px solid var(--amber);
+  border-radius:var(--radius-sm);padding:14px}
+#panel-conciliacao .rc-ajuste>b{font-size:.68rem;text-transform:uppercase;letter-spacing:.6px;color:var(--amber)}
+#panel-conciliacao .rc-modos{display:inline-flex}
+#panel-conciliacao .rc-ajuste .rc-modos{display:flex;flex-direction:column;gap:6px;margin:10px 0;
+  border:none;border-radius:0}
+#panel-conciliacao .rc-ajuste .rc-modos label{display:flex;align-items:center;gap:7px;font-size:.78rem;
+  color:var(--mut);cursor:pointer}
+#panel-conciliacao .rc-ajuste input[type=radio]{accent-color:var(--amber)}
+#panel-conciliacao .rc-campos{display:flex;gap:12px;flex-wrap:wrap;margin-top:11px}
+#panel-conciliacao .rc-campos label{display:flex;flex-direction:column;gap:4px;font-size:.68rem;
+  text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
+#panel-conciliacao .rc-campos input,#panel-conciliacao .rc-campos select{background:var(--navy);
+  border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:7px 9px;font-size:.8rem;
+  font-family:var(--mono);text-transform:none;letter-spacing:0}
+#panel-conciliacao .rc-campos .rc-obs{flex:1 1 240px}
+#panel-conciliacao .rc-campos .rc-obs input{font-family:inherit;width:100%}
+#panel-conciliacao .rc-recalc{margin-top:11px;font-size:.78rem;color:var(--mut);
+  border-top:1px solid var(--line);padding-top:10px}
+#panel-conciliacao .rc-recalc b{color:var(--ink);font-family:var(--mono)}
+
+/* ---------------- prévia ---------------- */
+#panel-conciliacao .rc-previa{background:var(--navy2);border:1px solid var(--line);
+  border-left:4px solid var(--amber);border-radius:var(--radius-md);padding:18px}
+#panel-conciliacao .rc-previa.vazia{border-left-color:var(--line2);font-size:.82rem;color:var(--mut);line-height:1.6}
+#panel-conciliacao .rc-previa-num{display:flex;gap:20px;flex-wrap:wrap;font-size:.82rem;color:var(--mut);
+  padding-bottom:13px;border-bottom:1px solid var(--line)}
+#panel-conciliacao .rc-previa-num b{color:var(--ink);font-family:var(--mono);font-size:.95rem}
+#panel-conciliacao .rc-previa-num .rc-intactas{color:var(--mut2)}
+#panel-conciliacao .rc-previa-lista{list-style:none;margin:13px 0;display:flex;flex-direction:column;gap:7px}
+#panel-conciliacao .rc-previa-lista li{font-size:.78rem;color:var(--mut);line-height:1.5}
+#panel-conciliacao .rc-tag{display:inline-block;font-size:.62rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.4px;border-radius:20px;padding:2px 9px;margin-right:7px}
+#panel-conciliacao .rc-tag.inc{background:var(--ok);color:#0d1f3c}
+#panel-conciliacao .rc-tag.alt{background:var(--warn);color:#1a1305}
+#panel-conciliacao .rc-tag.rem{background:var(--bad);color:#fff}
+#panel-conciliacao .rc-acoes{margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+#panel-conciliacao .rc-ok{color:var(--ok);font-size:.8rem;font-weight:600}
+
+@media(max-width:860px){
+  #panel-conciliacao .rc-slots{grid-template-columns:1fr}
+  #panel-conciliacao .rc-cols{grid-template-columns:1fr}
+}
 
 /* ================================================================
    ABA 2 — FUSÃO DE LINHAS
@@ -442,3 +618,9 @@ body:not([data-tab="conciliacao"]) footer{display:none!important}
   .apptabs{overflow-x:auto;flex-wrap:nowrap}
   .apptab{white-space:nowrap}
 }
+
+/* nota dos dois modos, no cartão da aba 1 do guia */
+#panel-guia .concept .modo-nota{margin-top:10px;padding-left:11px;border-left:2px solid var(--line2);
+  font-size:.76rem}
+#panel-guia .concept .modo-nota b{color:var(--amber)}
+#panel-guia .concept .modo-nota i{font-style:italic;color:var(--ink)}

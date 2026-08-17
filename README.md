@@ -1,7 +1,7 @@
 # Ajustes MELI
 
 Ferramenta de página única que lê a planilha **Labor enviado ao MELI** e responde
-duas perguntas diferentes sobre ela, uma em cada aba.
+perguntas diferentes sobre ela, uma em cada aba.
 
 Todo o processamento acontece no navegador. Nenhum dado sai da máquina: não há
 servidor, banco nem envio de arquivos.
@@ -10,7 +10,7 @@ servidor, banco nem envio de arquivos.
 
 | Aba | Pergunta | Entrega |
 |---|---|---|
-| **Conciliação Faturas** | O que já foi cobrado está certo? | Ajustes de desconto e acréscimo da próxima fatura |
+| **Conciliação Faturas** | O que já foi cobrado está certo? | Ajustes projetados, ou a conferência de duas competências |
 | **Fusão de Linhas** | O arquivo bate com o alvo do MELI? | Labor equalizado dia a dia contra o retorno |
 | **Extração · Diarista** | Quem foram os diaristas do período? | Uma planilha por operação, no layout de origem |
 | **Guia** | — | Resumo conceitual do que cada aba faz |
@@ -20,9 +20,30 @@ direto na segunda.
 
 ### Conciliação Faturas
 
+Tem dois modos, escolhidos no topo da aba.
+
+**Projetar ajustes** — uma fatura. Descobre quais ajustes deverão aparecer na
+competência seguinte.
+
 ```
 Importar planilha  →  competência detectada  →  lista de ajustes  →  Exportar Excel
 ```
+
+**Conciliar duas faturas** — duas competências consecutivas. Confronta o que a
+fatura N obrigava a ajustar com o que a fatura N+1 de fato traz, e classifica
+cada caso: conciliado, ajuste ausente, parcial, rateio divergente, sinal
+incorreto, duplicado, retroativo sem origem ou revisão manual. Cada apontamento
+vem com nível de confiança e um diagnóstico em texto.
+
+```
+Fatura N + Fatura N+1  →  apontamentos  →  você decide  →  prévia  →  Fatura Conciliada
+```
+
+O app **não altera nada por conta própria**. Toda linha nasce em "manter como
+está"; só o que for explicitamente aceito entra na prévia, e a exportação parte
+da fatura N+1 para criar um arquivo novo — o original nunca é sobrescrito. O
+arquivo gerado leva uma aba `CONCILIAÇÃO` documentando o que foi analisado,
+o que você decidiu e o que de fato mudou, inclusive o que optou por não tratar.
 
 ### Fusão de Linhas
 
@@ -95,8 +116,8 @@ O arquivo `.nojekyll` já está no repositório para o Pages servir tudo sem pro
 ## Estrutura
 
 ```
-index.html            as três abas e a ordem de carga dos scripts
-css/styles.css        estilos das três abas
+index.html            as quatro abas e a ordem de carga dos scripts
+css/styles.css        estilos das quatro abas
 js/config.js          nomes de abas, colunas aceitas, dia de corte
 js/dates.js           datas como inteiro AAAAMMDD, imune a fuso horário
 js/engine.js          motor de regras: valida, classifica, dedupe
@@ -104,26 +125,31 @@ js/competence.js      detecção automática da competência
 js/import.js          leitura da planilha (SheetJS)
 js/ui.js              renderização da tabela e do detalhe
 js/export.js          geração do Excel herdando o estilo do arquivo original
-js/app.js             inicialização e eventos da aba de conciliação
+js/app.js             inicialização e eventos do modo "projetar ajustes"
+js/reconciliation.js        motor de conciliação entre duas faturas
+js/reconciliation-ui.js     uploads duplos, apontamentos, decisões e prévia (IIFE)
+js/reconciliation-export.js clona a fatura N+1 e aplica só o que foi aceito
 js/fusao.js           aba Fusão de Linhas, inteira (IIFE)
 js/extracao.js        aba Extração · Diarista, inteira (IIFE)
 js/tabs.js            navegação entre as abas principais
-tests/                testes do motor, sem dependências
+tests/                testes do motor e da conciliação, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
 ```
 
 Os arquivos são carregados como scripts clássicos, na ordem declarada no
 `index.html`. Não há build, bundler nem instalação: é o código que roda.
 
-### Por que as abas 2 e 3 são IIFEs
+### Por que boa parte dos módulos é IIFE
 
 As ferramentas nasceram como páginas independentes e colidiam ao dividir o mesmo
-documento. A de conciliação está espalhada por sete arquivos que compartilham o
-escopo global e continua assim; as outras duas foram fechadas em IIFEs.
+documento. O modo "projetar ajustes" está espalhado por sete arquivos que
+compartilham o escopo global e continua assim; os demais foram fechados em IIFEs.
 
 `js/fusao.js` precisava disso porque também define uma função `render`; publica em
 `window.Fusao` apenas o que os handlers inline do HTML chamam. `js/extracao.js` já
-nascera isolado.
+nascera isolado. `js/reconciliation-ui.js` segue a mesma regra e publica
+`window.Recon` — já `js/reconciliation.js` fica no escopo global de propósito,
+porque é motor puro e os testes o carregam junto de `engine.js`.
 
 Os `id` dos elementos levam prefixo — `fz-` na fusão, `ex-` na extração — porque
 as abas coexistem no mesmo documento: fusão e conciliação tinham as duas um
@@ -141,13 +167,21 @@ Carregadas por CDN, sem instalação:
 ## Testes
 
 ```bash
-npm test          # ou: node tests/engine.test.js
+npm test          # roda os dois arquivos de teste
 ```
 
 Não há dependências para instalar. Os testes carregam os mesmos arquivos de
-`js/` que o navegador usa, num contexto compartilhado, e cobrem os casos
-obrigatórios de regra, os limites da competência, a proteção contra ajuste
-duplicado e a detecção automática da competência.
+`js/` que o navegador usa, num contexto compartilhado.
+
+`tests/engine.test.js` cobre os casos obrigatórios de regra, os limites da
+competência, a proteção contra ajuste duplicado e a detecção automática da
+competência.
+
+`tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as oito
+classificações, a separação entre linha normal e linha retroativa (incluindo
+rateio negativo legítimo), a normalização de identificadores, a checagem de
+sequência, as sugestões por tipo de divergência e a garantia de que nenhum
+apontamento nasce aceito.
 
 ## Detecção da competência
 
