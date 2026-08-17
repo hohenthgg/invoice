@@ -794,7 +794,8 @@ function exportarDiaristas(uid, tipo){
 }
 // =================== CONFRONTO HCM MELI ===================
 
-window.normGroot=g=>String(g||'').trim().replace(/\.0$/,'');
+/* mesma normalização do resto do app — js/identity.js */
+window.normGroot=g=>normalizeGroot(g);
 
 window.__hcmLinhas = []; // linhas do MELI não cobertas
 

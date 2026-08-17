@@ -94,14 +94,135 @@ function descreverAlteracao(it){
 }
 
 /* ================================================================
-   ESCRITA
+   ESCRITA — identidade lógica, nunca posição física
 
-   Ordem obrigatória das operações na aba de Labor:
-     1) substituições  — alteram células, não deslocam nada;
-     2) remoções       — de baixo para cima, senão os índices andam;
-     3) inclusões      — sempre no fim, herdando o estilo de uma linha
-                         existente da própria pessoa quando houver.
+   O perigo aqui é sutil: `spliceRows` desloca os índices das linhas
+   seguintes. Um índice guardado antes da remoção passa a apontar para
+   OUTRA pessoa. Se esse índice for usado como linha-modelo, a linha
+   nova de João sai com o GROOT, o nome e a matrícula de Maria — erro
+   nominal de faturamento, silencioso.
+
+   A defesa é dupla, e a segunda torna a primeira redundante de
+   propósito:
+
+   1. FASE 0, antes de qualquer operação estrutural, cada inclusão
+      captura um snapshot imutável do template (só estilos e altura) e a
+      identidade lógica da pessoa. Depois disso nenhum índice antigo é
+      consultado.
+
+   2. O template NUNCA fornece valor de célula. Toda a identidade da
+      linha nova vem do registro conciliado da pessoa. Ainda que o
+      snapshot viesse da linha errada, o que se herda é aparência.
+
+   E, antes de dar a linha por boa, os campos nominais escritos são
+   conferidos contra os esperados. Divergiu, a inclusão é abortada e
+   registrada — nunca gravada em silêncio.
    ================================================================ */
+
+/** Identidade lógica do colaborador, obtida do registro conciliado —
+ *  GROOT normalizado, matrícula como segundo recurso. Nunca da posição. */
+function buildEmployeeIdentity(item){
+  const raw=item.identidadeRaw||{};
+  const campos=item.identidadeCampos||{};
+  const pick=(a,b)=>(a!==undefined&&a!==null&&a!=="")?a:b;
+  return {
+    groot:      pick(raw.groot, pick(campos.groot, item.groot)),
+    matricula:  pick(raw.matricula, pick(campos.matricula, item.matricula)),
+    nome:       pick(raw.nome, pick(campos.nome, item.nome)),
+    cargo:      raw.cargo, regime: raw.regime,
+    diasFolga:  raw.diasFolga, escala: raw.escala
+  };
+}
+
+/** Snapshot imutável de uma linha: só o que é aparência. Capturado ANTES
+ *  de qualquer remoção, para que o deslocamento de índices não o afete. */
+function captureRowTemplate(ws, rowIndex){
+  if(!rowIndex||rowIndex<2||rowIndex>ws.rowCount) return null;
+  const row=ws.getRow(rowIndex);
+  const estilos=[];
+  row.eachCell({includeEmpty:true},(cell,c)=>{
+    estilos[c]=cell.style?JSON.parse(JSON.stringify(cell.style)):null;
+  });
+  return {estilos, height:row.height, origem:rowIndex};
+}
+
+/** Linha desta planilha que serve de molde visual. Preferência para a
+ *  linha da própria pessoa; qualquer linha de dados serve de reserva,
+ *  porque dela só se aproveita o estilo. */
+function resolveTemplateRow(ws, item, removidas){
+  const candidatos=[item.achado&&item.achado.srcRow, item.modeloRow];
+  for(const r of candidatos){
+    if(r&&!removidas.includes(r)&&r>=2&&r<=ws.rowCount) return r;
+  }
+  for(let r=2;r<=ws.rowCount;r++) if(!removidas.includes(r)) return r;
+  return null;
+}
+
+/** FASE 0 — resolve tudo que depende de índice enquanto os índices ainda
+ *  valem, e devolve um plano imutável. */
+function prepararInclusoes(ws, plano, removidas){
+  return plano.incluir.map(({item,sug})=>({
+    item, sug,
+    identity:buildEmployeeIdentity(item),
+    template:captureRowTemplate(ws, resolveTemplateRow(ws, item, removidas))
+  }));
+}
+
+function applyEmployeeIdentity(row, map, identity){
+  const set=(k,v)=>{ const c=map[k];
+    if(c!==undefined&&c>=0&&v!==undefined&&v!==null&&v!=="") row.getCell(c+1).value=v; };
+  set("groot", identity.groot);
+  set("nome", identity.nome);
+  set("matricula", identity.matricula);
+  set("regime", identity.regime);
+  set("cargo", identity.cargo);
+  set("diasFolga", identity.diasFolga);
+  set("escala", identity.escala);
+}
+
+function applyAdjustmentFields(row, map, sug){
+  const col=k=>(map[k]!==undefined&&map[k]>=0)?map[k]+1:null;
+  const cIni=col("inicio"), cFim=col("fim"), cRat=col("rateio");
+  if(cIni) escreverData(row.getCell(cIni), sug.start);
+  if(cFim) escreverData(row.getCell(cFim), sug.end);
+  if(cRat) escreverRateio(row.getCell(cRat), sug.kind==="DESCONTAR"?-sug.rateio:sug.rateio);
+}
+
+/** Confere o que foi realmente escrito contra o que era esperado.
+ *  Devolve a lista de divergências — vazia quando a linha está correta. */
+function validarIdentidadeDaLinha(row, map, identity){
+  const erros=[];
+  const lido=k=>{ const c=map[k]; return (c!==undefined&&c>=0)?row.getCell(c+1).value:undefined; };
+  const igualId=(a,b)=>normalizeGroot(a)===normalizeGroot(b);
+  const igualTexto=(a,b)=>String(a??"").trim().toUpperCase()===String(b??"").trim().toUpperCase();
+
+  if(identity.groot!==undefined&&identity.groot!==null&&identity.groot!==""
+     &&!igualId(lido("groot"), identity.groot))
+    erros.push("GROOT gravado ("+lido("groot")+") diferente do esperado ("+identity.groot+")");
+  if(identity.matricula!==undefined&&identity.matricula!==null&&identity.matricula!==""
+     &&!igualId(lido("matricula"), identity.matricula))
+    erros.push("matrícula gravada ("+lido("matricula")+") diferente da esperada ("+identity.matricula+")");
+  if(identity.nome&&!igualTexto(lido("nome"), identity.nome))
+    erros.push("nome gravado ("+lido("nome")+") diferente do esperado ("+identity.nome+")");
+  return erros;
+}
+
+/** Cria a linha conciliada: estrutura do template, identidade da pessoa.
+ *  Devolve {row, erros}. Com erros, a linha é removida e nada é gravado. */
+function createLaborRow(ws, map, prep){
+  const row=ws.addRow([]);
+  if(prep.template){
+    prep.template.estilos.forEach((st,c)=>{ if(st) row.getCell(c).style=JSON.parse(JSON.stringify(st)); });
+    if(prep.template.height) row.height=prep.template.height;
+  }
+  applyEmployeeIdentity(row, map, prep.identity);
+  applyAdjustmentFields(row, map, prep.sug);
+  const erros=validarIdentidadeDaLinha(row, map, prep.identity);
+  if(erros.length){ ws.spliceRows(row.number,1); return {row:null, erros}; }
+  row.commit&&row.commit();
+  return {row, erros:[]};
+}
+
 async function gerarFaturaConciliada(ctx){
   const {buffer, sheetName, map, items, comp, fileNameBase}=ctx;
   const plano=planoDeAlteracoes(items);
@@ -111,51 +232,28 @@ async function gerarFaturaConciliada(ctx){
   const ws=wb.getWorksheet(sheetName)||wb.worksheets[0];
   if(!ws) throw new Error("Aba de Labor não encontrada no arquivo da fatura seguinte.");
 
-  const col=k=>(map[k]!==undefined&&map[k]>=0)?map[k]+1:null;   // 1-based
-  const cIni=col("inicio"), cFim=col("fim"), cRat=col("rateio");
+  const paraRemover=[...new Set(plano.remover.flatMap(r=>r.sug.alvoRows||[]))]
+    .sort((a,b)=>b-a);
 
-  // ---------- 1) substituições ----------
+  // ---------- FASE 0: snapshots, enquanto os índices ainda valem ----------
+  const inclusoes=prepararInclusoes(ws, plano, paraRemover);
+
+  // ---------- 1) substituições (alteram células, não deslocam nada) ----------
   plano.substituir.forEach(({sug})=>{
-    const row=ws.getRow(sug.alvoRow);
-    if(cIni) escreverData(row.getCell(cIni), sug.start);
-    if(cFim) escreverData(row.getCell(cFim), sug.end);
-    if(cRat) escreverRateio(row.getCell(cRat), sug.kind==="DESCONTAR"?-sug.rateio:sug.rateio);
+    applyAdjustmentFields(ws.getRow(sug.alvoRow), map, sug);
   });
 
   // ---------- 2) remoções, de baixo para cima ----------
-  const paraRemover=[...new Set(plano.remover.flatMap(r=>r.sug.alvoRows||[]))]
-    .sort((a,b)=>b-a);
   paraRemover.forEach(r=>ws.spliceRows(r,1));
 
-  // ---------- 3) inclusões no fim ----------
-  plano.incluir.forEach(({item,sug})=>{
-    const modeloRow=acharModelo(ws, item, paraRemover);
-    const novo=ws.addRow([]);
-    if(modeloRow){
-      // mesma pessoa nesta planilha: herda estilo E cadastro
-      modeloRow.eachCell({includeEmpty:true},(cell,c)=>{
-        const alvo=novo.getCell(c);
-        alvo.style=JSON.parse(JSON.stringify(cell.style||{}));
-        if(c!==cIni&&c!==cFim&&c!==cRat) alvo.value=cell.value;
-      });
-      novo.height=modeloRow.height;
-    } else {
-      // pessoa ausente desta fatura: só a aparência é herdada
-      const visual=acharModeloVisual(ws, paraRemover);
-      if(visual){
-        // só a APARÊNCIA é herdada — nenhum valor de outra pessoa acompanha
-        visual.eachCell({includeEmpty:true},(cell,c)=>{
-          novo.getCell(c).style=JSON.parse(JSON.stringify(cell.style||{}));
-        });
-        novo.height=visual.height;
-      }
-      COLS_IDENTIDADE.forEach(k=>{ const c=map[k]; if(c!==undefined&&c>=0) novo.getCell(c+1).value=null; });
-      preencherIdentificacao(novo, map, item);
+  // ---------- 3) inclusões, a partir dos snapshots ----------
+  const falhas=[];
+  inclusoes.forEach(prep=>{
+    const {erros}=createLaborRow(ws, map, prep);
+    if(erros.length){
+      falhas.push({nome:prep.item.nome, erros});
+      prep.item.exportacaoAbortada=erros.join("; ");
     }
-    if(cIni) escreverData(novo.getCell(cIni), sug.start);
-    if(cFim) escreverData(novo.getCell(cFim), sug.end);
-    if(cRat) escreverRateio(novo.getCell(cRat), sug.kind==="DESCONTAR"?-sug.rateio:sug.rateio);
-    novo.commit&&novo.commit();
   });
 
   // ---------- aba de auditoria ----------
@@ -169,46 +267,8 @@ async function gerarFaturaConciliada(ctx){
   document.body.appendChild(a);
   a.click();
   setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},2000);
-  return {plano, arquivo:a.download};
+  return {plano, arquivo:a.download, falhas};
 }
-
-/** Linha da MESMA pessoa dentro desta planilha, para a nova herdar estilo e
- *  campos cadastrais. Só valem índices da própria fatura N+1: a linha de
- *  origem vem do outro arquivo e apontaria para outra pessoa.
- *  Linhas removidas nesta mesma geração não servem de modelo. */
-function acharModelo(ws, item, removidas){
-  const candidatos=[item.achado&&item.achado.srcRow, item.modeloRow];
-  for(const r of candidatos){
-    if(r && !removidas.includes(r) && r>=2 && r<=ws.rowCount) return ws.getRow(r);
-  }
-  return null;
-}
-/** Sem linha da pessoa no arquivo de destino, herda só a APARÊNCIA de uma
- *  linha qualquer — os dados vêm do cadastro da fatura de origem. */
-function acharModeloVisual(ws, removidas){
-  for(let r=2;r<=ws.rowCount;r++) if(!removidas.includes(r)) return ws.getRow(r);
-  return null;
-}
-
-/** Identidade do colaborador na linha nova.
- *  A ESTRUTURA (colunas, estilo, formatos) vem sempre da fatura N+1; a
- *  IDENTIDADE vem do registro conciliado da pessoa, que quando ela não existe
- *  na N+1 só existe na fatura N. Nunca se reaproveita a identidade de outra
- *  pessoa da N+1 só porque a linha dela serviu de molde visual. */
-function preencherIdentificacao(row, map, item){
-  const set=(k,v)=>{ const c=map[k]; if(c!==undefined&&c>=0&&v!==null&&v!==undefined&&v!=="") row.getCell(c+1).value=v; };
-  const raw=item.identidadeRaw||{};
-  const campos=item.identidadeCampos||{};
-  set("groot", raw.groot!==undefined&&raw.groot!==null?raw.groot:(campos.groot||item.groot));
-  set("nome", raw.nome!==undefined&&raw.nome!==null?raw.nome:(campos.nome||item.nome));
-  set("matricula", raw.matricula!==undefined&&raw.matricula!==null?raw.matricula:(campos.matricula||item.matricula));
-  set("regime", raw.regime); set("cargo", raw.cargo);
-  set("diasFolga", raw.diasFolga); set("escala", raw.escala);
-}
-
-/** Colunas que carregam identidade — precisam ser reescritas quando o molde
- *  visual veio de outra pessoa. */
-const COLS_IDENTIDADE=["groot","nome","matricula","regime","cargo","diasFolga","escala"];
 
 function escreverData(cell, v){
   cell.value=ymdToExcelDate(v);
@@ -268,5 +328,7 @@ function montarAbaConciliacao(wb, items){
 }
 
 if(typeof module!=="undefined"&&module.exports){
-  module.exports={planoDeAlteracoes, resumoPrevia, descreverAjuste, descreverAlteracao};
+  module.exports={planoDeAlteracoes, resumoPrevia, descreverAjuste, descreverAlteracao,
+    buildEmployeeIdentity, captureRowTemplate, resolveTemplateRow, prepararInclusoes,
+    applyEmployeeIdentity, applyAdjustmentFields, validarIdentidadeDaLinha, createLaborRow};
 }

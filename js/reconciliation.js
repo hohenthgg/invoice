@@ -64,17 +64,11 @@ const PLACEHOLDER_ID = "§sem-id§";
    entra como reforço visual. O Excel devolve o mesmo identificador ora
    como texto, ora como número: "123456", 123456 e 123456.0 são o mesmo.
    ================================================================ */
-function normId(v){
-  if(v===null||v===undefined) return "";
-  const s=String(v).trim();
-  if(!s) return "";
-  if(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(s)){
-    const n=Number(s);
-    if(isFinite(n)) return String(n);      // 123456.0 → "123456"
-  }
-  return s.toUpperCase();
-}
-function hasId(v){ const s=normId(v); return s!=="" && s!=="0"; }
+/* A regra de identidade é uma só no aplicativo inteiro — js/identity.js.
+   Duas implementações da mesma normalização é como se cria a situação em que
+   a Conciliação acha que são a mesma pessoa e a Extração acha que não. */
+function normId(v){ return normalizeGroot(v); }
+function hasId(v){ return hasGroot(v); }
 
 function buildPersonIndex(lists){
   const midToGids=new Map(), gidToMids=new Map();
