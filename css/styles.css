@@ -1,12 +1,13 @@
 /* ================================================================
-   Ajustes MELI — folha de estilo única das três abas.
+   Ajustes MELI — folha de estilo única das quatro abas.
 
    A estética é a do painel escuro: fundo navy, acento âmbar, números
-   em fonte monoespaçada. O que é comum às três abas fica na base; o
-   que é específico de uma aba fica sob #panel-<aba>, porque as duas
-   ferramentas usam seletores de elemento iguais (table, th, td) com
-   intenções diferentes — a de conciliação é uma lista enxuta, a de
-   fusão é uma planilha densa que rola na horizontal.
+   em fonte monoespaçada. O que é comum às abas fica na base; o que é
+   específico de uma fica sob #panel-<aba>, porque as ferramentas usam
+   seletores de elemento iguais (table, th, td) com intenções
+   diferentes — a de conciliação é uma lista enxuta, a de fusão é uma
+   planilha densa que rola na horizontal, a de extração é um placar de
+   seis linhas.
    ================================================================ */
 
 :root{
@@ -305,7 +306,96 @@ body:not([data-tab="conciliacao"]) footer{display:none!important}
 #panel-fusao .smallbtn svg{width:15px;height:15px}
 
 /* ================================================================
-   ABA 3 — GUIA
+   ABA 3 — EXTRAÇÃO · DIARISTA
+
+   A ferramenta é um assistente de três passos: os passos 2 e 3 ficam
+   apagados e inertes até o anterior concluir, e o número do passo vira
+   um ✓ verde quando ele termina.
+   ================================================================ */
+#panel-extracao .step{background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-md);padding:22px 24px;margin-bottom:18px;transition:opacity .25s}
+#panel-extracao .step.disabled{opacity:.4;pointer-events:none}
+#panel-extracao .step-head{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+#panel-extracao .step-num{width:28px;height:28px;border-radius:50%;background:var(--amber);color:#0d1f3c;
+  font-weight:700;font-size:.86rem;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#panel-extracao .step-num.done{background:var(--ok);color:#0d1f3c}
+#panel-extracao .step-head h2{font-size:.94rem;font-weight:700;letter-spacing:.2px;color:var(--ink);
+  text-transform:none;margin-bottom:0;display:block}
+#panel-extracao .step-head h2::after{display:none}
+#panel-extracao .step-head .hint{margin-left:auto;font-size:.74rem;color:var(--mut);font-family:var(--mono)}
+
+#panel-extracao .drop{border:2px dashed var(--line);border-radius:var(--radius-lg);padding:34px 20px;
+  text-align:center;cursor:pointer;transition:border-color .15s,background .15s;background:var(--navy)}
+#panel-extracao .drop:hover,#panel-extracao .drop.over{border-color:var(--amber);background:#16305a}
+#panel-extracao .drop svg{width:32px;height:32px;margin-bottom:10px}
+#panel-extracao .drop .big{font-size:.95rem;font-weight:600}
+#panel-extracao .drop .small{font-size:.76rem;color:var(--mut);margin-top:7px;line-height:1.5}
+#panel-extracao .filechip{display:none;margin-top:14px;background:linear-gradient(180deg,#123a24,#10331f);
+  border:1px solid #1d6b3c;border-radius:var(--radius-sm);padding:10px 14px;font-size:.82rem;
+  color:var(--ok);font-weight:600}
+#panel-extracao .filechip.show{display:block}
+#panel-extracao .warnbox{display:none;margin-top:12px;padding:10px 14px;
+  background:linear-gradient(180deg,#421823,#3a1620);border:1px solid #7a2b3a;
+  border-radius:var(--radius-sm);color:#ffb3b3;font-size:.8rem;line-height:1.5}
+#panel-extracao .warnbox.show{display:block}
+
+#panel-extracao .period-row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end}
+#panel-extracao .field label{display:block;font-size:.7rem;font-weight:600;color:var(--mut);
+  margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+#panel-extracao .field input[type=date]{border:1px solid var(--line);border-radius:8px;padding:9px 12px;
+  font-size:.86rem;font-family:var(--mono);background:var(--panel);color:var(--ink)}
+#panel-extracao .field input[type=date]:focus{outline:2px solid var(--amber);outline-offset:1px}
+#panel-extracao .range-note{font-size:.75rem;color:var(--mut);margin-top:12px;font-family:var(--mono)}
+
+#panel-extracao .optgrid{display:grid;grid-template-columns:1fr 1fr;gap:0 28px;margin-top:18px;
+  padding-top:16px;border-top:1px solid var(--line)}
+#panel-extracao fieldset{border:none}
+#panel-extracao fieldset legend{font-size:.7rem;font-weight:600;color:var(--mut);text-transform:uppercase;
+  letter-spacing:.5px;margin-bottom:8px}
+#panel-extracao fieldset label{display:flex;gap:8px;align-items:flex-start;font-size:.82rem;
+  margin-top:8px;cursor:pointer}
+#panel-extracao fieldset input[type=radio]{accent-color:var(--amber);margin-top:2px;flex-shrink:0}
+#panel-extracao fieldset label span b{font-weight:600;color:var(--ink)}
+#panel-extracao fieldset label span i{display:block;font-style:normal;font-size:.74rem;color:var(--mut);
+  margin-top:2px;line-height:1.45}
+#panel-extracao .seg{display:flex;margin-top:4px;border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;width:fit-content}
+#panel-extracao .seg input{position:absolute;opacity:0;pointer-events:none}
+#panel-extracao .seg label{margin:0;padding:9px 18px;font-size:.82rem;font-weight:600;cursor:pointer;
+  background:var(--panel);color:var(--mut);border-right:1px solid var(--line);display:block}
+#panel-extracao .seg label:last-of-type{border-right:none}
+#panel-extracao .seg input:checked+label{background:var(--amber);color:#0d1f3c}
+#panel-extracao .seg input:focus-visible+label{outline:2px solid var(--amber);outline-offset:-2px}
+
+#panel-extracao .btn{border:1px solid var(--line);border-radius:9px;cursor:pointer;font-size:.86rem;
+  font-weight:700;padding:11px 22px;background:var(--panel);color:var(--ink);transition:.15s}
+#panel-extracao .btn:hover{border-color:var(--amber);background:rgba(255,194,51,.12)}
+#panel-extracao .btn.amber{background:linear-gradient(135deg,var(--amber),#ff9d00);color:#0d1f3c;
+  border-color:transparent;box-shadow:0 4px 14px rgba(255,194,51,.25)}
+#panel-extracao .btn.amber:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(255,194,51,.38)}
+#panel-extracao .btn.mini{padding:8px 14px;font-size:.8rem}
+#panel-extracao .btn:disabled{opacity:.4;cursor:default;transform:none;box-shadow:none}
+#panel-extracao .actions{margin-top:20px}
+#panel-extracao .all-actions{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}
+
+#panel-extracao .tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius-md);
+  background:var(--navy)}
+#panel-extracao table{width:100%;border-collapse:collapse;font-size:.82rem}
+#panel-extracao th{text-align:left;font-size:.65rem;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--mut);padding:10px;background:var(--panel);box-shadow:0 1px 0 var(--line);white-space:nowrap}
+#panel-extracao th.num,#panel-extracao td.num{text-align:right;font-family:var(--mono);
+  font-variant-numeric:tabular-nums}
+#panel-extracao td{padding:10px;border-top:1px solid var(--line);vertical-align:middle}
+#panel-extracao td .op{font-weight:600}
+#panel-extracao td .dup{color:var(--bad);font-family:var(--mono);font-weight:700}
+#panel-extracao td .zero{color:var(--mut)}
+#panel-extracao tr.empty td{color:var(--mut)}
+#panel-extracao .total-bar{margin-top:14px;display:flex;gap:22px;flex-wrap:wrap;font-size:.78rem;
+  color:var(--mut);font-family:var(--mono)}
+#panel-extracao .total-bar b{color:var(--ink)}
+
+/* ================================================================
+   ABA 4 — GUIA
    ================================================================ */
 #panel-guia .guia-lead{font-size:.92rem;color:var(--ink);line-height:1.6;max-width:720px;margin-bottom:6px}
 #panel-guia .guia-lead b{color:var(--amber)}
@@ -324,6 +414,9 @@ body:not([data-tab="conciliacao"]) footer{display:none!important}
   padding:3px 10px;border-radius:20px;text-transform:uppercase;margin-bottom:10px}
 #panel-guia .concept.c1 .chiph{background:var(--amber);color:#1a1305}
 #panel-guia .concept.c2 .chiph{background:#3d7bd9;color:#fff}
+#panel-guia .concept.c3 .chiph{background:#8a5cf6;color:#fff}
+#panel-guia .concept code.inline{font-family:var(--mono);font-size:.76rem;color:var(--ink);
+  background:var(--navy);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
 #panel-guia .concept h3{font-size:.95rem;margin-bottom:8px}
 #panel-guia .concept p{font-size:.8rem;color:var(--mut);line-height:1.6}
 #panel-guia .concept p+p{margin-top:8px}
@@ -341,6 +434,7 @@ body:not([data-tab="conciliacao"]) footer{display:none!important}
 @media(max-width:760px){
   #panel-fusao .viz-grid{grid-template-columns:1fr}
   #panel-guia .duo{grid-template-columns:1fr}
+  #panel-extracao .optgrid{grid-template-columns:1fr}
 }
 @media(max-width:560px){
   #panel-fusao .cell{width:22px;height:30px}
