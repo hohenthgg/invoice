@@ -81,8 +81,17 @@ function hasGroot(v){ const s=normalizeGroot(v); return s!=="" && s!=="0"; }
  *  jeitos diferentes. Isto serve só para perguntar "estes dois textos são o
  *  mesmo nome escrito diferente?" — acentos, pontuação e espaços repetidos
  *  somem, o resto fica. */
+/** Tira a numeração de lista que algumas abas põem na frente do nome
+ *  ("1. Douglas David…", "23 - Maria…"). É posição, não identidade:
+ *  sem isso, "1. Douglas" e "5. Douglas" viram duas pessoas sob o mesmo
+ *  GROOT — o falso alarme mais grave que existe aqui. Exige o separador
+ *  depois do número para não tocar num nome que comece com dígito. */
+function semNumeracaoDeLista(s){
+  return String(s===null||s===undefined?"":s).replace(/^\s*\d{1,3}\s*[.\-)]\s+/,"");
+}
+
 function normalizeNome(v){
-  return String(v===null||v===undefined?"":v)
+  return semNumeracaoDeLista(v)
     .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .replace(/[^A-Za-z0-9 ]/g," ")
     .replace(/\s+/g," ").trim().toUpperCase();
@@ -134,5 +143,5 @@ function personDayKey(groot, data){
 
 if(typeof module!=="undefined"&&module.exports){
   module.exports={limparGroot, normalizeGroot, grootParaSaida, hasGroot,
-                  normalizeNome, normalizeDateKey, personDayKey};
+                  semNumeracaoDeLista, normalizeNome, normalizeDateKey, personDayKey};
 }

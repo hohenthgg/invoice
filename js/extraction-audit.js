@@ -93,7 +93,10 @@ const NOMES_GENERICOS = new Set([
 
 /** Devolve a lista de problemas de um nome — vazia quando o nome está bem. */
 function problemasDoNome(bruto){
-  const s = String(bruto === null || bruto === undefined ? "" : bruto).trim();
+  /* A numeração de lista ("1. Douglas David…") sai antes de qualquer teste:
+     é posição na planilha, não defeito do nome — sem isso, a aba inteira de
+     Pouso XD viraria "nome com números no meio". */
+  const s = semNumeracaoDeLista(String(bruto === null || bruto === undefined ? "" : bruto).trim()).trim();
   const chave = normalizeNome(s);
   if (!s || !chave) return [NOME_PROBLEMA.VAZIO];
 
@@ -370,6 +373,17 @@ function listarTopicos(aud, descartados, leitura, semHorario, saida){
      informativo, mas nunca silencioso: mexer em coluna sem avisar é como
      entregar um número diferente do que a pessoa conferiu na tela. */
   (saida || []).forEach(s => {
+    /* Um turno que a tabela da operação não conhece (SD, FULL, PM onde só o
+       AM foi levantado) sai como está — escrever o horário de outro turno no
+       lugar seria pôr um dado errado com cara de certo. */
+    (s.escalasSemMapa || []).forEach(m => t.push(Object.assign({
+      topico: "Escala sem horário mapeado", gravidade: GRAVIDADE.MEDIA,
+      nome: "", groot: "", op: s.op, date: "",
+      diagnostico: 'A escala "' + m.token + '" apareceu em ' + m.vezes + ' registro'
+                 + (m.vezes === 1 ? "" : "s") + ' desta filial e não tem horário levantado. '
+                 + "O valor saiu na planilha como está, sem conversão.",
+      acao: "Levantar numa fatura o horário desse turno e acrescentá-lo à tabela da operação."
+    }, vazio)));
     (s.vazias || []).forEach(coluna => t.push(Object.assign({
       topico: "Coluna vazia removida", gravidade: GRAVIDADE.INFO,
       nome: "", groot: "", op: s.op, date: "",

@@ -44,9 +44,7 @@ const COLS = {
 
    A exceção acompanha em parte o cargo "Diarista Dom. e Feriados", mas
    NÃO dá para derivar dele: em Pouso Alegre e Patos de Minas esse mesmo
-   cargo usa o horário normal da unidade. Como o SIGO não informa
-   horário, a coluna sai com o padrão da operação e a exceção continua
-   sendo conferida na fatura.
+   cargo usa o horário normal da unidade.
    ================================================================ */
 const ESCALA_HORARIO_PADRAO = {
   "Pouso Alegre SVC": "03:00 07:00 08:00 12:48",
@@ -63,6 +61,68 @@ function escalaHorarioDe(op){
     ? ESCALA_HORARIO_PADRAO[op] : "";
 }
 
+/* ================================================================
+   O QUE A COLUNA ESCALA DO SIGO REALMENTE CARREGA, POR OPERAÇÃO
+   ----------------------------------------------------------------
+   O padrão acima só entra quando a linha não diz nada. Mas o SIGO real
+   diz bastante — só que cada filial fala uma língua:
+
+     Divinópolis      o HORÁRIO completo, por linha ("01:00 04:00 05:00 09:20")
+     Patos de Minas   horário em outro formato ("00:30 as 09:18") — ou vazio
+     Varginha         turno: AM / PM
+     Poços de Caldas  turno: AM (761), PM (10), SD (17)
+     Pouso Alegre SVC turno: svc / SVC / xd / XD / sd — e uma coluna
+                      "Escala Horário" própria, hoje vazia
+     Pouso Alegre XD  turno: XD, SD, FULL
+
+   Horário escrito passa verbatim — inclusive o formato de Patos: é o que
+   consta na origem. Turno vira horário pela tabela abaixo, levantada nas
+   faturas 3PL (Varginha: AM = 4-Mista-3ºT, PM = "1º e 2º Turno" da fatura
+   SMG9 de julho; Pouso: svc = SMG3, xd = BRXMG3).
+
+   Token que NÃO está na tabela (SD, FULL, PM de Poços…) fica como está e
+   vira tópico de revisão: escrever o horário de outro turno no lugar
+   seria pôr um dado errado com cara de certo.
+   ================================================================ */
+const ESCALA_TOKEN_HORARIO = {
+  "Pouso Alegre SVC": { "SVC":"03:00 07:00 08:00 12:48", "XD":"13:00 17:00 18:00 22:45" },
+  "Pouso Alegre XD":  { "XD":"13:00 17:00 18:00 22:45" },
+  "Poços de Caldas":  { "AM":"03:00 07:00 08:00 12:48" },
+  "Varginha":         { "AM":"03:00 07:00 08:00 11:20", "PM":"10:00 15:00 16:00 19:48" },
+  "Divinópolis":      {},
+  "Patos de Minas":   {}
+};
+
+/** A célula já é um horário? Duas ou mais marcações HH:MM contam como sim —
+ *  cobre "01:00 04:00 05:00 09:20" e também "00:30 as 09:18". */
+function pareceHorario(v){
+  const m = String(v == null ? "" : v).match(/\d{1,2}[:h]\d{2}/g);
+  return !!m && m.length >= 2;
+}
+
+/** Resolve o que a coluna ESCALA da saída deve dizer para uma linha.
+ *
+ *  Prioridade: coluna explícita de horário → horário escrito na própria
+ *  ESCALA → turno mapeado → vazio vira o padrão da operação. Token sem
+ *  mapa fica como está, com origem "sem_mapa" para o painel apontar.
+ *
+ *  @returns {{valor:string, origem:string, token?:string}} */
+function resolverEscala(op, escalaBruta, horarioExplicito){
+  const hx = String(horarioExplicito == null ? "" : horarioExplicito).trim();
+  if(hx) return {valor:hx, origem:"coluna"};
+  const e = String(escalaBruta == null ? "" : escalaBruta).trim();
+  if(pareceHorario(e)) return {valor:e, origem:"arquivo"};
+  if(e){
+    const mapa = ESCALA_TOKEN_HORARIO[op] || {};
+    const token = e.toUpperCase();
+    if(Object.prototype.hasOwnProperty.call(mapa, token))
+      return {valor:mapa[token], origem:"token", token};
+    return {valor:e, origem:"sem_mapa", token:e};
+  }
+  return {valor:escalaHorarioDe(op), origem:"padrao"};
+}
+
 if(typeof module!=="undefined"&&module.exports){
-  module.exports={ESCALA_HORARIO_PADRAO, escalaHorarioDe};
+  module.exports={ESCALA_HORARIO_PADRAO, escalaHorarioDe,
+                  ESCALA_TOKEN_HORARIO, pareceHorario, resolverEscala};
 }
