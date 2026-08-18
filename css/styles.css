@@ -785,6 +785,15 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 #panel-abs .abs-btn.go:hover:not(:disabled){transform:translateY(-1px)}
 #panel-abs .abs-btn.dl{background:linear-gradient(135deg,var(--ok),#2bb673);color:#06281a}
 #panel-abs .abs-btn.dl:hover{transform:translateY(-1px)}
+
+/* downloads por filial, ao lado do unificado */
+#panel-abs .abs-porfilial{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px;
+  margin-left:14px;vertical-align:middle}
+#panel-abs .abs-porfilial .lb{font-size:.72rem;color:var(--mut)}
+#panel-abs .abs-btnfil{font:inherit;font-size:.74rem;font-weight:600;cursor:pointer;
+  color:var(--ok);background:none;border:1px solid var(--ok);border-radius:9px;
+  padding:8px 14px;transition:transform .12s, background .12s}
+#panel-abs .abs-btnfil:hover{transform:translateY(-1px);background:rgba(61,220,132,.08)}
 #panel-abs .actions{display:flex;gap:12px;margin-top:16px;align-items:center;flex-wrap:wrap}
 
 #panel-abs .opres{background:var(--navy2);border:1px solid var(--line);border-radius:var(--radius-md);
