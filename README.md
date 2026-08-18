@@ -130,7 +130,9 @@ Soltar planilha  →  período + filtros  →  placar por operação  →  Baixa
 
 Compara, dia a dia, o **Quadro S&OP (sem over)** com quem esteve **presente** no
 período da fatura, e compensa o déficit de cada dia com os **diaristas
-efetivamente solicitados naquele dia** — contados uma vez só, e apenas quando têm
+solicitados pela ID Logistics naquele dia** — a agência não importa e o diarista
+do MELI fica fora (é custo do MELI, não cobertura do quadro); contados uma vez
+só, e apenas quando têm
 Groot ID. O abate é limitado ao próprio déficit: um dia nunca fica positivo por
 sobra de diarista.
 
