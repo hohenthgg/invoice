@@ -20,7 +20,14 @@
 "use strict";
 /* ============================== estado ============================== */
 const S = { mesA:null, mesB:null, sigo:null, sop:{}, sopOrigem:{}, sopArquivo:[],
-            sopFiles:[], results:null };
+            sopFiles:[], results:null, compSrc:'id' };
+/* Quais diaristas podem compensar o absenteísmo, escolhido no diálogo antes
+   de validar. Empty (sem solicitante) fica sempre fora: não dá para atribuir. */
+const COMP_LABEL = {id:'ID Logistics', meli:'MELI', ambos:'ID Logistics + MELI'};
+function aceitaSolic(s){
+  if(S.compSrc==='ambos') return s==='id' || s==='meli';
+  return s===S.compSrc;
+}
 const MESES = {jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
 const MES_NOME = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const MES_LONGO = {janeiro:1,fevereiro:2,marco:3,abril:4,maio:5,junho:6,julho:7,agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
@@ -350,9 +357,10 @@ async function handleSigo(files,drop){
     const nId=todos.filter(r=>r.solic==='id').length;
     const nMeli=todos.filter(r=>r.solic==='meli').length;
     const nSem=todos.length-nId-nMeli;
-    st.textContent='✓ '+abas.length+' filiais · '+nId+' solicitados pela ID Logistics'
-      +(nMeli?' · '+nMeli+' do MELI (fora da compensação)':'')
-      +(nSem?' · '+nSem+' sem solicitante (fora)':'');
+    st.textContent='✓ '+abas.length+' filiais · '+nId+' ID Logistics'
+      +(nMeli?' · '+nMeli+' MELI':'')
+      +(nSem?' · '+nSem+' sem solicitante':'')
+      +' — a fonte da compensação é escolhida ao validar';
     st.className='st ok'; drop.classList.add('loaded');
   }catch(e){ st.textContent='✗ '+e.message; st.className='st bad'; drop.classList.add('err'); S.sigo=null; }
   checkReady();
@@ -502,18 +510,26 @@ function escalaDaOperacao(abas,op){
     if(norm(r.escala)===alvo) return alvo;
   return null;
 }
-function processar(){
+/* Confere período e cobertura de meses. Devolve {ini,fim,dias} ou null (com a
+   mensagem já na tela). Roda ANTES do diálogo, para não oferecer a escolha
+   quando o período nem é válido. */
+function validarPeriodo(){
   const msg=document.getElementById('abs-msgRun'); msg.textContent=''; msg.className='msg';
   const ini=new Date(document.getElementById('abs-dtIni').value+'T00:00:00');
   const fim=new Date(document.getElementById('abs-dtFim').value+'T00:00:00');
-  if(!(ini<fim)){ msg.textContent='Período inválido.'; msg.className='msg bad'; return; }
+  if(!(ini<fim)){ msg.textContent='Período inválido.'; msg.className='msg bad'; return null; }
   const dias=diasPeriodo(ini,fim);
   const mesesNec=[...new Set(dias.map(d=>d.getMonth()+1))];
   const mesesTem=[...new Set([...S.mesA.meses,...S.mesB.meses])];
   const faltam=mesesNec.filter(m=>!mesesTem.includes(m));
   const mp=document.getElementById('abs-msgPeriodo');
-  if(faltam.length){ mp.textContent='⚠ período pede '+faltam.map(m=>MES_NOME[m]).join(', ')+' e as planilhas de abs trazem '+mesesTem.map(m=>MES_NOME[m]).join(', '); mp.className='msg bad'; return; }
+  if(faltam.length){ mp.textContent='⚠ período pede '+faltam.map(m=>MES_NOME[m]).join(', ')+' e as planilhas de abs trazem '+mesesTem.map(m=>MES_NOME[m]).join(', '); mp.className='msg bad'; return null; }
   mp.textContent='✓ período coberto pelas bases'; mp.className='msg ok';
+  return {ini,fim,dias};
+}
+function processar(){
+  const v=validarPeriodo(); if(!v) return;
+  const {ini,fim,dias}=v;
 
   const selecionadas=[...document.querySelectorAll('#abs-opsGrid input[type=checkbox]:checked')].map(c=>c.dataset.key);
   const results=[];
@@ -598,7 +614,7 @@ function processar(){
     const diarPorDia={}, diarRegs=[];
     let foraDaEscala=0;
     for(const sh of sigoSheets) for(const r of S.sigo.base[sh]){
-      if(r.solic!=='id') continue;
+      if(!aceitaSolic(r.solic)) continue;
       if(r.data<ini||r.data>fim) continue;
       if(!daOperacao(r)){ foraDaEscala++; continue; }
       const chave=+r.data+'|'+r.id;
@@ -635,52 +651,53 @@ function processar(){
   S.results={ ini, fim, list:results };
   render(results,ini,fim);
 }
-document.getElementById('abs-btnRun').addEventListener('click',processar);
+/* Validar abre o diálogo da fonte de diaristas; só depois de escolher é que
+   processa. O período/coberturas são validados antes de abrir, para não
+   mostrar o diálogo quando nem dá para rodar. */
+const modalBg=document.getElementById('abs-modalBg');
+function abrirDialogoCompensacao(){
+  const marcado=modalBg.querySelector(`input[name="abs-comp"][value="${S.compSrc}"]`);
+  if(marcado) marcado.checked=true;
+  modalBg.hidden=false;
+  modalBg.querySelector('#abs-modalOk').focus();
+}
+function fecharDialogo(){ modalBg.hidden=true; }
+document.getElementById('abs-btnRun').addEventListener('click',()=>{
+  if(!validarPeriodo()) return;   // mensagens de período aparecem sem abrir o diálogo
+  abrirDialogoCompensacao();
+});
+document.getElementById('abs-modalCancel').addEventListener('click',fecharDialogo);
+modalBg.addEventListener('click',e=>{ if(e.target===modalBg) fecharDialogo(); });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'&&!modalBg.hidden) fecharDialogo(); });
+document.getElementById('abs-modalOk').addEventListener('click',()=>{
+  S.compSrc=modalBg.querySelector('input[name="abs-comp"]:checked').value;
+  fecharDialogo();
+  processar();
+});
 
 /* ============================== render ============================== */
 const fmtPct=v=>(v*100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})+'%';
 const fmtDia=d=>String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0');
 function render(list,ini,fim){
   document.getElementById('abs-step4').style.display='';
-  document.getElementById('abs-resSub').textContent='Período '+fmtDia(ini)+' a '+fmtDia(fim)+' · '+list.length+' seleção(ões) · S&OP diário sem over · abate limitado ao déficit do dia';
+  document.getElementById('abs-resSub').textContent='Período '+fmtDia(ini)+' a '+fmtDia(fim)
+    +' · '+list.length+' seleção(ões) · compensação por diaristas '+COMP_LABEL[S.compSrc]
+    +' · S&OP diário sem over · abate limitado ao déficit do dia';
+  /* A tela por operação foi ocultada a pedido: o resultado completo — por dia,
+     por operação — está na planilha. Aqui fica só a confirmação e os avisos
+     que mereceriam atenção antes de abrir o arquivo. */
   const area=document.getElementById('abs-resArea'); area.innerHTML='';
+  const avisos=[];
   for(const r of list){
     const nome=FILIAIS[r.fil]+(r.total?' · TOTAL':(r.op?' · '+OPER[r.op]:''));
-    const fonte=r.secoes? 'headcount · '+r.secoes.map(s=>s==='TOTAL'?'TOTAL filial':s).join('+')+' (sem over)' : 'manual '+r.manual+' (seg–sex)';
-    const okPos=r.absPos<=0.025, okPre=r.absPre<=0.025;
-    const pin=v=>Math.min(96,Math.max(3,(v/0.06)*100));
-    const defRows=r.daily.filter(x=>x.dif!==null&&x.dif<0);
-    const el=document.createElement('div'); el.className='opres';
-    el.innerHTML=`
-      <h3>${nome}
-        <span class="badge ${okPre?'ok':'bad'}">antes ${fmtPct(r.absPre)}</span>
-        <span class="badge ${okPos?'ok':'bad'}">pós diaristas ${fmtPct(r.absPos)}</span>
-      </h3>
-      <div class="gauge"><div class="lbl"><span>0%</span><span>6%</span></div>
-        <div class="gtrack" style="--cut:${(0.025/0.06)*100}%">
-          <div class="gcut"></div>
-          <span class="gpin antes" style="left:${pin(r.absPre)}%">A ${fmtPct(r.absPre)}</span>
-          <span class="gpin pos ${okPos?'':'above'}" style="left:${pin(r.absPos)}%">P ${fmtPct(r.absPos)}</span>
-        </div></div>
-      <div class="kpis">
-        <div class="kpi"><div class="l">S&amp;OP período</div><div class="v">${r.espT}</div></div>
-        <div class="kpi"><div class="l">Faltas vs S&amp;OP</div><div class="v r">${r.faltPre}</div></div>
-        <div class="kpi"><div class="l">Diaristas usados</div><div class="v y">${r.usadosT}</div></div>
-        <div class="kpi"><div class="l">Disponíveis (dias déficit)</div><div class="v">${r.dispT}</div></div>
-        <div class="kpi"><div class="l">Descoberto pós</div><div class="v ${r.faltPos?'r':'g'}">${r.faltPos}</div></div>
-        <div class="kpi"><div class="l">Colaboradores</div><div class="v">${r.roster.length}</div></div>
-      </div>
-      ${defRows.length?`<table class="mini"><thead><tr><th>Dia crítico</th><th>S&amp;OP</th><th>Presente</th><th>Dif</th><th>Disponíveis</th><th>Usados</th><th>Pós</th></tr></thead>
-        <tbody>${defRows.map(x=>`<tr><td>${fmtDia(x.d)} (${DOW[x.d.getDay()]})</td><td>${x.esp}</td><td>${x.pres}</td>
-          <td class="neg">${x.dif}</td><td class="zer">${x.disp||'—'}</td><td class="${x.usados?'pos':'zer'}">${x.usados||'—'}</td><td class="${x.pos<0?'neg':'zer'}">${x.pos}</td></tr>`).join('')}</tbody></table>`
-        :'<div class="note">Nenhum dia abaixo do S&OP no período. Diaristas zerados por regra.</div>'}
-      <div class="note">Fonte S&OP: <b style="color:var(--txt)">${fonte}</b>${r.sigoSheets.length?` · Diaristas: aba(s) <b style="color:var(--txt)">${r.sigoSheets.join(' + ')}</b> do SIGO${r.escalaOp?`, só escala <b style="color:var(--txt)">${r.escalaOp.toUpperCase()}</b>${r.foraDaEscala?` (${r.foraDaEscala} de outra escala ficaram de fora)`:''}`:''}, só solicitados pela ID Logistics.`:' · <b>⚠</b> sem aba do SIGO para esta filial — compensação zerada.'}</div>
-      ${r.escalaIndistinta&&list.filter(x=>x.fil===r.fil&&x.op&&!x.total).length>1?`<div class="note"><b>⚠</b> A coluna ESCALA do SIGO desta filial não identifica a operação (${OPER[r.op]}) — os diaristas disponíveis são os mesmos das outras operações da filial e podem estar sendo contados em duas. Confira antes de somar os cartões.</div>`:''}
-      ${r.semSop.length?`<div class="note"><b>⚠</b> Sem S&OP no headcount para ${r.semSop.length} dia(s) (excluídos do %): ${r.semSop.slice(0,8).map(fmtDia).join(', ')}${r.semSop.length>8?'…':''} — carregue o headcount do mês correspondente.</div>`:''}
-      ${r.semBase.length?`<div class="note"><b>⚠</b> Dias sem lançamento na base de abs (excluídos do %): ${r.semBase.map(fmtDia).join(', ')}.</div>`:''}
-    `;
-    area.appendChild(el);
+    if(!r.sigoSheets.length) avisos.push(`<b>${nome}</b>: sem aba do SIGO para esta filial — compensação zerada.`);
+    if(r.escalaIndistinta&&list.filter(x=>x.fil===r.fil&&x.op&&!x.total).length>1)
+      avisos.push(`<b>${nome}</b>: a coluna ESCALA do SIGO não identifica a operação — os diaristas são os mesmos das outras operações da filial e podem estar contados em duas.`);
+    if(r.semSop.length) avisos.push(`<b>${nome}</b>: sem S&OP para ${r.semSop.length} dia(s), excluídos do %.`);
   }
+  area.innerHTML='<div class="abs-pronto"><b>✓ Absenteísmo processado.</b> '
+    + 'Baixe a planilha — o resultado por dia e por operação está nela.</div>'
+    + (avisos.length? '<ul class="abs-avisos">'+avisos.map(a=>'<li>⚠ '+a+'</li>').join('')+'</ul>' : '');
 
   /* Um download por filial, além do unificado: é o arquivo que vai para cada
      gerente sem levar junto o resto da rede. Os botões nascem do resultado —

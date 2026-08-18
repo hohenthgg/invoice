@@ -422,8 +422,26 @@
     </div>
   </div>
 
-  <p class="abs-rodape">S&amp;OP diário (sem over) vs presente · compensação por diaristas da ID Logistics (com Groot ID) ·
+  <p class="abs-rodape">S&amp;OP diário (sem over) vs presente · compensação por diaristas (com Groot ID) ·
     saída: Unificado + Resumo Gerencial por operação</p>
+
+  <!-- diálogo: qual diarista pode compensar o absenteísmo -->
+  <div class="abs-modal-bg" id="abs-modalBg" hidden>
+    <div class="abs-modal" role="dialog" aria-modal="true" aria-labelledby="abs-modalTit">
+      <h4 id="abs-modalTit">Quais diaristas podem compensar o absenteísmo?</h4>
+      <p class="abs-modal-sub">O abate do déficit usa apenas os diaristas do solicitante escolhido — sempre com Groot ID.</p>
+      <label class="abs-opt"><input type="radio" name="abs-comp" value="id" checked>
+        <span><b>Somente ID Logistics</b><i>o padrão — diarista pedido pelo MELI é custo do MELI</i></span></label>
+      <label class="abs-opt"><input type="radio" name="abs-comp" value="meli">
+        <span><b>Somente MELI</b><i>apenas os diaristas solicitados pelo MELI</i></span></label>
+      <label class="abs-opt"><input type="radio" name="abs-comp" value="ambos">
+        <span><b>Ambos</b><i>ID Logistics + MELI</i></span></label>
+      <div class="abs-modal-acoes">
+        <button class="abs-btn ghost" id="abs-modalCancel" type="button">Cancelar</button>
+        <button class="abs-btn go" id="abs-modalOk" type="button">Validar</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ========================== ABA 5 — GUIA ========================== -->
@@ -470,7 +488,7 @@
       <span class="chiph">Aba 4 · Calcular ABS</span>
       <h3>O absenteísmo ficou dentro do range contratual?</h3>
       <p>Compara, dia a dia, o <b>Quadro S&amp;OP (sem over)</b> com quem esteve <b>presente</b> no período da fatura — 16/N-1 a 15/N, o período de folha. A diferença negativa de cada dia é o déficit.</p>
-      <p>Esse déficit é então compensado pelos <b>diaristas solicitados pela ID Logistics naquele dia</b>, contados uma única vez e só quando têm Groot ID — a agência não importa, e diarista solicitado pelo MELI fica fora: é custo do MELI, não cobertura do quadro. O abate é limitado ao próprio déficit: um dia nunca fica positivo por sobra de diarista.</p>
+      <p>Esse déficit é então compensado pelos <b>diaristas daquele dia</b>, contados uma única vez e só quando têm Groot ID. Ao clicar em <b>Validar</b>, você escolhe quais podem compensar: <b>somente ID Logistics</b> (o padrão — o do MELI é custo do MELI), <b>somente MELI</b> ou <b>ambos</b>. A agência não importa. O abate é limitado ao próprio déficit: um dia nunca fica positivo por sobra de diarista.</p>
       <p>O pool também é filtrado pela <b>escala da operação</b>, não pela aba do SIGO — as abas se misturam (a aba <i>Pouso Alegre XD</i> carrega linhas <i>SD</i> e <i>FULL</i>). Onde a filial marca a operação na escala, cada cartão leva só a sua; onde marca outra coisa (<i>AM</i>/<i>PM</i>, horário), leva tudo menos o que é das outras operações — e o cartão avisa quando a filial não distingue.</p>
       <p>O resultado sai em dois números — <b>antes</b> e <b>pós compensação</b> — medidos contra o <b>range contratual de 2,5%</b>, com a lista dos dias críticos. Baixa tudo num arquivo unificado ou <b>uma filial por arquivo</b>, para mandar a cada gerente só o que é dele. A linha <b>Contratado</b> do resumo vem da própria planilha mensal quando ela traz o bloco de headcount — é dado de origem, não contagem derivada da grade. Dias sem S&amp;OP no headcount, ou sem lançamento na base de absenteísmo, ficam de fora do percentual em vez de virar zero.</p>
       <p>Precisa de <b>três bases</b>: duas planilhas mensais de absenteísmo (que cobrem o período) e a base SIGO de diaristas. O S&amp;OP diário vem da linha <b>“Esperado”</b> de cada aba de operação — o headcount avulso virou opcional, só para planilhas no modelo antigo, que não trazem esse bloco.</p>
