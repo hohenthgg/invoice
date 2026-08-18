@@ -17,7 +17,8 @@
 (function(){
 "use strict";
 /* ============================== estado ============================== */
-const S = { mesA:null, mesB:null, sigo:null, sop:{}, sopFiles:[], results:null };
+const S = { mesA:null, mesB:null, sigo:null, sop:{}, sopOrigem:{}, sopArquivo:[],
+            sopFiles:[], results:null };
 const MESES = {jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
 const MES_NOME = ['','Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
 const MES_LONGO = {janeiro:1,fevereiro:2,marco:3,abril:4,maio:5,junho:6,julho:7,agosto:8,setembro:9,outubro:10,novembro:11,dezembro:12};
@@ -49,21 +50,58 @@ function parseTabName(name){
   if(!FILIAIS[code]) return null;
   return { fil:code, op, mes, tab:name };
 }
-function validaAba(ws){
-  const h1=String(cellVal(ws,1,1)??''), h3=String(cellVal(ws,1,3)??''), h9=String(cellVal(ws,1,9)??'');
-  if(!/mat/i.test(h1) || !/nome/i.test(h3)) return 'cabeçalho fora do padrão (esperado Mat./Nome nas colunas A/C)';
-  if(!/^\d{1,2}\s*\n?/.test(h9)) return 'colunas de dias não encontradas a partir da coluna I';
+/* Onde estão as coisas dentro de uma aba de operação.
+   ----------------------------------------------------------------
+   O modelo novo põe, ANTES da grade de pessoas, um bloco de headcount:
+
+     linha  1  S&OP — HEADCOUNT DIÁRIO · Pouso Alegre · Julho/2026
+     linha  2  Métrica  …  1 (Qua) | 2 (Qui) | …
+     linha  3  Esperado …      88  |     88  | …      ← o S&OP do dia
+     …
+     linha 10  COLABORADORES — PRESENÇAS E FALTAS
+     linha 11  Mat. | Groot ID | Nome | … | 1 Qua | 2 Qui | …
+     linha 12+ as pessoas
+
+   No modelo antigo a grade começa direto na linha 1 e não há S&OP. Por
+   isso nada aqui é posição fixa: procura-se a linha "Mat./Nome" e, se
+   existir, a linha "Esperado" com o cabeçalho de dias logo acima. */
+function localizarBlocos(ws){
+  const lim=Math.min(ws.rowCount||1, 30);
+  let pessoas=0, sop=0, sopHeader=0;
+  for(let r=1;r<=lim;r++){
+    const a=norm(cellVal(ws,r,1)), c=norm(cellVal(ws,r,3));
+    if(!pessoas && /^mat\.?$/.test(a) && c.startsWith('nome')) pessoas=r;
+    if(!sop && a==='esperado') sop=r;
+  }
+  if(!pessoas) return null;
+  const diasDe=(r,re)=>{
+    const cols={};
+    for(let c=9;c<=ws.columnCount;c++){
+      const m=re.exec(String(cellVal(ws,r,c)??'').trim());
+      if(m) cols[+m[1]]=c;
+    }
+    return cols;
+  };
+  const diasPessoas=diasDe(pessoas, /^(\d{1,2})(\s|\n|$)/);
+  if(Object.keys(diasPessoas).length<3) return null;
+  let diasSop={};
+  if(sop){
+    // o cabeçalho de dias do bloco S&OP é a linha logo acima da "Esperado"
+    for(let r=sop-1;r>=1 && !Object.keys(diasSop).length;r--) diasSop=diasDe(r, /^(\d{1,2})\s*\(/);
+    if(Object.keys(diasSop).length<3){ sop=0; diasSop={}; }
+    else sopHeader=1;
+  }
+  return { pessoas, diasPessoas, sop, diasSop, titulo:String(cellVal(ws,1,1)??'') };
+}
+function validaAba(ws, layout){
+  if(!layout) return 'cabeçalho fora do padrão (não achei a linha "Mat./Nome" com colunas de dias a partir da coluna I)';
   return null;
 }
-function lerAba(ws){
-  const dias={};
-  for(let c=9;c<=ws.columnCount;c++){
-    const h=String(cellVal(ws,1,c)??''); const m=/^(\d{1,2})/.exec(h.trim());
-    if(m) dias[+m[1]]=c;
-  }
+function lerAba(ws, layout){
+  const dias=layout.diasPessoas, h=layout.pessoas;
   const rows=[];
   ws.eachRow((row,rn)=>{
-    if(rn===1) return;
+    if(rn<=h) return;
     const mat=row.getCell(1).value, nome=row.getCell(3).value;
     if(mat==null && nome==null) return;
     const rec={ info:[], dias:{} };
@@ -72,6 +110,32 @@ function lerAba(ws){
     rows.push(rec);
   });
   return { rows };
+}
+/* O ano do S&AMP;OP embutido: vem do título ("· Julho/2026"). Sem ano no
+   título não dá para saber a que ano-mês o dia pertence, e chutar o ano
+   corrente colocaria o dado no lugar errado em silêncio. */
+function anoDoTitulo(titulo, mes){
+  const t=norm(titulo);
+  const monMap={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12,...MES_LONGO};
+  for(const m of t.matchAll(/\b([a-z]{3,})[\s\-\/]?(?:de\s*)?(\d{4})\b/g)){
+    const mk=Object.keys(monMap).find(k=>m[1].startsWith(k));
+    if(mk && monMap[mk]===mes) return +m[2];
+  }
+  const so=t.match(/\b(20\d{2})\b/);
+  return so? +so[1] : null;
+}
+/* Lê o S&OP embutido numa aba de operação: uma linha "Esperado" por dia. */
+function lerSopDaAba(ws, layout, mes){
+  if(!layout || !layout.sop) return null;
+  const ano=anoDoTitulo(layout.titulo, mes);
+  if(!ano) return {erro:'sem o ano no título (esperado algo como "· Julho/2026")'};
+  const dias={};
+  for(const [d,c] of Object.entries(layout.diasSop)){
+    const v=cellVal(ws, layout.sop, +c);
+    if(typeof v==='number') dias[+d]=v;
+  }
+  if(!Object.keys(dias).length) return {erro:'linha "Esperado" sem nenhum valor numérico'};
+  return { ym: ano*100+mes, dias };
 }
 /* headcount S&OP — flexível. Aceita:
    (a) 1 aba por filial, título "· Agosto/2026", colunas "1 SAB … 31 SEG"  → mês único
@@ -163,6 +227,29 @@ function parseHeadcount(wb, fname){
   return { blocos: out, avisos: erros };
 }
 
+/* Remonta S.sop a partir das duas fontes possíveis, nesta ordem:
+   1. o S&OP embutido nas próprias planilhas mensais (modelo novo);
+   2. o arquivo de headcount avulso, que sobrepõe — carregá-lo é um ato
+      explícito de quem quer justamente aquele número.
+   A origem fica registrada por seção para o seletor dizer de onde veio. */
+function aplicarSopDosMeses(){
+  S.sop={}; S.sopOrigem={};
+  const por=(b,origem)=>{
+    const dest=(((S.sop[b.filCode]??={})[b.secao]??={})[b.ym]??={});
+    Object.assign(dest, b.dias);
+    ((S.sopOrigem[b.filCode]??={})[b.secao]??=new Set()).add(origem);
+  };
+  for(const slot of ['mesA','mesB']) (S[slot]?.sop??[]).forEach(b=>por(b,'mensal'));
+  (S.sopArquivo??[]).forEach(b=>por(b,'arquivo'));
+}
+/* de onde veio a seção, para rotular o seletor sem mentir */
+function rotuloFonte(fil, secao){
+  const o=S.sopOrigem?.[fil]?.[secao];
+  if(!o) return 'S&OP';
+  if(o.has('arquivo') && o.has('mensal')) return 'S&OP (planilha mensal + headcount)';
+  return o.has('arquivo')? 'Headcount' : 'S&OP da planilha mensal';
+}
+
 /* ============================== upload ============================== */
 function bindDrop(dropId, fileId, fn){
   const drop=document.getElementById(dropId), inp=document.getElementById(fileId);
@@ -179,20 +266,30 @@ async function handleMes(slot,files,drop){
   drop.classList.remove('loaded','err');
   try{
     const wb=await readWB(file);
-    const tabs=[]; const warns=[];
+    const tabs=[]; const warns=[]; const sop=[];
     for(const ws of wb.worksheets){
       const p=parseTabName(ws.name); if(!p) continue;
-      const err=validaAba(ws);
+      const layout=localizarBlocos(ws);
+      const err=validaAba(ws, layout);
       if(err){ warns.push(ws.name+': '+err); continue; }
-      tabs.push({...p, ws});
+      tabs.push({...p, ws, layout});
+      /* O S&OP agora mora na própria aba da operação. Cada aba é UMA
+         operação, então ela vira uma seção com o nome do turno — e uma
+         filial sem turno (DV, PM) vira a seção TOTAL. É a mesma forma que
+         o arquivo de headcount produz, então tudo a jusante segue igual. */
+      const s=lerSopDaAba(ws, layout, p.mes);
+      if(s && s.erro) warns.push(ws.name+' (S&OP): '+s.erro);
+      else if(s) sop.push({filCode:p.fil, secao:p.op??'TOTAL', ym:s.ym, dias:s.dias, aba:ws.name});
     }
     if(!tabs.length) throw new Error('padrão diferente — nenhuma aba de operação reconhecida (ex.: PAXD Jul, DV Ago)');
     const meses=[...new Set(tabs.map(t=>t.mes))];
-    S[slot]={ file:file.name, tabs, meses };
+    S[slot]={ file:file.name, tabs, meses, sop };
+    aplicarSopDosMeses();
     st.textContent='✓ '+tabs.length+' operações · mês: '+meses.map(m=>MES_NOME[m]).join(', ')
-      + (warns.length? ' · ⚠ '+warns.length+' aba(s) fora do padrão':'');
+      + (sop.length? ' · S&OP de '+sop.length+' aba(s)':'')
+      + (warns.length? ' · ⚠ '+warns.length+' aviso(s)':'');
     st.className='st '+(warns.length?'warn':'ok'); drop.classList.add('loaded');
-    if(warns.length) console.warn('Abas ignoradas:',warns);
+    if(warns.length) console.warn('Avisos da leitura:',warns);
   }catch(e){ st.textContent='✗ '+e.message; st.className='st bad'; drop.classList.add('err'); S[slot]=null; }
   refreshOps(); checkReady();
 }
@@ -237,13 +334,11 @@ async function handleSop(files,drop){
       const wb=await readWB(file);
       const r=parseHeadcount(wb,file.name);
       if(r.erro) throw new Error(file.name+': '+r.erro);
-      for(const b of r.blocos){
-        const dest=(((S.sop[b.filCode]??={})[b.secao]??={})[b.ym]??={});
-        Object.assign(dest, b.dias); // funde dias (abas por mês contribuem para o mesmo ym)
-      }
+      (S.sopArquivo??=[]).push(...r.blocos);
       if(r.avisos&&r.avisos.length) console.warn('Headcount avisos:',r.avisos);
       if(!S.sopFiles.includes(file.name)) S.sopFiles.push(file.name);
     }
+    aplicarSopDosMeses();
     const meses=[...new Set(Object.values(S.sop).flatMap(sec=>Object.values(sec).flatMap(m=>Object.keys(m))))]
       .map(Number).sort().map(ym=>MES_NOME[ym%100]+'/'+Math.floor(ym/100));
     fn.textContent=S.sopFiles.join(' · ');
@@ -277,18 +372,20 @@ function opcoesFonte(card){
   const secs=Object.keys(S.sop[card.fil]??{});
   const sug=[], outras=[];
   const semTotal=secs.filter(s=>norm(s)!=='total');
+  const rot=s=>rotuloFonte(card.fil,s)+' · '+s;
   if(card.total || !card.op){
     const t=secs.find(s=>norm(s)==='total');
-    if(t) sug.push({v:'hc:'+t, l:'Headcount · TOTAL filial (sem over)'});
-    if(!t && semTotal.length) sug.push({v:'hcsum:'+semTotal.join(','), l:'Headcount · soma das seções'});
-    for(const s of semTotal) outras.push({v:'hc:'+s, l:'Headcount · '+s});
+    if(t) sug.push({v:'hc:'+t, l:rotuloFonte(card.fil,t)+' · TOTAL filial (sem over)'});
+    if(!t && semTotal.length) sug.push({v:'hcsum:'+semTotal.join(','),
+      l:rotuloFonte(card.fil,semTotal[0])+' · soma das operações ('+semTotal.join('+')+')'});
+    for(const s of semTotal) outras.push({v:'hc:'+s, l:rot(s)});
   } else {
     const m=semTotal.find(s=>norm(s)===norm(card.op));
-    if(m) sug.push({v:'hc:'+m, l:'Headcount · '+m+' (sem over)'});
+    if(m) sug.push({v:'hc:'+m, l:rotuloFonte(card.fil,m)+' · '+m+' (sem over)'});
     const am=semTotal.find(s=>norm(s)==='am'), pm=semTotal.find(s=>norm(s)==='pm');
     if(!m && am && pm && norm(card.op)==='svc')
-      sug.push({v:'hcsum:'+am+','+pm, l:'Headcount · AM+PM (soma)'});
-    for(const s of semTotal) if(s!==m) outras.push({v:'hc:'+s, l:'Headcount · '+s});
+      sug.push({v:'hcsum:'+am+','+pm, l:rotuloFonte(card.fil,am)+' · AM+PM (soma)'});
+    for(const s of semTotal) if(s!==m) outras.push({v:'hc:'+s, l:rot(s)});
   }
   return { sug, outras };
 }
@@ -389,7 +486,7 @@ function processar(){
     }
     const porMes={}; // mes -> rows concatenadas das operações do cartão
     for(const [m,ts] of Object.entries(tabsPorMes))
-      porMes[m]=ts.flatMap(t=>lerAba(t.ws).rows);
+      porMes[m]=ts.flatMap(t=>lerAba(t.ws, t.layout).rows);
     const mesA=Math.min(...Object.keys(porMes).map(Number)), mesB=Math.max(...Object.keys(porMes).map(Number));
     const kOf=r=> r.info[0]!=null?String(r.info[0]).trim():'N:'+String(r.info[2]??'').trim();
     const mapA=new Map(porMes[mesA].map(r=>[kOf(r),r]));

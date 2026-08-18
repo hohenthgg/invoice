@@ -345,8 +345,9 @@
     <div class="rail"><div class="n">1</div><div class="bar"></div></div>
     <div class="abs-card">
       <h3>Bases de dados</h3>
-      <div class="sub">Duas planilhas mensais de absenteísmo (abas por operação, ex. <code>PAXD Jul</code>),
-        a base SIGO de diaristas e o headcount diário com o Quadro S&amp;OP (sem over).</div>
+      <div class="sub">Duas planilhas mensais de absenteísmo (abas por operação, ex. <code>PAXD Jul</code>)
+        e a base SIGO de diaristas. O <b>S&amp;OP do dia vem da linha “Esperado”</b> de cada aba —
+        o headcount avulso só é necessário para planilhas no modelo antigo, que não trazem esse bloco.</div>
       <div class="drops">
         <div class="abs-drop" id="abs-dropA">
           <div class="ttl">Mês 1 — início do período</div>
@@ -367,9 +368,9 @@
           <div class="st" id="abs-stS"></div>
         </div>
         <div class="abs-drop" id="abs-dropH">
-          <div class="ttl">Headcount S&amp;OP</div>
+          <div class="ttl">Headcount S&amp;OP <span class="abs-opc">opcional</span></div>
           <div class="fname" id="abs-fnH">Clique ou arraste (aceita vários)</div>
-          <div class="hint">headcount-diario-todas-as-filiais · 1 por mês</div>
+          <div class="hint">só para planilhas antigas, sem a linha “Esperado”</div>
           <div class="st" id="abs-stH"></div>
         </div>
       </div>
@@ -397,8 +398,9 @@
     <div class="rail"><div class="n">3</div><div class="bar"></div></div>
     <div class="abs-card">
       <h3>Filiais e operações</h3>
-      <div class="sub">Selecione as operações. A fonte do Quadro S&amp;OP vem do headcount (por operação ou TOTAL
-        da filial, sempre <b>sem over</b>); use Manual apenas se não houver headcount para a operação.</div>
+      <div class="sub">Selecione as operações. A fonte do Quadro S&amp;OP vem da <b>linha “Esperado”</b> da própria
+        aba da operação — ou do headcount avulso, quando carregado (por operação ou TOTAL da filial, sempre
+        <b>sem over</b>). Use Manual apenas se nenhuma das duas trouxer a operação.</div>
       <div class="opsgrid" id="abs-opsGrid"><span class="msg dim">Carregue as duas planilhas mensais para listar as operações.</span></div>
       <div class="actions">
         <button class="abs-btn go" id="abs-btnRun" disabled>Validar absenteísmo</button>
@@ -470,7 +472,7 @@
       <p>Compara, dia a dia, o <b>Quadro S&amp;OP (sem over)</b> com quem esteve <b>presente</b> no período da fatura — 16/N-1 a 15/N, o período de folha. A diferença negativa de cada dia é o déficit.</p>
       <p>Esse déficit é então compensado pelos <b>diaristas efetivamente solicitados naquele dia</b>, contados uma única vez e só quando têm Groot ID. O abate é limitado ao próprio déficit: um dia nunca fica positivo por sobra de diarista.</p>
       <p>O resultado sai em dois números — <b>antes</b> e <b>pós compensação</b> — medidos contra o <b>range contratual de 2,5%</b>, com a lista dos dias críticos. Dias sem S&amp;OP no headcount, ou sem lançamento na base de absenteísmo, ficam de fora do percentual em vez de virar zero.</p>
-      <p>Precisa de quatro bases: duas planilhas mensais de absenteísmo (que cobrem o período), a base SIGO de diaristas e o headcount diário.</p>
+      <p>Precisa de <b>três bases</b>: duas planilhas mensais de absenteísmo (que cobrem o período) e a base SIGO de diaristas. O S&amp;OP diário vem da linha <b>“Esperado”</b> de cada aba de operação — o headcount avulso virou opcional, só para planilhas no modelo antigo, que não trazem esse bloco.</p>
     </div>
   </section>
 

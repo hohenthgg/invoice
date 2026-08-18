@@ -140,15 +140,35 @@ de 2,5%**, a lista dos dias críticos e um Excel com a aba `Diaristas`, um
 `COUNTIFS` dos diaristas aponta para a própria aba `Diaristas`, então a planilha
 recalcula sozinha se alguém editar.
 
-Dias sem S&OP no headcount, ou sem lançamento na base de absenteísmo, ficam de
-fora do percentual em vez de entrar como zero.
+Dias sem S&OP, ou sem lançamento na base de absenteísmo, ficam de fora do
+percentual em vez de entrar como zero.
 
 ```
-4 bases  →  período  →  filiais e operações  →  antes × pós  →  Baixar .xlsx
+3 bases  →  período  →  filiais e operações  →  antes × pós  →  Baixar .xlsx
 ```
 
-Precisa de quatro bases: duas planilhas mensais de absenteísmo (abas por
-operação, ex. `PAXD Jul`), a base SIGO de diaristas e o headcount diário.
+Precisa de **três bases**: duas planilhas mensais de absenteísmo (abas por
+operação, ex. `PAXD Jul`) e a base SIGO de diaristas.
+
+O **S&OP diário vem da própria aba da operação**, na linha `Esperado` do bloco de
+headcount que precede a grade de pessoas:
+
+```
+linha  1  S&OP — HEADCOUNT DIÁRIO · Pouso Alegre · Julho/2026
+linha  2  Métrica  …  1 (Qua) | 2 (Qui) | …
+linha  3  Esperado …      88  |     88  | …   ← o S&OP do dia
+linha 10  COLABORADORES — PRESENÇAS E FALTAS
+linha 11  Mat. | Groot ID | Nome | … | 1 Qua | 2 Qui | …
+```
+
+Nada disso é posição fixa: `localizarBlocos` procura a linha `Mat./Nome` e, se
+existir, a linha `Esperado` com o cabeçalho de dias logo acima — por isso o
+**modelo antigo continua valendo**, com a grade começando na linha 1 e o S&OP
+vindo do arquivo de headcount, que virou **opcional**. Cada aba é uma operação,
+então vira uma seção com o nome do turno (`SVC`, `XD`, `SD`, `FULL`) e uma filial
+sem turno vira a seção `TOTAL`. Quando as duas fontes trazem o mesmo dia, o
+arquivo avulso prevalece — carregá-lo é um ato explícito — e o seletor diz de onde
+o número veio.
 
 ## A regra em uma frase
 
