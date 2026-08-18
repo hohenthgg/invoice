@@ -46,18 +46,46 @@ function cellVal(ws,r,c){ const v = ws.getRow(r).getCell(c).value;
   if (v && typeof v==='object'){ if (v.result!==undefined) return v.result; if (v.richText) return v.richText.map(t=>t.text).join(''); if (v instanceof Date) return v; if (v.text!==undefined) return v.text; }
   return v;
 }
-/* abas de operação das planilhas mensais: "PAXD Jul", "DV Ago" */
+/* abas de operação das planilhas mensais. Dois padrões de nome:
+     "PAXD Jul"  / "DV Ago"           → um mês (formato antigo)
+     "PASVC 16.07-15.08"              → intervalo que cruza dois meses
+   O código (PASVC, DV, PM…) é sempre a parte alfabética inicial; o resto diz
+   o(s) mês(es). Devolve `meses` como ARRAY porque uma aba pode cobrir dois. */
 function parseTabName(name){
-  const m = /^([A-Za-z]+)\s+([A-Za-zç]{3})/.exec(name.trim());
-  if(!m) return null;
-  const mes = MESES[norm(m[2]).slice(0,3)];
-  if(!mes) return null;
-  let code = m[1].toUpperCase(), op=null;
+  const raw = name.trim();
+  const mCode = /^([A-Za-z]+)/.exec(raw);
+  if(!mCode) return null;
+  let code = mCode[1].toUpperCase(), op=null;
   for(const suf of ['SVC','FULL','XD','SD']){
     if(code.endsWith(suf) && code.length>suf.length){ op=suf; code=code.slice(0,-suf.length); break; }
   }
   if(!FILIAIS[code]) return null;
-  return { fil:code, op, mes, tab:name };
+  const resto = raw.slice(mCode[1].length).trim();
+  let meses=null;
+  const mMes = /^([A-Za-zç]{3,})/.exec(resto);          // "Jul", "Agosto"
+  if(mMes){ const mm=MESES[norm(mMes[1]).slice(0,3)]; if(mm) meses=[mm]; }
+  if(!meses){                                            // "16.07-15.08" / "16/07 a 15/08"
+    const mr=/(\d{1,2})[.\/](\d{1,2}).*?(\d{1,2})[.\/](\d{1,2})/.exec(resto);
+    if(mr){ const m1=+mr[2], m2=+mr[4]; if(m1>=1&&m1<=12&&m2>=1&&m2<=12) meses=m1===m2?[m1]:[m1,m2]; }
+  }
+  if(!meses) return null;
+  return { fil:code, op, meses, tab:name };
+}
+/* Mês/ano de cada coluna do bloco S&OP, a partir do título:
+     "· Julho/2026"            → um mês
+     "· 16/07 a 15/08/2026"    → intervalo (o ano do fim; o início recua um ano
+                                 se o mês inicial for maior, cruzando dezembro) */
+function mesesDoTitulo(titulo){
+  const t=norm(titulo);
+  let m=/(\d{1,2})[\/.](\d{1,2})\s*(?:a|ate|-)\s*(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})/.exec(t);
+  if(m){ const m1=+m[2], m2=+m[4], y=+m[5];
+    return {tipo:'range', ini:{m:m1, y:m1<=m2?y:y-1}, fim:{m:m2, y}}; }
+  const monMap={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12,...MES_LONGO};
+  for(const mm of t.matchAll(/\b([a-z]{3,})[\s\-\/]?(?:de\s*)?(\d{4})\b/g)){
+    const mk=Object.keys(monMap).find(k=>mm[1].startsWith(k));
+    if(mk) return {tipo:'mes', ini:{m:monMap[mk], y:+mm[2]}, fim:{m:monMap[mk], y:+mm[2]}};
+  }
+  return null;
 }
 /* Onde estão as coisas dentro de uma aba de operação.
    ----------------------------------------------------------------
@@ -121,39 +149,38 @@ function lerAba(ws, layout){
   });
   return { rows };
 }
-/* O ano do S&AMP;OP embutido: vem do título ("· Julho/2026"). Sem ano no
-   título não dá para saber a que ano-mês o dia pertence, e chutar o ano
-   corrente colocaria o dado no lugar errado em silêncio. */
-function anoDoTitulo(titulo, mes){
-  const t=norm(titulo);
-  const monMap={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12,...MES_LONGO};
-  for(const m of t.matchAll(/\b([a-z]{3,})[\s\-\/]?(?:de\s*)?(\d{4})\b/g)){
-    const mk=Object.keys(monMap).find(k=>m[1].startsWith(k));
-    if(mk && monMap[mk]===mes) return +m[2];
-  }
-  const so=t.match(/\b(20\d{2})\b/);
-  return so? +so[1] : null;
-}
 /* Lê o bloco de headcount embutido numa aba de operação: a linha "Esperado"
-   (o S&OP do dia) e, quando existir, a "Contratado" — que é dado de origem,
-   não algo que dê para derivar da grade de presenças: contar marcas não-DF
-   dava 179 num dia em que a planilha diz 137. */
-function lerSopDaAba(ws, layout, mes){
+   (o S&OP do dia) e, quando existir, a "Contratado" — dado de origem, não
+   algo que dê para derivar da grade de presenças (contar marcas não-DF dava
+   179 num dia em que a planilha diz 137).
+
+   Cada COLUNA é resolvida ao seu ano-mês pelo título: numa aba de um mês só
+   todas caem no mesmo ym; numa aba de intervalo (16/07 a 15/08) as colunas
+   16..31 são de julho e 1..15 de agosto — a virada é detectada quando o dia
+   cai em relação à coluna anterior. Devolve um bloco por ym. */
+function lerSopDaAba(ws, layout){
   if(!layout || !layout.sop) return null;
-  const ano=anoDoTitulo(layout.titulo, mes);
-  if(!ano) return {erro:'sem o ano no título (esperado algo como "· Julho/2026")'};
+  const info=mesesDoTitulo(layout.titulo);
+  if(!info) return {erro:'sem mês/ano legível no título (ex.: "· Julho/2026" ou "16/07 a 15/08/2026")'};
+  const diasOrdem=Object.keys(layout.diasSop).map(Number).sort((a,b)=>layout.diasSop[a]-layout.diasSop[b]);
+  const ymDe=new Map();
+  let cur={...info.ini}, prev=-Infinity;
+  for(const d of diasOrdem){
+    if(d<prev && info.tipo==='range') cur={m:info.fim.m, y:info.fim.y};
+    ymDe.set(d, cur.y*100+cur.m); prev=d;
+  }
   const linha=r=>{
     const o={};
-    for(const [d,c] of Object.entries(layout.diasSop)){
-      const v=cellVal(ws, r, +c);
-      if(typeof v==='number') o[+d]=v;
+    for(const d of diasOrdem){
+      const v=cellVal(ws, r, layout.diasSop[d]);
+      if(typeof v==='number'){ const ym=ymDe.get(d); (o[ym]??={})[d]=v; }
     }
     return o;
   };
-  const dias=linha(layout.sop);
-  if(!Object.keys(dias).length) return {erro:'linha "Esperado" sem nenhum valor numérico'};
-  const contratado=layout.contratado? linha(layout.contratado) : {};
-  return { ym: ano*100+mes, dias, contratado };
+  const esp=linha(layout.sop);
+  if(!Object.keys(esp).length) return {erro:'linha "Esperado" sem nenhum valor numérico'};
+  const con=layout.contratado? linha(layout.contratado) : {};
+  return { blocos:Object.keys(esp).map(ym=>({ym:+ym, dias:esp[ym], contratado:con[ym]||{}})) };
 }
 /* headcount S&OP — flexível. Aceita:
    (a) 1 aba por filial, título "· Agosto/2026", colunas "1 SAB … 31 SEG"  → mês único
@@ -299,13 +326,13 @@ async function handleMes(slot,files,drop){
          operação, então ela vira uma seção com o nome do turno — e uma
          filial sem turno (DV, PM) vira a seção TOTAL. É a mesma forma que
          o arquivo de headcount produz, então tudo a jusante segue igual. */
-      const s=lerSopDaAba(ws, layout, p.mes);
+      const s=lerSopDaAba(ws, layout);
       if(s && s.erro) warns.push(ws.name+' (S&OP): '+s.erro);
-      else if(s) sop.push({filCode:p.fil, secao:p.op??'TOTAL', ym:s.ym, dias:s.dias,
-                           contratado:s.contratado, aba:ws.name});
+      else if(s) for(const bl of s.blocos) sop.push({filCode:p.fil, secao:p.op??'TOTAL',
+                           ym:bl.ym, dias:bl.dias, contratado:bl.contratado, aba:ws.name});
     }
-    if(!tabs.length) throw new Error('padrão diferente — nenhuma aba de operação reconhecida (ex.: PAXD Jul, DV Ago)');
-    const meses=[...new Set(tabs.map(t=>t.mes))];
+    if(!tabs.length) throw new Error('padrão diferente — nenhuma aba de operação reconhecida (ex.: PAXD Jul, PASVC 16.07-15.08)');
+    const meses=[...new Set(tabs.flatMap(t=>t.meses))].sort((a,b)=>a-b);
     S[slot]={ file:file.name, tabs, meses, sop };
     aplicarSopDosMeses();
     st.textContent='✓ '+tabs.length+' operações · mês: '+meses.map(m=>MES_NOME[m]).join(', ')
@@ -392,11 +419,22 @@ bindDrop('abs-dropS','abs-fileS',handleSigo);
 bindDrop('abs-dropH','abs-fileH',handleSop);
 
 /* ============================== operações ============================== */
+/* Abas de operação disponíveis, unindo os dois slots sem duplicar. Um arquivo
+   de intervalo (16/07 a 15/08) já traz tudo num slot só; dois arquivos mensais
+   trazem a mesma operação uma vez por mês, mas para LISTAR o cartão basta uma —
+   o roster depois lê ambas. Dedup por filial|operação, guardando as abas que
+   alimentam cada cartão. */
+function blocosCarregados(){ return [S.mesA, S.mesB].filter(Boolean); }
+function abasUnicas(){
+  const vis=new Map();
+  for(const bl of blocosCarregados()) for(const t of bl.tabs){
+    const k=t.fil+'|'+(t.op??''); if(!vis.has(k)) vis.set(k, t);
+  }
+  return [...vis.values()];
+}
 /* monta a lista de cartões: cada operação + um cartão TOTAL por filial com 2+ operações */
 function listarCartoes(){
-  const keysA=new Set(S.mesA.tabs.map(t=>t.fil+'|'+(t.op??'')));
-  const ops=S.mesB.tabs.filter(t=>keysA.has(t.fil+'|'+(t.op??'')));
-  const cards=ops.map(t=>({ fil:t.fil, op:t.op??null, total:false }));
+  const cards=abasUnicas().map(t=>({ fil:t.fil, op:t.op??null, total:false }));
   const porFil={};
   for(const c of cards) (porFil[c.fil]??=[]).push(c);
   for(const [fil,list] of Object.entries(porFil))
@@ -442,9 +480,9 @@ function refreshOps(){
          digna de ser preservada. */
       tinhaAlternativa: !!sel && sel.options.length>1 };
   });
-  if(!S.mesA||!S.mesB){ grid.innerHTML='<span class="msg" style="color:var(--dim)">Carregue as duas planilhas mensais para listar as operações.</span>'; return; }
+  if(!S.mesA&&!S.mesB){ grid.innerHTML='<span class="msg" style="color:var(--dim)">Carregue a planilha de absenteísmo para listar as operações.</span>'; return; }
   const cards=listarCartoes();
-  if(!cards.length){ grid.innerHTML='<span class="msg bad">Nenhuma operação em comum entre as duas planilhas.</span>'; return; }
+  if(!cards.length){ grid.innerHTML='<span class="msg bad">Nenhuma operação reconhecida nas planilhas.</span>'; return; }
   grid.innerHTML='';
   for(const card of cards){
     const key=cardKey(card);
@@ -476,7 +514,8 @@ function refreshOps(){
 }
 function checkReady(){
   const any=[...document.querySelectorAll('#abs-opsGrid input[type=checkbox]')].some(c=>c.checked);
-  document.getElementById('abs-btnRun').disabled=!(S.mesA&&S.mesB&&S.sigo&&any);
+  // basta uma planilha de abs (a de intervalo já cobre tudo) + SIGO + seleção
+  document.getElementById('abs-btnRun').disabled=!((S.mesA||S.mesB)&&S.sigo&&any);
 }
 
 /* ============================== cálculo ============================== */
@@ -520,7 +559,7 @@ function validarPeriodo(){
   if(!(ini<fim)){ msg.textContent='Período inválido.'; msg.className='msg bad'; return null; }
   const dias=diasPeriodo(ini,fim);
   const mesesNec=[...new Set(dias.map(d=>d.getMonth()+1))];
-  const mesesTem=[...new Set([...S.mesA.meses,...S.mesB.meses])];
+  const mesesTem=[...new Set(blocosCarregados().flatMap(b=>b.meses))];
   const faltam=mesesNec.filter(m=>!mesesTem.includes(m));
   const mp=document.getElementById('abs-msgPeriodo');
   if(faltam.length){ mp.textContent='⚠ período pede '+faltam.map(m=>MES_NOME[m]).join(', ')+' e as planilhas de abs trazem '+mesesTem.map(m=>MES_NOME[m]).join(', '); mp.className='msg bad'; return null; }
@@ -539,12 +578,17 @@ function processar(){
     const op = (total||!opRaw)? null : opRaw;
     const src=document.querySelector(`select[data-src="${key}"]`).value;
     const manual=+document.querySelector(`input[data-sop="${key}"]`).value||0;
-    /* abas de abs que compõem o cartão: 1 operação, ou todas da filial no cartão TOTAL */
+    /* abas de abs que compõem o cartão: 1 operação, ou todas da filial no cartão
+       TOTAL. Deduplicadas por (fil|op|aba): o mesmo arquivo nos dois slots, ou
+       uma aba de intervalo que cobre dois meses, não pode entrar duas vezes. */
     const tabsPorMes={}; // mes -> [tabs]
-    for(const bloco of [S.mesA,S.mesB]) for(const t of bloco.tabs){
+    const vistas=new Set();
+    for(const bloco of blocosCarregados()) for(const t of bloco.tabs){
       if(t.fil!==fil) continue;
       if(!total && (t.op??'')!==(op??'')) continue;
-      (tabsPorMes[t.mes]??=[]).push(t);
+      const idt=t.fil+'|'+(t.op??'')+'|'+t.tab;
+      if(vistas.has(idt)) continue; vistas.add(idt);
+      for(const m of t.meses) (tabsPorMes[m]??=[]).push(t);
     }
     const porMes={}; // mes -> rows concatenadas das operações do cartão
     for(const [m,ts] of Object.entries(tabsPorMes))
@@ -611,15 +655,19 @@ function processar(){
       const e=norm(r.escala);
       return escalaOp? e===escalaOp : deOutrasOps.indexOf(e)<0;
     };
-    const diarPorDia={}, diarRegs=[];
+    /* Pool por dia, separado por solicitante e com ID em PRIORIDADE: quando a
+       escolha é "ambos", um GROOT que aparece nos dois no mesmo dia conta como
+       ID; o MELI só entra com quem a ID não trouxe. Assim o MELI é sempre
+       fallback — usado apenas depois de esgotada a ID. */
+    const idPorDia={}, meliPorDia={}, diarRegs=[];
     let foraDaEscala=0;
     for(const sh of sigoSheets) for(const r of S.sigo.base[sh]){
       if(!aceitaSolic(r.solic)) continue;
       if(r.data<ini||r.data>fim) continue;
       if(!daOperacao(r)){ foraDaEscala++; continue; }
-      const chave=+r.data+'|'+r.id;
-      if(!(diarPorDia[+r.data]??=new Set()).has(r.id)) diarRegs.push(r);
-      diarPorDia[+r.data].add(r.id);
+      const idSet=(idPorDia[+r.data]??=new Set()), meliSet=(meliPorDia[+r.data]??=new Set());
+      if(r.solic==='id'){ if(!idSet.has(r.id)){ idSet.add(r.id); diarRegs.push(r); } }
+      else { if(!idSet.has(r.id) && !meliSet.has(r.id)){ meliSet.add(r.id); diarRegs.push(r); } }
     }
     const daily=dias.map(d=>{
       let esp=sopDia(d);
@@ -629,22 +677,29 @@ function processar(){
       for(const r of roster){ const v=r.cel[+d]; if(v&&v!=='DF')cont++; if(v==='P')pres++; }
       const semBase = esp!==null && cont===0;
       const dif=(esp!==null&&!semBase)? pres-esp : null;
-      const disp=(diarPorDia[+d]??new Set()).size;               // solicitados no dia (com ID)
-      const usados=(dif!==null&&dif<0)? Math.min(disp,-dif) : 0; // abate limitado ao déficit
-      const pos=dif!==null? dif+usados : null;                   // teto do abate é zerar o dia
-      return { d, esp, cont, contSop:contratadoDia(d), pres, dif, disp, usados, pos, semBase };
+      const dispId=(idPorDia[+d]??new Set()).size, dispMeli=(meliPorDia[+d]??new Set()).size;
+      const disp=dispId+dispMeli;                                 // solicitados no dia (únicos)
+      const falta=(dif!==null&&dif<0)? -dif : 0;
+      const usadosId=Math.min(dispId, falta);                     // ID primeiro
+      const usadosMeli=Math.min(dispMeli, falta-usadosId);        // MELI só no que sobrou
+      const usados=usadosId+usadosMeli;                           // = min(disp, déficit)
+      const pos=dif!==null? dif+usados : null;                    // teto do abate é zerar o dia
+      return { d, esp, cont, contSop:contratadoDia(d), pres, dif, disp, dispId, dispMeli,
+               usados, usadosId, usadosMeli, pos, semBase };
     });
     const validos=daily.filter(x=>x.dif!==null);
     const espT=validos.reduce((a,x)=>a+x.esp,0);
     const faltPre=validos.reduce((a,x)=>a+Math.max(0,-x.dif),0);
     const faltPos=validos.reduce((a,x)=>a+Math.max(0,-x.pos),0);
     const usadosT=validos.reduce((a,x)=>a+x.usados,0);
+    const usadosIdT=validos.reduce((a,x)=>a+x.usadosId,0);
+    const usadosMeliT=validos.reduce((a,x)=>a+x.usadosMeli,0);
     const dispT=validos.filter(x=>x.dif<0).reduce((a,x)=>a+x.disp,0);
     results.push({ key, fil, op, total, src, secoes, manual, roster, daily, dias, mesA, mesB, sigoSheets,
       escalaOp, deOutrasOps, foraDaEscala, diarRegs,
       // filial que não marca a operação na ESCALA: o pool é o mesmo dos irmãos
       escalaIndistinta: !!op && !total && !escalaOp,
-      espT, faltPre, faltPos, usadosT, dispT,
+      espT, faltPre, faltPos, usadosT, usadosIdT, usadosMeliT, dispT,
       absPre: espT? faltPre/espT : 0, absPos: espT? faltPos/espT : 0,
       semBase: daily.filter(x=>x.semBase).map(x=>x.d), semSop });
   }
@@ -695,8 +750,18 @@ function render(list,ini,fim){
       avisos.push(`<b>${nome}</b>: a coluna ESCALA do SIGO não identifica a operação — os diaristas são os mesmos das outras operações da filial e podem estar contados em duas.`);
     if(r.semSop.length) avisos.push(`<b>${nome}</b>: sem S&OP para ${r.semSop.length} dia(s), excluídos do %.`);
   }
+  /* Com "ambos", mostra que o MELI foi só fallback: quanto do abate veio da ID
+     e quanto o MELI precisou completar. */
+  let fallback='';
+  if(S.compSrc==='ambos'){
+    const id=list.reduce((a,r)=>a+r.usadosIdT,0), meli=list.reduce((a,r)=>a+r.usadosMeliT,0);
+    fallback='<div class="abs-pronto" style="border-left-color:var(--amber);margin-top:8px">'
+      +'<b style="color:var(--amber)">Ambos — ID primeiro.</b> Do abate, <b>'+id+'</b> vieram da ID Logistics; '
+      +'o MELI completou <b>'+meli+'</b>'+(meli?'':' (a ID cobriu tudo)')+'.</div>';
+  }
   area.innerHTML='<div class="abs-pronto"><b>✓ Absenteísmo processado.</b> '
     + 'Baixe a planilha — o resultado por dia e por operação está nela.</div>'
+    + fallback
     + (avisos.length? '<ul class="abs-avisos">'+avisos.map(a=>'<li>⚠ '+a+'</li>').join('')+'</ul>' : '');
 
   /* Um download por filial, além do unificado: é o arquivo que vai para cada
