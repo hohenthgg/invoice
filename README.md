@@ -130,9 +130,10 @@ Soltar planilha  →  período + filtros  →  placar por operação  →  Baixa
 
 Compara, dia a dia, o **Quadro S&OP (sem over)** com quem esteve **presente** no
 período da fatura, e compensa o déficit de cada dia com os **diaristas
-solicitados pela ID Logistics naquele dia** — a agência não importa e o diarista
-do MELI fica fora (é custo do MELI, não cobertura do quadro); contados uma vez
-só, e apenas quando têm Groot ID. O abate é limitado ao próprio déficit: um dia
+daquele dia** — contados uma vez só, e apenas quando têm Groot ID. Ao clicar em
+**Validar**, um diálogo pergunta quais diaristas podem compensar: **somente ID
+Logistics** (o padrão — o do MELI é custo do MELI), **somente MELI**, ou **ambos**.
+A agência (MOURA, TSI…) não importa; quem não tem solicitante fica sempre fora. O abate é limitado ao próprio déficit: um dia
 nunca fica positivo por sobra de diarista.
 
 O pool é ainda filtrado pela **ESCALA da operação**, não pela aba do SIGO: as abas
@@ -144,8 +145,11 @@ pertence às outras operações da filial. Filial que não distingue a operaçã
 ESCALA recebe um aviso no cartão: os diaristas são os mesmos dos irmãos e podem
 estar contados em dois.
 
-Devolve o absenteísmo **antes** e **pós compensação** contra o **range contratual
-de 2,5%**, a lista dos dias críticos e um Excel no formato do modelo de
+A tela de resultado por operação foi **ocultada**: depois de validar sobra só a
+confirmação e os avisos que merecem atenção antes de abrir o arquivo — o resultado
+completo, por dia e por operação, está na planilha. Ela traz o absenteísmo
+**antes** e **pós compensação** contra o **range contratual de 2,5%**, a lista dos
+dias críticos, no formato do modelo de
 referência: uma aba `Diaristas <operação>` no layout do SIGO, um `Unificado` por
 operação e um `Resumo Gerencial` com fórmulas vivas — o `COUNTIFS` aponta para a
 aba de diaristas da própria operação e filtra a ESCALA, então a planilha

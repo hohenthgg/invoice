@@ -785,6 +785,38 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 #panel-abs .abs-btn.go:hover:not(:disabled){transform:translateY(-1px)}
 #panel-abs .abs-btn.dl{background:linear-gradient(135deg,var(--ok),#2bb673);color:#06281a}
 #panel-abs .abs-btn.dl:hover{transform:translateY(-1px)}
+#panel-abs .abs-btn.ghost{background:transparent;border:1px solid var(--line2);color:var(--mut)}
+#panel-abs .abs-btn.ghost:hover{color:var(--ink);border-color:var(--mut2)}
+
+/* diálogo: fonte de diaristas para a compensação */
+#panel-abs .abs-modal-bg{position:fixed;inset:0;z-index:50;display:flex;align-items:center;
+  justify-content:center;background:rgba(4,10,22,.66);padding:20px}
+#panel-abs .abs-modal-bg[hidden]{display:none}
+#panel-abs .abs-modal{background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-md);padding:22px 24px;max-width:440px;width:100%;
+  box-shadow:0 20px 60px rgba(0,0,0,.5)}
+#panel-abs .abs-modal h4{margin:0 0 6px;font-size:.98rem;color:var(--ink)}
+#panel-abs .abs-modal-sub{margin:0 0 16px;font-size:.76rem;color:var(--mut);line-height:1.5}
+#panel-abs .abs-opt{display:flex;gap:10px;align-items:flex-start;cursor:pointer;
+  padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);margin-bottom:8px;
+  transition:border-color .12s,background .12s}
+#panel-abs .abs-opt:hover{border-color:var(--mut2)}
+#panel-abs .abs-opt:has(input:checked){border-color:var(--amber);background:rgba(255,194,51,.06)}
+#panel-abs .abs-opt input{margin-top:3px;accent-color:var(--amber)}
+#panel-abs .abs-opt b{font-size:.82rem;color:var(--ink);display:block}
+#panel-abs .abs-opt i{font-size:.72rem;color:var(--mut);font-style:normal;display:block;margin-top:2px}
+#panel-abs .abs-modal-acoes{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+#panel-abs .abs-modal-acoes .abs-btn{padding:9px 18px}
+
+/* resultado enxuto — a tela por operação foi ocultada */
+#panel-abs .abs-pronto{font-size:.82rem;color:var(--ink);background:var(--navy);
+  border:1px solid var(--line);border-left:3px solid var(--ok);border-radius:var(--radius-sm);
+  padding:12px 14px}
+#panel-abs .abs-pronto b{color:var(--ok)}
+#panel-abs .abs-avisos{list-style:none;margin:10px 0 0;padding:0}
+#panel-abs .abs-avisos li{font-size:.75rem;color:var(--warn);line-height:1.5;
+  padding:6px 0;border-top:1px solid var(--line)}
+#panel-abs .abs-avisos b{color:var(--ink)}
 
 /* downloads por filial, ao lado do unificado */
 #panel-abs .abs-porfilial{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px;
