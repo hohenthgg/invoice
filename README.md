@@ -149,7 +149,14 @@ de 2,5%**, a lista dos dias críticos e um Excel no formato do modelo de
 referência: uma aba `Diaristas <operação>` no layout do SIGO, um `Unificado` por
 operação e um `Resumo Gerencial` com fórmulas vivas — o `COUNTIFS` aponta para a
 aba de diaristas da própria operação e filtra a ESCALA, então a planilha
-recalcula sozinha se alguém editar. Além do unificado há **um download por
+recalcula sozinha se alguém editar.
+
+As datas gravadas no Excel são **sempre meia-noite UTC** (`dataExcel`). Meia-noite
+local vira `03:00Z` em UTC-3, ou seja o serial `46223,125` em vez de `46223` — e o
+`COUNTIFS` do resumo, que compara com `DATE(2026,7,20)` (serial inteiro), não casa
+com nada: **todo o abate recalculava para zero ao abrir a planilha**, embora os
+valores em cache estivessem certos. Um ambiente em UTC não reproduz o defeito, por
+isso `tests/abs-datas.test.js` força o fuso de São Paulo. Além do unificado há **um download por
 filial** — o arquivo que vai para cada gerente sem levar junto o resto da rede.
 
 A linha **Contratado** do resumo vem da linha `Contratado` do bloco de headcount
