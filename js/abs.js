@@ -707,6 +707,16 @@ const COR={hdr:'FF1F4E78', P:'FFC6EFCE', F:'FFFFC7CE', AM:'FFFFEB9C', DF:'FFD9D9
 const BORD={top:{style:'thin',color:{argb:'FFBFBFBF'}},bottom:{style:'thin',color:{argb:'FFBFBFBF'}},left:{style:'thin',color:{argb:'FFBFBFBF'}},right:{style:'thin',color:{argb:'FFBFBFBF'}}};
 const F10={name:'Arial',size:10}, F10B={name:'Arial',size:10,bold:true};
 function colL(n){let s='';while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=(n-1-m)/26;}return s;}
+/* Data para o Excel: SEMPRE meia-noite UTC.
+   ----------------------------------------------------------------
+   Internamente as datas são meia-noite LOCAL, e o ExcelJS grava o instante
+   UTC. Em UTC-3 isso vira 03:00Z, ou seja o serial 46223,125 em vez de
+   46223 — e aí o COUNTIFS do resumo, que compara com DATE(2026,7,20)
+   (serial inteiro), não casa com nada: TODO abate recalculava para zero ao
+   abrir a planilha. Os valores em cache estavam certos, o que enganava.
+   Um ambiente em UTC não reproduz o defeito, então a defesa mora aqui, no
+   único ponto em que data vira célula. */
+const dataExcel = d => new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
 
 async function exportar(){
   if(!S.results) return;
@@ -740,7 +750,7 @@ async function exportarLista(list, prefixo){
     wsD.getRow(1).height=28;
     for(const reg of r.diarRegs){
       const row=wsD.addRow([MESES_PT[reg.data.getMonth()+1]+'/'+String(reg.data.getFullYear()).slice(2),
-        reg.data, reg.solicitante, reg.empresa, isNaN(Number(reg.id))?reg.id:Number(reg.id),
+        dataExcel(reg.data), reg.solicitante, reg.empresa, isNaN(Number(reg.id))?reg.id:Number(reg.id),
         reg.nome, reg.cargo, reg.escala]);
       row.eachCell(c=>{c.font=F10;c.border=BORD;});
       row.getCell(2).numFmt='dd/mm/yyyy';
