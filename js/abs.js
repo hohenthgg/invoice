@@ -720,7 +720,7 @@ const dataExcel = d => new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDat
 
 async function exportar(){
   if(!S.results) return;
-  await exportarLista(S.results.list, 'Absenteismo_Unificado');
+  await exportarLista(S.results.list);
 }
 /* Uma filial por arquivo: o mesmo workbook (Diaristas + Unificado + Resumo por
    cartão), restrito aos cartões da filial. É o que se manda para cada gerente
@@ -729,9 +729,26 @@ async function exportarFilial(fil){
   if(!S.results) return;
   const lista=S.results.list.filter(r=>r.fil===fil);
   if(!lista.length) return;
-  await exportarLista(lista, 'Absenteismo_'+FILIAIS[fil].normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'_'));
+  await exportarLista(lista);
 }
-async function exportarLista(list, prefixo){
+/* Nome do arquivo, padronizado:
+     "Conciliação ABS Diaristas - Filial - Operação - Período"
+   Filial e Operação vêm da SELEÇÃO: quando ela cobre uma só, sai o nome
+   dela; quando cobre várias, sai "Todas as Filiais" / "Todas as Operações".
+   Um cartão de filial inteira (Divinópolis, sem sub-operação) é "Geral". */
+function rotuloOperacao(r){ return r.total? 'TOTAL' : (r.op? OPER[r.op] : 'Geral'); }
+function nomeArquivoABS(list){
+  const {ini,fim}=S.results;
+  const fils=[...new Set(list.map(r=>r.fil))];
+  const ops=[...new Set(list.map(rotuloOperacao))];
+  const filPart = fils.length===1 ? FILIAIS[fils[0]] : 'Todas as Filiais';
+  const opPart  = ops.length===1  ? ops[0]          : 'Todas as Operações';
+  const dia=d=>fmtDia(d).replace('/','-')+'-'+d.getFullYear();
+  const bruto=`Conciliação ABS Diaristas - ${filPart} - ${opPart} - ${dia(ini)} a ${dia(fim)}`;
+  // tira só o que é ilegal em nome de arquivo; acentos ficam, são legíveis
+  return bruto.replace(/[\\/:*?"<>|]/g,'-')+'.xlsx';
+}
+async function exportarLista(list){
   const {ini,fim}=S.results;
   const wb=new ExcelJS.Workbook();
 
@@ -853,7 +870,7 @@ async function exportarLista(list, prefixo){
   const buf=await wb.xlsx.writeBuffer();
   const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=prefixo+'_'+fmtDia(ini).replace('/','-')+'_a_'+fmtDia(fim).replace('/','-')+'.xlsx';
+  a.download=nomeArquivoABS(list);
   a.click(); URL.revokeObjectURL(a.href);
 }
 document.getElementById('abs-btnXlsx').addEventListener('click',exportar);
