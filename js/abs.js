@@ -67,11 +67,12 @@ function parseTabName(name){
    existir, a linha "Esperado" com o cabeçalho de dias logo acima. */
 function localizarBlocos(ws){
   const lim=Math.min(ws.rowCount||1, 30);
-  let pessoas=0, sop=0, sopHeader=0;
+  let pessoas=0, sop=0, contratado=0, sopHeader=0;
   for(let r=1;r<=lim;r++){
     const a=norm(cellVal(ws,r,1)), c=norm(cellVal(ws,r,3));
     if(!pessoas && /^mat\.?$/.test(a) && c.startsWith('nome')) pessoas=r;
     if(!sop && a==='esperado') sop=r;
+    if(!contratado && a==='contratado') contratado=r;
   }
   if(!pessoas) return null;
   const diasDe=(r,re)=>{
@@ -91,7 +92,7 @@ function localizarBlocos(ws){
     if(Object.keys(diasSop).length<3){ sop=0; diasSop={}; }
     else sopHeader=1;
   }
-  return { pessoas, diasPessoas, sop, diasSop, titulo:String(cellVal(ws,1,1)??'') };
+  return { pessoas, diasPessoas, sop, contratado, diasSop, titulo:String(cellVal(ws,1,1)??'') };
 }
 function validaAba(ws, layout){
   if(!layout) return 'cabeçalho fora do padrão (não achei a linha "Mat./Nome" com colunas de dias a partir da coluna I)';
@@ -124,18 +125,26 @@ function anoDoTitulo(titulo, mes){
   const so=t.match(/\b(20\d{2})\b/);
   return so? +so[1] : null;
 }
-/* Lê o S&OP embutido numa aba de operação: uma linha "Esperado" por dia. */
+/* Lê o bloco de headcount embutido numa aba de operação: a linha "Esperado"
+   (o S&OP do dia) e, quando existir, a "Contratado" — que é dado de origem,
+   não algo que dê para derivar da grade de presenças: contar marcas não-DF
+   dava 179 num dia em que a planilha diz 137. */
 function lerSopDaAba(ws, layout, mes){
   if(!layout || !layout.sop) return null;
   const ano=anoDoTitulo(layout.titulo, mes);
   if(!ano) return {erro:'sem o ano no título (esperado algo como "· Julho/2026")'};
-  const dias={};
-  for(const [d,c] of Object.entries(layout.diasSop)){
-    const v=cellVal(ws, layout.sop, +c);
-    if(typeof v==='number') dias[+d]=v;
-  }
+  const linha=r=>{
+    const o={};
+    for(const [d,c] of Object.entries(layout.diasSop)){
+      const v=cellVal(ws, r, +c);
+      if(typeof v==='number') o[+d]=v;
+    }
+    return o;
+  };
+  const dias=linha(layout.sop);
   if(!Object.keys(dias).length) return {erro:'linha "Esperado" sem nenhum valor numérico'};
-  return { ym: ano*100+mes, dias };
+  const contratado=layout.contratado? linha(layout.contratado) : {};
+  return { ym: ano*100+mes, dias, contratado };
 }
 /* headcount S&OP — flexível. Aceita:
    (a) 1 aba por filial, título "· Agosto/2026", colunas "1 SAB … 31 SEG"  → mês único
@@ -233,11 +242,15 @@ function parseHeadcount(wb, fname){
       explícito de quem quer justamente aquele número.
    A origem fica registrada por seção para o seletor dizer de onde veio. */
 function aplicarSopDosMeses(){
-  S.sop={}; S.sopOrigem={};
+  S.sop={}; S.sopOrigem={}; S.sopContratado={};
   const por=(b,origem)=>{
     const dest=(((S.sop[b.filCode]??={})[b.secao]??={})[b.ym]??={});
     Object.assign(dest, b.dias);
     ((S.sopOrigem[b.filCode]??={})[b.secao]??=new Set()).add(origem);
+    if(b.contratado && Object.keys(b.contratado).length){
+      const dc=(((S.sopContratado[b.filCode]??={})[b.secao]??={})[b.ym]??={});
+      Object.assign(dc, b.contratado);
+    }
   };
   for(const slot of ['mesA','mesB']) (S[slot]?.sop??[]).forEach(b=>por(b,'mensal'));
   (S.sopArquivo??[]).forEach(b=>por(b,'arquivo'));
@@ -279,7 +292,8 @@ async function handleMes(slot,files,drop){
          o arquivo de headcount produz, então tudo a jusante segue igual. */
       const s=lerSopDaAba(ws, layout, p.mes);
       if(s && s.erro) warns.push(ws.name+' (S&OP): '+s.erro);
-      else if(s) sop.push({filCode:p.fil, secao:p.op??'TOTAL', ym:s.ym, dias:s.dias, aba:ws.name});
+      else if(s) sop.push({filCode:p.fil, secao:p.op??'TOTAL', ym:s.ym, dias:s.dias,
+                           contratado:s.contratado, aba:ws.name});
     }
     if(!tabs.length) throw new Error('padrão diferente — nenhuma aba de operação reconhecida (ex.: PAXD Jul, DV Ago)');
     const meses=[...new Set(tabs.map(t=>t.mes))];
@@ -520,6 +534,18 @@ function processar(){
       }
       return achou? soma : undefined; // undefined = sem dado no headcount
     };
+    /* Contratado do dia, da linha "Contratado" do bloco embutido — dado de
+       origem. null quando as abas não trazem (modelo antigo). */
+    const contratadoDia = d=>{
+      if(!secoes) return null;
+      const ym=d.getFullYear()*100+(d.getMonth()+1);
+      let soma=0, achou=false;
+      for(const s of secoes){
+        const v=S.sopContratado[fil]?.[s]?.[ym]?.[d.getDate()];
+        if(typeof v==='number'){ soma+=v; achou=true; }
+      }
+      return achou? soma : null;
+    };
     const semSop=[];
     /* diaristas (somente ID, únicos por dia, união das abas do SIGO do cartão) */
     const sigoSheets=sigoSheetsFor(fil,op,total);
@@ -538,7 +564,7 @@ function processar(){
       const disp=(diarPorDia[+d]??new Set()).size;               // solicitados no dia (com ID)
       const usados=(dif!==null&&dif<0)? Math.min(disp,-dif) : 0; // abate limitado ao déficit
       const pos=dif!==null? dif+usados : null;                   // teto do abate é zerar o dia
-      return { d, esp, cont, pres, dif, disp, usados, pos, semBase };
+      return { d, esp, cont, contSop:contratadoDia(d), pres, dif, disp, usados, pos, semBase };
     });
     const validos=daily.filter(x=>x.dif!==null);
     const espT=validos.reduce((a,x)=>a+x.esp,0);
@@ -599,6 +625,24 @@ function render(list,ini,fim){
     `;
     area.appendChild(el);
   }
+
+  /* Um download por filial, além do unificado: é o arquivo que vai para cada
+     gerente sem levar junto o resto da rede. Os botões nascem do resultado —
+     só aparecem as filiais realmente calculadas. */
+  const fils=[...new Set(list.map(r=>r.fil))];
+  let bar=document.getElementById('abs-porFilial');
+  if(!bar){
+    bar=document.createElement('div'); bar.id='abs-porFilial'; bar.className='abs-porfilial';
+    document.getElementById('abs-btnXlsx').insertAdjacentElement('afterend', bar);
+  }
+  bar.innerHTML=fils.length>1? '<span class="lb">ou uma filial por arquivo:</span>' : '';
+  if(fils.length>1) for(const fil of fils){
+    const b=document.createElement('button');
+    b.type='button'; b.className='abs-btnfil'; b.textContent=FILIAIS[fil];
+    b.addEventListener('click',()=>exportarFilial(fil));
+    bar.appendChild(b);
+  }
+
   document.getElementById('abs-step4').scrollIntoView({behavior:'smooth'});
 }
 
@@ -610,7 +654,19 @@ function colL(n){let s='';while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m
 
 async function exportar(){
   if(!S.results) return;
-  const {ini,fim,list}=S.results;
+  await exportarLista(S.results.list, 'Absenteismo_Unificado');
+}
+/* Uma filial por arquivo: o mesmo workbook (Diaristas + Unificado + Resumo por
+   cartão), restrito aos cartões da filial. É o que se manda para cada gerente
+   sem levar junto o resto da rede. */
+async function exportarFilial(fil){
+  if(!S.results) return;
+  const lista=S.results.list.filter(r=>r.fil===fil);
+  if(!lista.length) return;
+  await exportarLista(lista, 'Absenteismo_'+FILIAIS[fil].normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,'_'));
+}
+async function exportarLista(list, prefixo){
+  const {ini,fim}=S.results;
   const wb=new ExcelJS.Workbook();
 
   const wsD=wb.addWorksheet('Diaristas');
@@ -662,7 +718,14 @@ async function exportar(){
     hRow.getCell(2+nDias).value='Média Período';
     for(let c=1;c<=2+nDias;c++){const cl=hRow.getCell(c);cl.font={...F10B,color:{argb:'FFFFFFFF'}};cl.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.hdr}};cl.alignment={horizontal:'center',vertical:'middle',wrapText:true};cl.border=BORD;}
     hRow.height=28;
-    const rotulos=['Quadro S&OP (sem over)','Contratado - Escala do dia','Presente','Diferença (S&OP-Presente)','Diaristas Disponíveis (com ID)','Diaristas Utilizados (abate)','Saldo Pós Compensação'];
+    /* O Contratado vem da planilha mensal quando ela traz a linha; contar
+       marcas não-DF na grade dava 179 num dia em que a origem diz 137. Só o
+       fallback (modelo antigo, sem o bloco) continua derivado — e é rotulado
+       como derivado, para ninguém confundir. */
+    const temContSop=r.daily.some(x=>x.contSop!==null&&x.contSop!==undefined);
+    const rotulos=['Quadro S&OP (sem over)',
+      temContSop?'Contratado (planilha mensal)':'Contratado (derivado da grade)',
+      'Presente','Diferença (S&OP-Presente)','Diaristas Disponíveis (com ID)','Diaristas Utilizados (abate)','Saldo Pós Compensação'];
     rotulos.forEach((t,i)=>{const c=wr.getCell(4+i,1);c.value=t;c.font=F10B;c.border=BORD;
       if(i===3)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.dif}};
       if(i===4||i===5)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.diar}};});
@@ -673,7 +736,9 @@ async function exportar(){
         c.font=rw===7||rw===10?F10B:F10;c.alignment={horizontal:'center'};c.border=BORD;
         if(fill)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:fill}};};
       set(4,null,day.esp);
-      set(5,`SUMPRODUCT((${uni}!${pL}2:${pL}${lastRow}<>"")*(${uni}!${pL}2:${pL}${lastRow}<>"DF"))`,day.cont);
+      // valor da origem entra como valor; a fórmula viva só faz sentido no derivado
+      if(temContSop) set(5,null,day.contSop);
+      else set(5,`SUMPRODUCT((${uni}!${pL}2:${pL}${lastRow}<>"")*(${uni}!${pL}2:${pL}${lastRow}<>"DF"))`,day.cont);
       set(6,`COUNTIF(${uni}!${pL}2:${pL}${lastRow},"P")`,day.pres);
       set(7,day.dif!==null?`${L}6-${L}4`:null,day.dif,COR.dif);
       set(8,day.dif!==null?`COUNTIFS(Diaristas!$B:$B,DATE(${d.getFullYear()},${d.getMonth()+1},${d.getDate()}),Diaristas!$A:$A,"${rotulo}")`:null,day.dif!==null?day.disp:null,COR.diar);
@@ -684,7 +749,7 @@ async function exportar(){
     const med=(rw,f,res)=>{const c=wr.getCell(rw,mc);c.value={formula:f,result:res};c.font=F10B;c.alignment={horizontal:'center'};c.border=BORD;c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.med}};c.numFmt='0.0';};
     const vs=r.daily.filter(x=>x.dif!==null);
     med(4,`ROUND(AVERAGEIF(B4:${mL}4,"<>0"),1)`, vs.length?+(vs.reduce((a,x)=>a+x.esp,0)/vs.length).toFixed(1):0);
-    med(5,`ROUND(AVERAGEIF(B5:${mL}5,"<>0"),1)`, vs.length?+(vs.reduce((a,x)=>a+x.cont,0)/vs.length).toFixed(1):0);
+    med(5,`ROUND(AVERAGEIF(B5:${mL}5,"<>0"),1)`, vs.length?+(vs.reduce((a,x)=>a+(temContSop?(x.contSop??0):x.cont),0)/vs.length).toFixed(1):0);
     med(6,`ROUND(AVERAGEIF(B6:${mL}6,"<>0"),1)`, vs.length?+(vs.reduce((a,x)=>a+x.pres,0)/vs.length).toFixed(1):0);
     med(7,`ROUND(SUMIF(B7:${mL}7,"<0"),1)`, -r.faltPre);
     med(8,`SUM(B8:${mL}8)`, vs.reduce((a,x)=>a+(x.dif!==null?x.disp:0),0));
@@ -705,7 +770,7 @@ async function exportar(){
   const buf=await wb.xlsx.writeBuffer();
   const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download='Absenteismo_Unificado_'+fmtDia(ini).replace('/','-')+'_a_'+fmtDia(fim).replace('/','-')+'.xlsx';
+  a.download=prefixo+'_'+fmtDia(ini).replace('/','-')+'_a_'+fmtDia(fim).replace('/','-')+'.xlsx';
   a.click(); URL.revokeObjectURL(a.href);
 }
 document.getElementById('abs-btnXlsx').addEventListener('click',exportar);

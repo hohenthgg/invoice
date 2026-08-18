@@ -138,7 +138,13 @@ Devolve o absenteísmo **antes** e **pós compensação** contra o **range contr
 de 2,5%**, a lista dos dias críticos e um Excel com a aba `Diaristas`, um
 `Unificado` por operação e um `Resumo` gerencial com fórmulas vivas — o
 `COUNTIFS` dos diaristas aponta para a própria aba `Diaristas`, então a planilha
-recalcula sozinha se alguém editar.
+recalcula sozinha se alguém editar. Além do unificado há **um download por
+filial** — o arquivo que vai para cada gerente sem levar junto o resto da rede.
+
+A linha **Contratado** do resumo vem da linha `Contratado` do bloco de headcount
+da própria planilha mensal — é dado de origem, não algo derivável da grade:
+contar marcas não-DF dava 179 num dia em que a origem diz 137. Só no modelo
+antigo, sem o bloco, ela continua derivada — e rotulada como derivada.
 
 Dias sem S&OP, ou sem lançamento na base de absenteísmo, ficam de fora do
 percentual em vez de entrar como zero.
