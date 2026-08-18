@@ -100,18 +100,20 @@ alinhamentos, sem congelar linha e sem autofiltro, porque o modelo não tem):
 `GROOT ID` · `NOME` · `CARGO` · `ESCALA`
 
 **No modelo, `ESCALA` é o HORÁRIO** (`03:00 07:00 08:00 12:48` — entrada, início e
-fim do intervalo, saída), não o `6x1`/`XD` do SIGO, que não tem lugar na entrega.
-O horário vem do **padrão de diarista da operação**, levantado na aba `DIARISTAS`
-da fatura 3PL, onde cada unidade tem um horário dominante. A tabela está em
-`ESCALA_HORARIO_PADRAO` (`js/config.js`), com a fonte de cada valor documentada —
-as seis operações estão levantadas nas faturas de julho/2026. Quando a origem já
-traz o horário (Divinópolis, coluna `ESCALA NATURAL`), **vale o arquivo**; o padrão
-só entra quando o arquivo não diz nada.
+fim do intervalo, saída), não o `6x1`/`XD` do SIGO. E a coluna ESCALA do SIGO fala
+uma língua por filial, então a resolução é **por linha** (`resolverEscala`,
+`js/config.js`), nesta prioridade:
 
-É um padrão, não uma verdade linha a linha: quatro unidades são uniformes, mas
-Varginha teve 30 de 138 e Divinópolis 6 de 37 em outros horários. Operação sem
-levantamento sai **em branco** e vira tópico de revisão: chutar o horário de outra
-filial seria pior que a lacuna.
+1. coluna explícita de horário ("Escala Horário" / "Escala Natural"), se preenchida;
+2. horário escrito na própria ESCALA passa **verbatim** — Divinópolis
+   (`01:00 04:00 05:00 09:20`) e Patos de Minas (`00:30 as 09:18`);
+3. turno vira horário pela tabela da operação (`ESCALA_TOKEN_HORARIO`), levantada
+   nas faturas 3PL: Varginha `AM` → `03:00 07:00 08:00 11:20` e `PM` →
+   `10:00 15:00 16:00 19:48`; Pouso `svc` → horário SMG3 e `xd` → BRXMG3; Poços `AM`;
+4. célula vazia recebe o padrão da operação (`ESCALA_HORARIO_PADRAO`);
+5. turno **sem horário levantado** (`SD`, `FULL`, `PM` de Poços) sai como está e
+   vira tópico de revisão — escrever o horário de outro turno no lugar seria pôr
+   um dado errado com cara de certo.
 
 ```
 Soltar planilha  →  período + filtros  →  placar por operação  →  Baixar .xlsx

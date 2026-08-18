@@ -17,7 +17,8 @@ const { normalizeGroot, limparGroot, grootParaSaida, hasGroot, normalizeNome,
         deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO,
         problemasDoNome, nomeQuebrado, NOME_PROBLEMA,
         listarTopicos, resumirTopicos, GRAVIDADE,
-        ESCALA_HORARIO_PADRAO, escalaHorarioDe } = ctx;
+        ESCALA_HORARIO_PADRAO, escalaHorarioDe,
+        pareceHorario, resolverEscala } = ctx;
 
 let pass = 0, fail = 0;
 function check(ok, label, extra) {
@@ -242,6 +243,18 @@ check(normalizeNome("José  da Silva") === "JOSE DA SILVA", "acento, caixa e esp
 check(normalizeNome("MARIA D'ÁVILA") === "MARIA D AVILA", "pontuação vira separador",
       normalizeNome("MARIA D'ÁVILA"));
 check(normalizeNome(null) === "" && normalizeNome(undefined) === "", "nulo e indefinido viram vazio");
+/* A aba de Pouso XD numera os nomes por posição na lista. Sem tirar isso,
+   "1. Douglas" e "5. Douglas" viravam duas pessoas sob o mesmo GROOT. */
+check(normalizeNome("1. Douglas David da Silva") === "DOUGLAS DAVID DA SILVA"
+      && normalizeNome("1. Douglas David da Silva") === normalizeNome("5. Douglas David da Silva")
+      && normalizeNome("23 - Maria José") === "MARIA JOSE",
+      "numeração de lista na frente do nome é posição, não identidade",
+      normalizeNome("1. Douglas David da Silva"));
+check(problemasDoNome("1. Douglas David da Silva").length === 0,
+      "…e não marca o nome como quebrado por 'ter número'",
+      JSON.stringify(problemasDoNome("1. Douglas David da Silva")));
+check(problemasDoNome("JOAO SILVA 2").includes(NOME_PROBLEMA.DIGITOS),
+      "…mas número NO MEIO do nome continua sendo defeito");
 
 console.log("\n  Mesmo nome, identificadores diferentes");
 {
@@ -472,6 +485,53 @@ check(escalaHorarioDe("Filial Inexistente") === "",
 check(OPS.filter(op => escalaHorarioDe(op))
         .every(op => /^\d{2}:\d{2}( \d{2}:\d{2}){3}$/.test(escalaHorarioDe(op))),
       "todos no formato da fatura: entrada, início e fim do intervalo, saída");
+/* A coluna ESCALA do SIGO fala uma língua por filial: Varginha diz AM/PM,
+   Divinópolis escreve o horário inteiro, Patos usa "00:30 as 09:18", Pouso
+   usa svc/xd. A saída precisa refletir os horários fielmente. */
+console.log("\n  Resolução da escala por linha");
+check(pareceHorario("01:00 04:00 05:00 09:20") && pareceHorario("00:30 as 09:18")
+      && !pareceHorario("AM") && !pareceHorario("XD") && !pareceHorario(""),
+      "horário escrito é reconhecido nos dois formatos; turno e vazio não");
+{
+  const r = resolverEscala("Varginha", "AM", "");
+  const s = resolverEscala("Varginha", "PM", "");
+  check(r.valor === "03:00 07:00 08:00 11:20" && s.valor === "10:00 15:00 16:00 19:48"
+        && r.origem === "token" && s.origem === "token",
+        "Varginha: AM e PM viram os dois horários da fatura SMG9",
+        r.valor + " · " + s.valor);
+  check(resolverEscala("Varginha", "pm", "").valor === "10:00 15:00 16:00 19:48",
+        "…sem depender de caixa (pm = PM)");
+}
+check(resolverEscala("Pouso Alegre SVC", "svc", "").valor === "03:00 07:00 08:00 12:48"
+      && resolverEscala("Pouso Alegre SVC", "XD", "").valor === "13:00 17:00 18:00 22:45",
+      "Pouso SVC: svc e XD viram os horários das faturas SMG3 e BRXMG3 — a aba mistura os dois turnos");
+check(resolverEscala("Divinópolis", "01:00 04:00 05:00 09:20", "").valor === "01:00 04:00 05:00 09:20"
+      && resolverEscala("Divinópolis", "01:00 04:00 05:00 09:20", "").origem === "arquivo",
+      "Divinópolis: horário escrito na linha passa verbatim, sem conversão");
+check(resolverEscala("Patos de Minas", "00:30 as 09:18", "").valor === "00:30 as 09:18",
+      "Patos: o formato próprio ('00:30 as 09:18') também passa como está");
+check(resolverEscala("Patos de Minas", "", "").valor === "00:00 05:00 06:00 09:20"
+      && resolverEscala("Patos de Minas", "", "").origem === "padrao",
+      "…e a célula vazia recebe o padrão da operação");
+{
+  const r = resolverEscala("Poços de Caldas", "SD", "");
+  check(r.valor === "SD" && r.origem === "sem_mapa",
+        "turno sem horário levantado (SD) fica como está — escrever o horário de outro "
+        + "turno seria pôr dado errado com cara de certo", JSON.stringify(r));
+}
+check(resolverEscala("Varginha", "AM", "07:00 11:00 12:00 16:20").valor === "07:00 11:00 12:00 16:20",
+      "a coluna explícita de horário, quando preenchida, manda sobre tudo");
+
+{
+  const r = auditar({ SVC: [reg("1", "2026-08-10", "ANA SOUZA")] });
+  const t = listarTopicos(r, [], null, [],
+    [{op:"Poços de Caldas", escalasSemMapa:[{token:"SD", vezes:17}], vazias:[], preenchidas:[]}]);
+  check(t.length === 1 && t[0].topico === "Escala sem horário mapeado"
+        && /"SD"/.test(t[0].diagnostico) && /17 registros/.test(t[0].diagnostico),
+        "o turno sem mapa vira tópico, dizendo o token e quantos registros saíram sem conversão",
+        JSON.stringify(t[0] && t[0].diagnostico));
+}
+
 {
   const r = auditar({ SVC: [reg("1", "2026-08-10", "ANA SOUZA")] });
   const t = listarTopicos(r, [], null, [{op:"Varginha", registros:12}]);

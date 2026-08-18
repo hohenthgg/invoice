@@ -214,12 +214,21 @@
       // coluna que existe no padrão e não foi achada nesta aba: sai vazia, e isso se diz
       COLUNAS_SIGO.forEach(c => {
         if(c.k !== "horario" && mapa.col[c.k] === undefined)
-          leitura.colunas.push({op, coluna:c.titulo.replace("\n"," ")});
+          leitura.colunas.push({op, coluna:c.nomes[0].toUpperCase()});
       });
 
       const rows = [];
       const txt = v => (v === null || v === undefined) ? "" : String(v).trim();
       const val = (r, k) => mapa.col[k] === undefined ? "" : txt(r[mapa.col[k]]);
+      /* Perda de dado é uma linha sem data legível que carrega ALGO QUE
+         IDENTIFICA uma diária: pessoa (groot, nome) ou pelo menos empresa,
+         cargo ou escala. Dois falsos alarmes reais ensinaram o limite:
+         as tabelas auxiliares ao lado ("Dias/Qtd", cadastro GROOT) enchem
+         a linha fora da tabela principal, e a aba XD tem ~9.700 linhas
+         futuras com só o SOLICITANTE pré-arrastado ("MELI") — nenhum dos
+         dois é uma diária perdida. */
+      const colunasQueIdentificam = ["groot","nome","empresa","cargo","escala"]
+        .map(k => mapa.col[k]).filter(j => j !== undefined);
       for(let i=mapa.headerIdx+1;i<grid.length;i++){
         const r = grid[i]; if(!r) continue;
         const dv = mapa.col.data === undefined ? null : r[mapa.col.data];
@@ -227,8 +236,7 @@
         if(dv instanceof Date && !isNaN(dv)) key = dateKey(dv);
         else if(typeof dv === "number" && dv > 20000 && dv < 80000) key = excelSerialToKey(dv);
         if(!key){
-          // linha em branco é formatação; linha COM conteúdo e sem data é perda de dado
-          if(r.some(c => c !== null && c !== undefined && String(c).trim() !== ""))
+          if(colunasQueIdentificam.some(j => txt(r[j]) !== ""))
             leitura.semData.push({op, linha:i+1, valor:txt(dv),
                                   nome:val(r,"nome"), groot:val(r,"groot")});
           continue;
@@ -539,19 +547,26 @@
      distintos, a célula continua vazia. Escolher entre "Diarista" e
      "Diarista Dom. e Feriados" seria inventar. */
   function montarSaida(op, linhas){
-    const padrao = escalaHorarioDe(op);
-    const dados = linhas.map(r => ({
-      mes: r.mes,
-      data: keyToUTCDate(r.date),
-      solicitante: r.solicitante,
-      empresa: r.empresa,
-      groot: grootParaSaida(r.id),
-      nome: r.nome,
-      cargo: r.cargo,
-      /* No modelo, ESCALA é o HORÁRIO — não o 6x1 do SIGO. O arquivo manda
-         quando traz o horário (Divinópolis); senão vale o padrão da operação. */
-      escala: r.horario || padrao
-    }));
+    /* No modelo, ESCALA é o HORÁRIO. A linha do SIGO manda: horário escrito
+       passa verbatim (Divinópolis, Patos), turno vira horário pela tabela da
+       operação (AM/PM de Varginha, svc/xd de Pouso), vazio recebe o padrão.
+       Token sem mapa fica como está e é contado para o painel apontar —
+       ver resolverEscala em js/config.js. */
+    const semMapa = new Map();
+    const dados = linhas.map(r => {
+      const e = resolverEscala(op, r.escala, r.horario);
+      if(e.origem === "sem_mapa") semMapa.set(e.token, (semMapa.get(e.token)||0)+1);
+      return {
+        mes: r.mes,
+        data: keyToUTCDate(r.date),
+        solicitante: r.solicitante,
+        empresa: r.empresa,
+        groot: grootParaSaida(r.id),
+        nome: r.nome,
+        cargo: r.cargo,
+        escala: e.valor
+      };
+    });
 
     const preenchidas = [];
     ORDEM_SAIDA.forEach(k => {
@@ -567,6 +582,7 @@
     const colunas = ORDEM_SAIDA.filter(k => COL(k).sempre
       || dados.some(d => String(d[k] == null ? "" : d[k]).trim() !== ""));
     return {dados, colunas, preenchidas,
+            escalasSemMapa: Array.from(semMapa, ([token, vezes]) => ({token, vezes})),
             vazias: ORDEM_SAIDA.filter(k => colunas.indexOf(k) < 0).map(tituloDe)};
   }
   const tituloDe = k => COL(k).titulo.replace("\n", " ");
