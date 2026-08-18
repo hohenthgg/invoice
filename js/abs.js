@@ -2,9 +2,11 @@
    ================================================================
 
    Confronta o quadro S&OP diário (sem over) com quem esteve presente,
-   e compensa o déficit de cada dia com os diaristas efetivamente
-   solicitados naquele dia — o abate é limitado ao próprio déficit, de
-   modo que um dia nunca fica "positivo" por excesso de diarista.
+   e compensa o déficit de cada dia com os diaristas SOLICITADOS PELA
+   ID LOGISTICS naquele dia — a agência não importa, e o diarista pedido
+   pelo MELI fica fora: é custo do MELI, não cobertura do quadro. O abate
+   é limitado ao próprio déficit, de modo que um dia nunca fica
+   "positivo" por excesso de diarista.
 
    Todo o módulo vive dentro de uma IIFE: esta aba define uma função
    `render`, e a aba de Conciliação também — a primeira roda no escopo
@@ -328,14 +330,26 @@ async function handleSigo(files,drop){
         if(!(dt instanceof Date)) return;
         const idn=String(id??'').replace(/\D/g,'');
         if(!idn) return; // somente ID
+        /* Quem pediu decide se o diarista compensa: o abate de ABS só pode
+           usar diarista SOLICITADO PELA ID LOGISTICS — o do MELI é custo do
+           MELI, não cobertura do quadro. A agência (MOURA, TSI…) não importa. */
+        const solicTxt=norm(row.getCell(3).value);
+        const solic=!solicTxt? '' : (solicTxt.includes('meli')? 'meli' : 'id');
         // ExcelJS entrega datas em UTC: usar getters UTC para não deslocar 1 dia em UTC-3
-        regs.push({ data:new Date(dt.getUTCFullYear(),dt.getUTCMonth(),dt.getUTCDate()), id:idn,
+        regs.push({ data:new Date(dt.getUTCFullYear(),dt.getUTCMonth(),dt.getUTCDate()), id:idn, solic,
+                    solicitante:String(row.getCell(3).value??''),
                     nome:String(row.getCell(6).value??''), escala:String(row.getCell(8).value??'') });
       });
       base[ws.name]=regs;
     }
     S.sigo={ file:file.name, base };
-    st.textContent='✓ '+abas.length+' filiais · '+Object.values(base).reduce((a,b)=>a+b.length,0)+' registros com ID';
+    const todos=Object.values(base).flat();
+    const nId=todos.filter(r=>r.solic==='id').length;
+    const nMeli=todos.filter(r=>r.solic==='meli').length;
+    const nSem=todos.length-nId-nMeli;
+    st.textContent='✓ '+abas.length+' filiais · '+nId+' solicitados pela ID Logistics'
+      +(nMeli?' · '+nMeli+' do MELI (fora da compensação)':'')
+      +(nSem?' · '+nSem+' sem solicitante (fora)':'');
     st.className='st ok'; drop.classList.add('loaded');
   }catch(e){ st.textContent='✗ '+e.message; st.className='st bad'; drop.classList.add('err'); S.sigo=null; }
   checkReady();
@@ -547,10 +561,12 @@ function processar(){
       return achou? soma : null;
     };
     const semSop=[];
-    /* diaristas (somente ID, únicos por dia, união das abas do SIGO do cartão) */
+    /* diaristas da compensação: únicos por dia, com GROOT, e SOLICITADOS PELA
+       ID LOGISTICS — os do MELI existem no SIGO, mas não cobrem quadro de ABS */
     const sigoSheets=sigoSheetsFor(fil,op,total);
     const diarPorDia={};
     for(const sh of sigoSheets) for(const r of S.sigo.base[sh]){
+      if(r.solic!=='id') continue;
       if(r.data>=ini&&r.data<=fim){ (diarPorDia[+r.data]??=new Set()).add(r.id); }
     }
     const daily=dias.map(d=>{
@@ -669,20 +685,25 @@ async function exportarLista(list, prefixo){
   const {ini,fim}=S.results;
   const wb=new ExcelJS.Workbook();
 
+  /* A aba alimenta o COUNTIFS do Resumo, então só entra quem CONTA para a
+     compensação: solicitado pela ID Logistics. Diarista do MELI aqui dentro
+     faria a fórmula viva divergir do cálculo. A coluna SOLICITANTE fica
+     para a conferência. */
   const wsD=wb.addWorksheet('Diaristas');
-  wsD.addRow(['SELEÇÃO','DATA','GROOT ID','NOME','ESCALA','ABA SIGO']).eachCell(c=>{c.font={...F10B,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.hdr}};c.border=BORD;c.alignment={horizontal:'center'};});
+  wsD.addRow(['SELEÇÃO','DATA','GROOT ID','NOME','SOLICITANTE','ESCALA','ABA SIGO']).eachCell(c=>{c.font={...F10B,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.hdr}};c.border=BORD;c.alignment={horizontal:'center'};});
   for(const r of list){
     const rotulo=FILIAIS[r.fil]+(r.total?' TOTAL':(r.op?' '+r.op:''));
     const vistos=new Set();
     for(const sh of r.sigoSheets) for(const reg of S.sigo.base[sh]){
+      if(reg.solic!=='id') continue;
       if(reg.data<ini||reg.data>fim) continue;
       const k=+reg.data+'|'+reg.id; if(vistos.has(k))continue; vistos.add(k);
-      const row=wsD.addRow([rotulo,reg.data,reg.id,reg.nome,reg.escala,sh]);
+      const row=wsD.addRow([rotulo,reg.data,reg.id,reg.nome,reg.solicitante,reg.escala,sh]);
       row.eachCell(c=>{c.font=F10;c.border=BORD;});
       row.getCell(2).numFmt='dd/mm/yyyy';
     }
   }
-  wsD.columns=[{width:22},{width:13},{width:12},{width:38},{width:14},{width:20}];
+  wsD.columns=[{width:22},{width:13},{width:12},{width:38},{width:16},{width:14},{width:20}];
   wsD.views=[{state:'frozen',ySplit:1}];
 
   for(const r of list){
@@ -725,7 +746,7 @@ async function exportarLista(list, prefixo){
     const temContSop=r.daily.some(x=>x.contSop!==null&&x.contSop!==undefined);
     const rotulos=['Quadro S&OP (sem over)',
       temContSop?'Contratado (planilha mensal)':'Contratado (derivado da grade)',
-      'Presente','Diferença (S&OP-Presente)','Diaristas Disponíveis (com ID)','Diaristas Utilizados (abate)','Saldo Pós Compensação'];
+      'Presente','Diferença (S&OP-Presente)','Diaristas ID Logistics Disponíveis','Diaristas Utilizados (abate)','Saldo Pós Compensação'];
     rotulos.forEach((t,i)=>{const c=wr.getCell(4+i,1);c.value=t;c.font=F10B;c.border=BORD;
       if(i===3)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.dif}};
       if(i===4||i===5)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.diar}};});
