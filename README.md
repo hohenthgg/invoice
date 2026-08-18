@@ -1,6 +1,6 @@
-# Ajustes MELI
+# Ajustes de Fatura
 
-Ferramenta de página única que lê a planilha **Labor enviado ao MELI** e responde
+Ferramenta de página única que lê a planilha de **Labor enviado** e responde
 perguntas diferentes sobre ela, uma em cada aba.
 
 Todo o processamento acontece no navegador. Nenhum dado sai da máquina: não há
@@ -11,7 +11,7 @@ servidor, banco nem envio de arquivos.
 | Aba | Pergunta | Entrega |
 |---|---|---|
 | **Conciliação Faturas** | O que já foi cobrado está certo? | Ajustes projetados, ou a conferência de duas competências |
-| **Fusão de Linhas** | O arquivo bate com o alvo do MELI? | Labor equalizado dia a dia contra o retorno |
+| **Fusão de Linhas** | O arquivo bate com o alvo do cliente? | Labor equalizado dia a dia contra o retorno |
 | **Extração · Diarista** | Quem foram os diaristas do período? | Uma planilha por operação, no layout de origem |
 | **Calcular ABS** | O absenteísmo ficou dentro do range? | Absenteísmo antes e pós diaristas, com o Excel gerencial |
 | **Guia** | — | Resumo conceitual do que cada aba faz |
@@ -53,29 +53,25 @@ o que você decidiu e o que de fato mudou, inclusive o que optou por não tratar
 
 ### Fusão de Linhas
 
-Compara, dia a dia, o headcount ativo no Labor com a quantidade que o MELI aponta
-na aba `Retorno MELI` (`Qtd. PREF` e `Q Pós Comp.`). Onde sobra gente monta um
+Compara, dia a dia, o headcount ativo no Labor com a quantidade que o cliente
+aponta na aba de Retorno (`Qtd. PREF` e `Q Pós Comp.`). Onde sobra gente monta um
 plano e o aplica — retirar linha, adiar início, encurtar fim, ou pausar e retomar
 o contrato preservando GROOT e matrícula — e devolve o Labor corrigido no mesmo
 layout do original, com abas `A_INCLUIR` e `REVISAR` para o que depende de
 decisão humana. Aceita ainda dois arquivos opcionais: a base de diaristas, para
-preencher os dias em falta, e o HCM Report, para achar quem está na base do MELI
-e não tem cobertura nenhuma no Labor.
+preencher os dias em falta, e o HCM Report, para achar quem está na base do
+cliente e não tem cobertura nenhuma no Labor.
 
 ```
 Soltar planilha  →  conciliação dia a dia  →  plano aplicado  →  Baixar Labor ajustado
 ```
-
-A lógica completa desta aba, contrastada com a da Conciliação Faturas — o que
-cada uma pergunta, em que unidade mede e por que só uma delas escreve arquivo —
-está em [`docs/FUSAO-vs-CONCILIACAO.md`](docs/FUSAO-vs-CONCILIACAO.md).
 
 ### Extração · Diarista
 
 Assistente de três passos sobre o controle de diaristas — o arquivo único com uma
 aba por operação (Pouso Alegre SVC e XD, Poços de Caldas, Varginha, Divinópolis,
 Patos de Minas). Filtra pela **data de solicitação**, opcionalmente por
-**solicitante** (ID Logistics ou MELI), e resolve os **Groot IDs repetidos** em um
+**solicitante** (interno ou cliente), e resolve os **Groot IDs repetidos** em um
 de três modos: uma linha por pessoa no período, uma por pessoa por dia, ou nenhuma
 remoção. A deduplicação é **global** — a mesma pessoa-dia em duas operações é uma
 só, e o que foi descartado aparece num painel com GROOT, data e de onde veio. Exporta uma planilha por operação — ou as seis num arquivo só — no layout
@@ -113,7 +109,7 @@ uma língua por filial, então a resolução é **por linha** (`resolverEscala`,
    (`01:00 04:00 05:00 09:20`) e Patos de Minas (`00:30 as 09:18`);
 3. turno vira horário pela tabela da operação (`ESCALA_TOKEN_HORARIO`), levantada
    nas faturas 3PL: Varginha `AM` → `03:00 07:00 08:00 11:20` e `PM` →
-   `10:00 15:00 16:00 19:48`; Pouso `svc` → horário SMG3 e `xd` → BRXMG3; Poços `AM`;
+   `10:00 15:00 16:00 19:48`; Pouso `svc` e `xd` → o horário levantado para cada uma; Poços `AM`;
 4. célula vazia recebe o padrão da operação (`ESCALA_HORARIO_PADRAO`);
 5. turno **sem horário levantado** (`SD`, `FULL` no SVC, `PM` em Poços) sai como
    está e vira tópico de revisão — escrever o horário de outro turno no lugar
@@ -135,12 +131,13 @@ Soltar planilha  →  período + filtros  →  placar por operação  →  Baixa
 Compara, dia a dia, o **Quadro S&OP (sem over)** com quem esteve **presente** no
 período da fatura, e compensa o déficit de cada dia com os **diaristas
 daquele dia** — contados uma vez só, e apenas quando têm Groot ID. Ao clicar em
-**Validar**, um diálogo pergunta quais diaristas podem compensar: **somente ID
-Logistics** (o padrão — o do MELI é custo do MELI), **somente MELI**, ou **ambos**.
-Em **ambos a ID tem prioridade**: o MELI só entra no dia depois de esgotados
-todos os diaristas da ID, e apenas no que sobrou do déficit — o total abatido é o
-mesmo, muda a atribuição, e o resultado diz quanto veio de cada fonte.
-A agência (MOURA, TSI…) não importa; quem não tem solicitante fica sempre fora. O abate é limitado ao próprio déficit: um dia
+**Validar**, um diálogo pergunta quais diaristas podem compensar: **somente os
+internos** (o padrão — diarista pedido pelo cliente é custo do cliente),
+**somente os do cliente**, ou **ambos**. Em **ambos o interno tem prioridade**:
+o do cliente só entra no dia depois de esgotados todos os internos, e apenas no
+que sobrou do déficit — o total abatido é o mesmo, muda a atribuição, e o
+resultado diz quanto veio de cada fonte.
+A agência não importa; quem não tem solicitante fica sempre fora. O abate é limitado ao próprio déficit: um dia
 nunca fica positivo por sobra de diarista.
 
 A planilha de absenteísmo é aceita nos dois formatos: **um arquivo por período**,
@@ -277,7 +274,6 @@ js/abs.js             aba Calcular ABS, inteira (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
-docs/FUSAO-vs-CONCILIACAO.md   Fusão de Linhas por dentro, contrastada com a aba 1
 ```
 
 Os arquivos são carregados como scripts clássicos, na ordem declarada no
@@ -309,7 +305,7 @@ Carregadas por CDN, sem instalação:
 
 - **SheetJS (xlsx)** — leitura da planilha importada.
 - **ExcelJS** — escrita do arquivo exportado, porque a versão comunitária do
-  SheetJS não grava formatação, e a exportação precisa preservar o visual MELI.
+  SheetJS não grava formatação, e a exportação precisa preservar o visual do modelo.
 
 ## Testes
 
@@ -333,9 +329,10 @@ remoções acima dela.
 Diarista: mesmo GROOT normalizado e mesma data são uma única pessoa-dia,
 independentemente de operação, aba ou arquivo de origem.
 
-`tests/abs-prioridade.test.js` cobre a prioridade da ID Logistics no abate
-"ambos" da aba Calcular ABS: o MELI nunca entra com diarista da ID sobrando no
-dia, a ID é sempre consumida até o teto, e o total abatido continua sendo
+`tests/abs-prioridade.test.js` cobre a prioridade do solicitante interno no
+abate "ambos" da aba Calcular ABS: o do cliente nunca entra com diarista interno
+sobrando no dia, o interno é sempre consumido até o teto, e o total abatido
+continua sendo
 `min(pool inteiro, déficit)`. O defeito que ele pega é invisível no total — só
 aparece na repartição entre as duas fontes.
 
@@ -351,7 +348,7 @@ nenhum apontamento nasce aceito.
 
 Em ordem de força da evidência:
 
-1. Se a aba `Retorno MELI` tiver `Data Trab.` com um mês concentrando **≥70%**
+1. Se a aba de Retorno tiver `Data Trab.` com um mês concentrando **≥70%**
    das datas válidas, esse mês é a competência.
 2. Caso contrário, o app localiza o mês-âncora — o mais recente com volume real
    de movimentações — e avalia apenas ele e os dois anteriores. Desligamentos
@@ -362,7 +359,7 @@ Em ordem de força da evidência:
 
 ## Exportação
 
-O arquivo gerado (`Ajustes MELI - Agosto 2026.xlsx`, aba `Ajustes MELI`) mantém
+O arquivo gerado — nomeado pela competência, com uma única aba de ajustes — mantém
 as dez colunas originais da planilha, copiadas da linha importada, e acrescenta
 à direita apenas o bloco do ajuste: tipo, início, fim, dias, FTE, competência de
 origem, competência de aplicação e motivo.
@@ -375,7 +372,7 @@ automaticamente. Só entram no Excel os ajustes que permanecem marcados.
 
 ## Planilha de entrada
 
-O app procura a aba `Labor enviado ao MELI` e localiza as colunas **pelo nome do
+O app procura a aba de Labor do arquivo e localiza as colunas **pelo nome do
 cabeçalho**, não pela posição:
 
 `GROOT ID` · `NOME` · `MATRICULA` · `REGIME DE CONTRATO` · `CARGO` ·
