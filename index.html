@@ -345,32 +345,40 @@
     <div class="rail"><div class="n">1</div><div class="bar"></div></div>
     <div class="abs-card">
       <h3>Bases de dados</h3>
-      <div class="sub">Duas planilhas mensais de absenteísmo (abas por operação, ex. <code>PAXD Jul</code>)
-        e a base SIGO de diaristas. O <b>S&amp;OP do dia vem da linha “Esperado”</b> de cada aba —
-        o headcount avulso só é necessário para planilhas no modelo antigo, que não trazem esse bloco.</div>
+      <div class="sub">A planilha de absenteísmo (abas por operação, ex. <code>PAXD Jul</code> ou
+        <code>PASVC 16.07-15.08</code>) e a base SIGO de diaristas. O <b>S&amp;OP do dia vem da linha “Esperado”</b>
+        de cada aba — o headcount avulso só é necessário para planilhas no modelo antigo, que não trazem esse bloco.</div>
+      <div class="abs-legenda">
+        <span class="lg req"><i></i><b>Obrigatória</b> — sem ela o botão de validar não libera</span>
+        <span class="lg opt"><i></i><b>Opcional</b> — só em casos específicos, descritos no campo</span>
+      </div>
       <div class="drops">
-        <div class="abs-drop" id="abs-dropA">
-          <div class="ttl">Planilha de absenteísmo</div>
+        <div class="abs-drop req" id="abs-dropA">
+          <div class="ttl">Planilha de absenteísmo <span class="abs-req">obrigatória</span></div>
           <div class="fname" id="abs-fnA">Clique ou arraste o .xlsx</div>
           <div class="hint">um arquivo do período (ex.: <code>…16.07-15.08</code>) — ou dois mensais, um em cada lado</div>
+          <div class="why">é a base do cálculo: traz o S&amp;OP diário e a presença pessoa a pessoa</div>
           <div class="st" id="abs-stA"></div>
         </div>
-        <div class="abs-drop" id="abs-dropB">
+        <div class="abs-drop opt" id="abs-dropB">
           <div class="ttl">2ª planilha <span class="abs-opc">opcional</span></div>
           <div class="fname" id="abs-fnB">Clique ou arraste o .xlsx</div>
           <div class="hint">só quando o período vem em dois arquivos mensais (Jul + Ago)</div>
+          <div class="why">com o arquivo único do período, deixe vazia</div>
           <div class="st" id="abs-stB"></div>
         </div>
-        <div class="abs-drop" id="abs-dropS">
-          <div class="ttl">SIGO — Diaristas</div>
+        <div class="abs-drop req" id="abs-dropS">
+          <div class="ttl">SIGO — Diaristas <span class="abs-req">obrigatória</span></div>
           <div class="fname" id="abs-fnS">Clique ou arraste o .xlsx</div>
           <div class="hint">abas por filial · conta só diarista com Groot ID</div>
+          <div class="why">sem ela não há como abater o déficit — o ABS sairia sem compensação</div>
           <div class="st" id="abs-stS"></div>
         </div>
-        <div class="abs-drop" id="abs-dropH">
+        <div class="abs-drop opt" id="abs-dropH">
           <div class="ttl">Headcount S&amp;OP <span class="abs-opc">opcional</span></div>
           <div class="fname" id="abs-fnH">Clique ou arraste (aceita vários)</div>
           <div class="hint">só para planilhas antigas, sem a linha “Esperado”</div>
+          <div class="why">a planilha atual já traz o “Esperado” — deixe vazia</div>
           <div class="st" id="abs-stH"></div>
         </div>
       </div>
@@ -384,7 +392,7 @@
     <div class="rail"><div class="n">2</div><div class="bar"></div></div>
     <div class="abs-card">
       <h3>Período da fatura</h3>
-      <div class="sub">O período precisa estar coberto pelos meses das duas planilhas de absenteísmo.</div>
+      <div class="sub">O período precisa estar coberto pelos meses da planilha de absenteísmo carregada.</div>
       <div class="row">
         <label class="fld">Início<input type="date" id="abs-dtIni" value="2026-07-16"></label>
         <label class="fld">Fim<input type="date" id="abs-dtFim" value="2026-08-15"></label>
@@ -401,7 +409,7 @@
       <div class="sub">Selecione as operações. A fonte do Quadro S&amp;OP vem da <b>linha “Esperado”</b> da própria
         aba da operação — ou do headcount avulso, quando carregado (por operação ou TOTAL da filial, sempre
         <b>sem over</b>). Use Manual apenas se nenhuma das duas trouxer a operação.</div>
-      <div class="opsgrid" id="abs-opsGrid"><span class="msg dim">Carregue as duas planilhas mensais para listar as operações.</span></div>
+      <div class="opsgrid" id="abs-opsGrid"><span class="msg dim">Carregue a planilha de absenteísmo para listar as operações.</span></div>
       <div class="actions">
         <button class="abs-btn go" id="abs-btnRun" disabled>Validar absenteísmo</button>
         <span class="msg" id="abs-msgRun"></span>

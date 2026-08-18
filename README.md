@@ -66,6 +66,10 @@ e não tem cobertura nenhuma no Labor.
 Soltar planilha  →  conciliação dia a dia  →  plano aplicado  →  Baixar Labor ajustado
 ```
 
+A lógica completa desta aba, contrastada com a da Conciliação Faturas — o que
+cada uma pergunta, em que unidade mede e por que só uma delas escreve arquivo —
+está em [`docs/FUSAO-vs-CONCILIACAO.md`](docs/FUSAO-vs-CONCILIACAO.md).
+
 ### Extração · Diarista
 
 Assistente de três passos sobre o controle de diaristas — o arquivo único com uma
@@ -133,8 +137,17 @@ período da fatura, e compensa o déficit de cada dia com os **diaristas
 daquele dia** — contados uma vez só, e apenas quando têm Groot ID. Ao clicar em
 **Validar**, um diálogo pergunta quais diaristas podem compensar: **somente ID
 Logistics** (o padrão — o do MELI é custo do MELI), **somente MELI**, ou **ambos**.
+Em **ambos a ID tem prioridade**: o MELI só entra no dia depois de esgotados
+todos os diaristas da ID, e apenas no que sobrou do déficit — o total abatido é o
+mesmo, muda a atribuição, e o resultado diz quanto veio de cada fonte.
 A agência (MOURA, TSI…) não importa; quem não tem solicitante fica sempre fora. O abate é limitado ao próprio déficit: um dia
 nunca fica positivo por sobra de diarista.
+
+A planilha de absenteísmo é aceita nos dois formatos: **um arquivo por período**,
+com abas nomeadas por intervalo (`PASVC 16.07-15.08`) cobrindo dois meses, ou os
+**dois arquivos mensais** antigos (`PASVC Jul` + `PASVC Ago`), um em cada campo.
+No passo 1 as bases **obrigatórias** (absenteísmo e SIGO) vêm destacadas em
+âmbar, com a razão de serem obrigatórias; as opcionais ficam apagadas.
 
 O pool é ainda filtrado pela **ESCALA da operação**, não pela aba do SIGO: as abas
 se misturam — a aba `Pouso Alegre XD` carrega linhas `SD` e `FULL`, e o cartão
@@ -264,6 +277,7 @@ js/abs.js             aba Calcular ABS, inteira (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
+docs/FUSAO-vs-CONCILIACAO.md   Fusão de Linhas por dentro, contrastada com a aba 1
 ```
 
 Os arquivos são carregados como scripts clássicos, na ordem declarada no
@@ -300,7 +314,7 @@ Carregadas por CDN, sem instalação:
 ## Testes
 
 ```bash
-npm test          # roda os dois arquivos de teste
+npm test          # roda todos os arquivos de teste
 ```
 
 Não há dependências para instalar. Os testes carregam os mesmos arquivos de
@@ -318,6 +332,12 @@ remoções acima dela.
 `tests/extraction.test.js` cobre a deduplicação pessoa-dia da Extração ·
 Diarista: mesmo GROOT normalizado e mesma data são uma única pessoa-dia,
 independentemente de operação, aba ou arquivo de origem.
+
+`tests/abs-prioridade.test.js` cobre a prioridade da ID Logistics no abate
+"ambos" da aba Calcular ABS: o MELI nunca entra com diarista da ID sobrando no
+dia, a ID é sempre consumida até o teto, e o total abatido continua sendo
+`min(pool inteiro, déficit)`. O defeito que ele pega é invisível no total — só
+aparece na repartição entre as duas fontes.
 
 `tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
 classificações de status, a reconstrução da cobrança original (o corte projeta
