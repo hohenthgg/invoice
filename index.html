@@ -350,21 +350,21 @@
         o headcount avulso só é necessário para planilhas no modelo antigo, que não trazem esse bloco.</div>
       <div class="drops">
         <div class="abs-drop" id="abs-dropA">
-          <div class="ttl">Mês 1 — início do período</div>
+          <div class="ttl">Planilha de absenteísmo</div>
           <div class="fname" id="abs-fnA">Clique ou arraste o .xlsx</div>
-          <div class="hint">ex.: Absenteismo_Jul2026.xlsx</div>
+          <div class="hint">um arquivo do período (ex.: <code>…16.07-15.08</code>) — ou dois mensais, um em cada lado</div>
           <div class="st" id="abs-stA"></div>
         </div>
         <div class="abs-drop" id="abs-dropB">
-          <div class="ttl">Mês 2 — fim do período</div>
+          <div class="ttl">2ª planilha <span class="abs-opc">opcional</span></div>
           <div class="fname" id="abs-fnB">Clique ou arraste o .xlsx</div>
-          <div class="hint">ex.: Absenteismo_Ago2026.xlsx</div>
+          <div class="hint">só quando o período vem em dois arquivos mensais (Jul + Ago)</div>
           <div class="st" id="abs-stB"></div>
         </div>
         <div class="abs-drop" id="abs-dropS">
           <div class="ttl">SIGO — Diaristas</div>
           <div class="fname" id="abs-fnS">Clique ou arraste o .xlsx</div>
-          <div class="hint">abas por filial · conta só diarista com Groot ID solicitado pela ID Logistics</div>
+          <div class="hint">abas por filial · conta só diarista com Groot ID</div>
           <div class="st" id="abs-stS"></div>
         </div>
         <div class="abs-drop" id="abs-dropH">
@@ -435,7 +435,7 @@
       <label class="abs-opt"><input type="radio" name="abs-comp" value="meli">
         <span><b>Somente MELI</b><i>apenas os diaristas solicitados pelo MELI</i></span></label>
       <label class="abs-opt"><input type="radio" name="abs-comp" value="ambos">
-        <span><b>Ambos</b><i>ID Logistics + MELI</i></span></label>
+        <span><b>Ambos</b><i>ID Logistics primeiro; o MELI só entra onde a ID não cobrir o déficit</i></span></label>
       <div class="abs-modal-acoes">
         <button class="abs-btn ghost" id="abs-modalCancel" type="button">Cancelar</button>
         <button class="abs-btn go" id="abs-modalOk" type="button">Validar</button>
