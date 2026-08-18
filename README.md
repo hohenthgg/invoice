@@ -132,14 +132,23 @@ Compara, dia a dia, o **Quadro S&OP (sem over)** com quem esteve **presente** no
 período da fatura, e compensa o déficit de cada dia com os **diaristas
 solicitados pela ID Logistics naquele dia** — a agência não importa e o diarista
 do MELI fica fora (é custo do MELI, não cobertura do quadro); contados uma vez
-só, e apenas quando têm
-Groot ID. O abate é limitado ao próprio déficit: um dia nunca fica positivo por
-sobra de diarista.
+só, e apenas quando têm Groot ID. O abate é limitado ao próprio déficit: um dia
+nunca fica positivo por sobra de diarista.
+
+O pool é ainda filtrado pela **ESCALA da operação**, não pela aba do SIGO: as abas
+se misturam — a aba `Pouso Alegre XD` carrega linhas `SD` e `FULL`, e o cartão
+Same Day nem tinha aba própria (caía na do Service). Onde a filial marca a
+operação na ESCALA, cada cartão leva só a sua; onde marca outra coisa (Varginha e
+Poços usam `AM`/`PM`, Divinópolis usa horário), o cartão leva tudo **menos** o que
+pertence às outras operações da filial. Filial que não distingue a operação na
+ESCALA recebe um aviso no cartão: os diaristas são os mesmos dos irmãos e podem
+estar contados em dois.
 
 Devolve o absenteísmo **antes** e **pós compensação** contra o **range contratual
-de 2,5%**, a lista dos dias críticos e um Excel com a aba `Diaristas`, um
-`Unificado` por operação e um `Resumo` gerencial com fórmulas vivas — o
-`COUNTIFS` dos diaristas aponta para a própria aba `Diaristas`, então a planilha
+de 2,5%**, a lista dos dias críticos e um Excel no formato do modelo de
+referência: uma aba `Diaristas <operação>` no layout do SIGO, um `Unificado` por
+operação e um `Resumo Gerencial` com fórmulas vivas — o `COUNTIFS` aponta para a
+aba de diaristas da própria operação e filtra a ESCALA, então a planilha
 recalcula sozinha se alguém editar. Além do unificado há **um download por
 filial** — o arquivo que vai para cada gerente sem levar junto o resto da rede.
 
