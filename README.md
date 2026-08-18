@@ -111,9 +111,16 @@ uma língua por filial, então a resolução é **por linha** (`resolverEscala`,
    nas faturas 3PL: Varginha `AM` → `03:00 07:00 08:00 11:20` e `PM` →
    `10:00 15:00 16:00 19:48`; Pouso `svc` → horário SMG3 e `xd` → BRXMG3; Poços `AM`;
 4. célula vazia recebe o padrão da operação (`ESCALA_HORARIO_PADRAO`);
-5. turno **sem horário levantado** (`SD`, `FULL`, `PM` de Poços) sai como está e
-   vira tópico de revisão — escrever o horário de outro turno no lugar seria pôr
-   um dado errado com cara de certo.
+5. turno **sem horário levantado** (`SD`, `FULL` no SVC, `PM` em Poços) sai como
+   está e vira tópico de revisão — escrever o horário de outro turno no lugar
+   seria pôr um dado errado com cara de certo.
+
+Antes do passo 3 há uma regra de **pertencimento**, que é de negócio e não de
+horário (`ESCALA_TURNOS_DA_OPERACAO`): o **SVC mistura-se** com `SD`, `FULL` e
+`XD`; o **XD é apenas XD**. Um `SD` ou `FULL` na aba XD não é falta de horário —
+é registro na aba errada. Sai como está e vira tópico **grave**, com uma linha por
+ocorrência (nome, GROOT e data), porque cada diária precisa ser conferida
+individualmente. Operação sem regra declarada não policia turno nenhum.
 
 ```
 Soltar planilha  →  período + filtros  →  placar por operação  →  Baixar .xlsx

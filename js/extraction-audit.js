@@ -376,6 +376,32 @@ function listarTopicos(aud, descartados, leitura, semHorario, saida){
     /* Um turno que a tabela da operação não conhece (SD, FULL, PM onde só o
        AM foi levantado) sai como está — escrever o horário de outro turno no
        lugar seria pôr um dado errado com cara de certo. */
+    /* Turno que não pertence à operação. Diferente de "sem horário": aqui o
+       registro provavelmente está na aba errada, e o horário não é a questão.
+       Uma linha por OCORRÊNCIA, com nome e data, porque cada uma precisa ser
+       conferida individualmente — é uma diária no lugar errado. */
+    (s.escalasIntrusas || []).forEach(m => {
+      const explica = 'A escala "' + m.token + '" não pertence a esta operação, mas apareceu em '
+        + m.vezes + ' registro' + (m.vezes === 1 ? "" : "s") + ". O valor saiu como está, "
+        + "sem conversão: converter carimbaria de válido um registro que provavelmente "
+        + "está na aba errada.";
+      const acao = "Conferir se essas diárias são desta filial. Se forem de outra operação, "
+        + "movê-las na origem; se o turno for legítimo aqui, ele precisa entrar na regra da operação.";
+      const ocorrencias = m.exemplos.length ? m.exemplos : [{nome:"", groot:"", date:""}];
+      ocorrencias.forEach(o => t.push(Object.assign({
+        topico: "Escala de outra operação", gravidade: GRAVIDADE.ALTA,
+        nome: o.nome || "", groot: o.groot || "", op: s.op, date: o.date || "",
+        diagnostico: explica, acao: acao
+      }, vazio)));
+      if(m.vezes > m.exemplos.length) t.push(Object.assign({
+        topico: "Escala de outra operação", gravidade: GRAVIDADE.ALTA,
+        nome: "", groot: "", op: s.op, date: "",
+        diagnostico: explica + " (…e mais " + (m.vezes - m.exemplos.length)
+                   + " além dos exemplos listados)",
+        acao: acao
+      }, vazio));
+    });
+
     (s.escalasSemMapa || []).forEach(m => t.push(Object.assign({
       topico: "Escala sem horário mapeado", gravidade: GRAVIDADE.MEDIA,
       nome: "", groot: "", op: s.op, date: "",
