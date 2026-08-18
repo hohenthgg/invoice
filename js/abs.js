@@ -335,10 +335,13 @@ async function handleSigo(files,drop){
            MELI, não cobertura do quadro. A agência (MOURA, TSI…) não importa. */
         const solicTxt=norm(row.getCell(3).value);
         const solic=!solicTxt? '' : (solicTxt.includes('meli')? 'meli' : 'id');
+        const txt=c=>{ let v=row.getCell(c).value;
+          if(v&&typeof v==='object'){ if(v.result!==undefined)v=v.result; else if(v.richText)v=v.richText.map(t=>t.text).join(''); }
+          return String(v??'').trim(); };
         // ExcelJS entrega datas em UTC: usar getters UTC para não deslocar 1 dia em UTC-3
         regs.push({ data:new Date(dt.getUTCFullYear(),dt.getUTCMonth(),dt.getUTCDate()), id:idn, solic,
-                    solicitante:String(row.getCell(3).value??''),
-                    nome:String(row.getCell(6).value??''), escala:String(row.getCell(8).value??'') });
+                    solicitante:txt(3), empresa:txt(4), nome:txt(6), cargo:txt(7),
+                    escala:txt(8), aba:ws.name });
       });
       base[ws.name]=regs;
     }
@@ -480,9 +483,24 @@ function sigoSheetsFor(fil,op,total){
   const doFil=nomes.filter(n=>norm(n).includes(alvoFil));
   if(!doFil.length) return [];
   if(total) return doFil; // TOTAL da filial: todas as abas dela (ex.: PA SVC + PA XD)
+  /* Quando a filial marca a operação na coluna ESCALA, quem manda é a ESCALA,
+     não a aba: as abas do SIGO se misturam (a aba "Pouso Alegre XD" carrega
+     linhas SD e FULL) e o cartão SD nem tinha aba própria — caía na do SVC.
+     Nesse caso varremos todas as abas da filial e filtramos por escala. */
+  if(op && escalaDaOperacao(doFil,op)) return doFil;
   if(op){ const comOp=doFil.find(n=>norm(n).includes(norm(op))); if(comOp) return [comOp]; }
   const semOp=doFil.find(n=>!['svc','xd','sd','full'].some(s=>norm(n).endsWith(' '+s)));
   return [semOp ?? doFil[0]];
+}
+/* A filial usa este token de operação na coluna ESCALA? Só então dá para
+   filtrar por ela. Varginha e Poços marcam turno (AM/PM) e Divinópolis marca
+   horário — nessas, filtrar por "SVC" zeraria a compensação inteira. */
+function escalaDaOperacao(abas,op){
+  if(!op) return null;
+  const alvo=norm(op);
+  for(const sh of abas) for(const r of (S.sigo.base[sh]||[]))
+    if(norm(r.escala)===alvo) return alvo;
+  return null;
 }
 function processar(){
   const msg=document.getElementById('abs-msgRun'); msg.textContent=''; msg.className='msg';
@@ -564,10 +582,28 @@ function processar(){
     /* diaristas da compensação: únicos por dia, com GROOT, e SOLICITADOS PELA
        ID LOGISTICS — os do MELI existem no SIGO, mas não cobrem quadro de ABS */
     const sigoSheets=sigoSheetsFor(fil,op,total);
-    const diarPorDia={};
+    /* Escala do cartão: o diarista cobre a operação em que foi solicitado. Um
+       SD lançado na aba do XD é do SD, não do XD — a referência confirma:
+       em 06/08 a aba XD tem 6 XD + 4 FULL e o abate é 6. */
+    const escalaOp = total? null : escalaDaOperacao(sigoSheets,op);
+    /* Quando a filial não marca ESTA operação na escala mas marca OUTRAS, o
+       pool é "tudo menos o que é das outras" — senão o SD de Poços entraria
+       no Same Day e também no Service, contado duas vezes. */
+    const deOutrasOps = (total||escalaOp)? []
+      : Object.keys(OPER).map(norm).filter(o=>o!==norm(op) && escalaDaOperacao(sigoSheets,o));
+    const daOperacao = r => {
+      const e=norm(r.escala);
+      return escalaOp? e===escalaOp : deOutrasOps.indexOf(e)<0;
+    };
+    const diarPorDia={}, diarRegs=[];
+    let foraDaEscala=0;
     for(const sh of sigoSheets) for(const r of S.sigo.base[sh]){
       if(r.solic!=='id') continue;
-      if(r.data>=ini&&r.data<=fim){ (diarPorDia[+r.data]??=new Set()).add(r.id); }
+      if(r.data<ini||r.data>fim) continue;
+      if(!daOperacao(r)){ foraDaEscala++; continue; }
+      const chave=+r.data+'|'+r.id;
+      if(!(diarPorDia[+r.data]??=new Set()).has(r.id)) diarRegs.push(r);
+      diarPorDia[+r.data].add(r.id);
     }
     const daily=dias.map(d=>{
       let esp=sopDia(d);
@@ -589,6 +625,9 @@ function processar(){
     const usadosT=validos.reduce((a,x)=>a+x.usados,0);
     const dispT=validos.filter(x=>x.dif<0).reduce((a,x)=>a+x.disp,0);
     results.push({ key, fil, op, total, src, secoes, manual, roster, daily, dias, mesA, mesB, sigoSheets,
+      escalaOp, deOutrasOps, foraDaEscala, diarRegs,
+      // filial que não marca a operação na ESCALA: o pool é o mesmo dos irmãos
+      escalaIndistinta: !!op && !total && !escalaOp,
       espT, faltPre, faltPos, usadosT, dispT,
       absPre: espT? faltPre/espT : 0, absPos: espT? faltPos/espT : 0,
       semBase: daily.filter(x=>x.semBase).map(x=>x.d), semSop });
@@ -635,7 +674,8 @@ function render(list,ini,fim){
         <tbody>${defRows.map(x=>`<tr><td>${fmtDia(x.d)} (${DOW[x.d.getDay()]})</td><td>${x.esp}</td><td>${x.pres}</td>
           <td class="neg">${x.dif}</td><td class="zer">${x.disp||'—'}</td><td class="${x.usados?'pos':'zer'}">${x.usados||'—'}</td><td class="${x.pos<0?'neg':'zer'}">${x.pos}</td></tr>`).join('')}</tbody></table>`
         :'<div class="note">Nenhum dia abaixo do S&OP no período. Diaristas zerados por regra.</div>'}
-      <div class="note">Fonte S&OP: <b style="color:var(--txt)">${fonte}</b>${r.sigoSheets.length?` · Diaristas: aba(s) <b style="color:var(--txt)">${r.sigoSheets.join(' + ')}</b> do SIGO.`:' · <b>⚠</b> sem aba do SIGO para esta filial — compensação zerada.'}</div>
+      <div class="note">Fonte S&OP: <b style="color:var(--txt)">${fonte}</b>${r.sigoSheets.length?` · Diaristas: aba(s) <b style="color:var(--txt)">${r.sigoSheets.join(' + ')}</b> do SIGO${r.escalaOp?`, só escala <b style="color:var(--txt)">${r.escalaOp.toUpperCase()}</b>${r.foraDaEscala?` (${r.foraDaEscala} de outra escala ficaram de fora)`:''}`:''}, só solicitados pela ID Logistics.`:' · <b>⚠</b> sem aba do SIGO para esta filial — compensação zerada.'}</div>
+      ${r.escalaIndistinta&&list.filter(x=>x.fil===r.fil&&x.op&&!x.total).length>1?`<div class="note"><b>⚠</b> A coluna ESCALA do SIGO desta filial não identifica a operação (${OPER[r.op]}) — os diaristas disponíveis são os mesmos das outras operações da filial e podem estar sendo contados em duas. Confira antes de somar os cartões.</div>`:''}
       ${r.semSop.length?`<div class="note"><b>⚠</b> Sem S&OP no headcount para ${r.semSop.length} dia(s) (excluídos do %): ${r.semSop.slice(0,8).map(fmtDia).join(', ')}${r.semSop.length>8?'…':''} — carregue o headcount do mês correspondente.</div>`:''}
       ${r.semBase.length?`<div class="note"><b>⚠</b> Dias sem lançamento na base de abs (excluídos do %): ${r.semBase.map(fmtDia).join(', ')}.</div>`:''}
     `;
@@ -685,26 +725,30 @@ async function exportarLista(list, prefixo){
   const {ini,fim}=S.results;
   const wb=new ExcelJS.Workbook();
 
-  /* A aba alimenta o COUNTIFS do Resumo, então só entra quem CONTA para a
-     compensação: solicitado pela ID Logistics. Diarista do MELI aqui dentro
-     faria a fórmula viva divergir do cálculo. A coluna SOLICITANTE fica
-     para a conferência. */
-  const wsD=wb.addWorksheet('Diaristas');
-  wsD.addRow(['SELEÇÃO','DATA','GROOT ID','NOME','SOLICITANTE','ESCALA','ABA SIGO']).eachCell(c=>{c.font={...F10B,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.hdr}};c.border=BORD;c.alignment={horizontal:'center'};});
+  /* Uma aba de diaristas POR SELEÇÃO, no layout do SIGO — é o formato do
+     modelo de referência, e é o que permite o COUNTIFS do resumo filtrar por
+     escala apontando para a aba da própria operação. Só entra quem conta para
+     a compensação: solicitado pela ID Logistics e da escala da operação. */
+  const umaSo=list.length===1;
+  const abaDiar=r=>'Diaristas '+((umaSo||list.every(x=>x.fil===r.fil))
+    ? (r.total?'TOTAL':(r.op??FILIAIS[r.fil])) : r.fil+(r.total?'TOTAL':(r.op??'')));
+  const HD=['MÊS\nSOLICITAÇÃO','DATA\nSOLICITAÇÃO','SOLICITANTE','EMPRESA\nDIARISTA','GROOT ID','NOME','CARGO','ESCALA'];
+  const MESES_PT=['','janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
   for(const r of list){
-    const rotulo=FILIAIS[r.fil]+(r.total?' TOTAL':(r.op?' '+r.op:''));
-    const vistos=new Set();
-    for(const sh of r.sigoSheets) for(const reg of S.sigo.base[sh]){
-      if(reg.solic!=='id') continue;
-      if(reg.data<ini||reg.data>fim) continue;
-      const k=+reg.data+'|'+reg.id; if(vistos.has(k))continue; vistos.add(k);
-      const row=wsD.addRow([rotulo,reg.data,reg.id,reg.nome,reg.solicitante,reg.escala,sh]);
+    const wsD=wb.addWorksheet(abaDiar(r).substring(0,31));
+    wsD.addRow(HD).eachCell(c=>{c.font={...F10B,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.hdr}};c.border=BORD;c.alignment={horizontal:'center',vertical:'middle',wrapText:true};});
+    wsD.getRow(1).height=28;
+    for(const reg of r.diarRegs){
+      const row=wsD.addRow([MESES_PT[reg.data.getMonth()+1]+'/'+String(reg.data.getFullYear()).slice(2),
+        reg.data, reg.solicitante, reg.empresa, isNaN(Number(reg.id))?reg.id:Number(reg.id),
+        reg.nome, reg.cargo, reg.escala]);
       row.eachCell(c=>{c.font=F10;c.border=BORD;});
       row.getCell(2).numFmt='dd/mm/yyyy';
     }
+    wsD.columns=[{width:15},{width:15},{width:14},{width:14},{width:12},{width:38},{width:14},{width:12}];
+    wsD.views=[{state:'frozen',ySplit:1}];
+    wsD.autoFilter={from:'A1',to:'H1'};
   }
-  wsD.columns=[{width:22},{width:13},{width:12},{width:38},{width:16},{width:14},{width:20}];
-  wsD.views=[{state:'frozen',ySplit:1}];
 
   for(const r of list){
     const opTag=r.fil+(r.total?'TOTAL':(r.op??''));
@@ -727,7 +771,7 @@ async function exportarLista(list, prefixo){
     ws.views=[{state:'frozen',ySplit:1}];
     ws.autoFilter={from:'A1',to:colL(8+nDias)+String(r.roster.length+1)};
 
-    const wr=wb.addWorksheet('Resumo '+opTag);
+    const wr=wb.addWorksheet(umaSo? 'Resumo Gerencial' : ('Resumo '+opTag));
     const lastRow=r.roster.length+1, uni=`'${opTag} Unificado'`;
     const fonteTxt=r.secoes? 'S&OP headcount '+r.secoes.map(s=>s==='TOTAL'?'TOTAL filial':s).join('+')+' sem over' : 'S&OP manual '+r.manual;
     wr.getCell('A1').value='HEADCOUNT DIÁRIO '+rotulo+' ('+fmtDia(ini)+' a '+fmtDia(fim)+'/'+fim.getFullYear()+') · '+fonteTxt;
@@ -744,12 +788,15 @@ async function exportarLista(list, prefixo){
        fallback (modelo antigo, sem o bloco) continua derivado — e é rotulado
        como derivado, para ninguém confundir. */
     const temContSop=r.daily.some(x=>x.contSop!==null&&x.contSop!==undefined);
-    const rotulos=['Quadro S&OP (sem over)',
-      temContSop?'Contratado (planilha mensal)':'Contratado (derivado da grade)',
-      'Presente','Diferença (S&OP-Presente)','Diaristas ID Logistics Disponíveis','Diaristas Utilizados (abate)','Saldo Pós Compensação'];
+    /* Seis métricas, como o modelo de referência: a linha de diaristas é o
+       ABATE (o quanto do déficit foi coberto), não o estoque do dia. */
+    const rotulos=['Quadro S&OP',
+      temContSop?'Contratado - Escala do dia (planilha mensal)':'Contratado - Escala do dia (derivado)',
+      'Presente','Diferença (S&OP-Presente)',
+      'Diaristas ID Logistics (abate do déficit)','Abs Pós Compensação Diaristas'];
     rotulos.forEach((t,i)=>{const c=wr.getCell(4+i,1);c.value=t;c.font=F10B;c.border=BORD;
       if(i===3)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.dif}};
-      if(i===4||i===5)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.diar}};});
+      if(i===4)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.diar}};});
     r.dias.forEach((d,i)=>{
       const col=2+i, L=colL(col), pL=colL(9+i), day=r.daily[i];
       const set=(rw,formula,res,fill)=>{const c=wr.getCell(rw,col);
@@ -762,9 +809,15 @@ async function exportarLista(list, prefixo){
       else set(5,`SUMPRODUCT((${uni}!${pL}2:${pL}${lastRow}<>"")*(${uni}!${pL}2:${pL}${lastRow}<>"DF"))`,day.cont);
       set(6,`COUNTIF(${uni}!${pL}2:${pL}${lastRow},"P")`,day.pres);
       set(7,day.dif!==null?`${L}6-${L}4`:null,day.dif,COR.dif);
-      set(8,day.dif!==null?`COUNTIFS(Diaristas!$B:$B,DATE(${d.getFullYear()},${d.getMonth()+1},${d.getDate()}),Diaristas!$A:$A,"${rotulo}")`:null,day.dif!==null?day.disp:null,COR.diar);
-      set(9,day.dif!==null?`IF(${L}7>=0,0,MIN(${L}8,-${L}7))`:null,day.dif!==null?day.usados:null,COR.diar);
-      set(10,day.dif!==null?`${L}7+${L}9`:null,day.pos);
+      /* Abate: conta os diaristas do dia na aba da própria operação — filtrando
+         a ESCALA quando a filial a usa — e limita ao déficit, que é a regra da
+         aba: um dia nunca fica positivo por sobra de diarista. */
+      const alvo=`'${abaDiar(r)}'`;
+      const criterios=`${alvo}!$B:$B,DATE(${d.getFullYear()},${d.getMonth()+1},${d.getDate()})`
+        + (r.escalaOp? `,${alvo}!$H:$H,"${r.escalaOp.toUpperCase()}"` : '');
+      set(8,day.dif!==null?`IF(${L}7>=0,0,MIN(COUNTIFS(${criterios}),-${L}7))`:null,
+          day.dif!==null?day.usados:null,COR.diar);
+      set(9,day.dif!==null?`${L}7+${L}8`:null,day.pos);
     });
     const mc=2+nDias, mL=colL(1+nDias);
     const med=(rw,f,res)=>{const c=wr.getCell(rw,mc);c.value={formula:f,result:res};c.font=F10B;c.alignment={horizontal:'center'};c.border=BORD;c.fill={type:'pattern',pattern:'solid',fgColor:{argb:COR.med}};c.numFmt='0.0';};
@@ -773,14 +826,13 @@ async function exportarLista(list, prefixo){
     med(5,`ROUND(AVERAGEIF(B5:${mL}5,"<>0"),1)`, vs.length?+(vs.reduce((a,x)=>a+(temContSop?(x.contSop??0):x.cont),0)/vs.length).toFixed(1):0);
     med(6,`ROUND(AVERAGEIF(B6:${mL}6,"<>0"),1)`, vs.length?+(vs.reduce((a,x)=>a+x.pres,0)/vs.length).toFixed(1):0);
     med(7,`ROUND(SUMIF(B7:${mL}7,"<0"),1)`, -r.faltPre);
-    med(8,`SUM(B8:${mL}8)`, vs.reduce((a,x)=>a+(x.dif!==null?x.disp:0),0));
-    med(9,`SUM(B9:${mL}9)`, r.usadosT);
-    med(10,`ROUND(SUMIF(B10:${mL}10,"<0"),1)`, -r.faltPos);
-    const bl=[[12,'Abs Operacional ANTES (faltas/S&OP)',r.absPre],[13,'Abs Operacional PÓS diaristas',r.absPos],[14,'Range contratual',0.025]];
+    med(8,`SUM(B8:${mL}8)`, r.usadosT);
+    med(9,`ROUND(SUMIF(B9:${mL}9,"<0"),1)`, -r.faltPos);
+    const bl=[[11,'Abs Operacional ANTES (faltas/S&OP)',r.absPre],[12,'Abs Operacional PÓS diaristas',r.absPos],[13,'Range contratual',0.025]];
     for(const [rw,t,v] of bl){
       wr.getCell(rw,1).value=t; wr.getCell(rw,1).font=F10B;
       const c=wr.getCell(rw,2); c.value=v; c.numFmt='0.00%'; c.font=F10B; c.alignment={horizontal:'center'};
-      c.fill={type:'pattern',pattern:'solid',fgColor:{argb: rw===14?COR.med : (v<=0.025?COR.P:COR.F)}};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb: rw===13?COR.med : (v<=0.025?COR.P:COR.F)}};
     }
     wr.getColumn(1).width=34;
     for(let c=2;c<=1+nDias;c++)wr.getColumn(c).width=8;
