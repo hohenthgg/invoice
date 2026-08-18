@@ -552,10 +552,16 @@
        operação (AM/PM de Varginha, svc/xd de Pouso), vazio recebe o padrão.
        Token sem mapa fica como está e é contado para o painel apontar —
        ver resolverEscala em js/config.js. */
-    const semMapa = new Map();
+    const semMapa = new Map(), intrusos = new Map();
     const dados = linhas.map(r => {
       const e = resolverEscala(op, r.escala, r.horario);
       if(e.origem === "sem_mapa") semMapa.set(e.token, (semMapa.get(e.token)||0)+1);
+      if(e.origem === "intruso"){
+        if(!intrusos.has(e.token)) intrusos.set(e.token, {vezes:0, exemplos:[]});
+        const x = intrusos.get(e.token);
+        x.vezes++;
+        if(x.exemplos.length < 3) x.exemplos.push({nome:r.nome, groot:r.id, date:r.date});
+      }
       return {
         mes: r.mes,
         data: keyToUTCDate(r.date),
@@ -583,6 +589,8 @@
       || dados.some(d => String(d[k] == null ? "" : d[k]).trim() !== ""));
     return {dados, colunas, preenchidas,
             escalasSemMapa: Array.from(semMapa, ([token, vezes]) => ({token, vezes})),
+            escalasIntrusas: Array.from(intrusos, ([token, x]) =>
+              ({token, vezes:x.vezes, exemplos:x.exemplos})),
             vazias: ORDEM_SAIDA.filter(k => colunas.indexOf(k) < 0).map(tituloDe)};
   }
   const tituloDe = k => COL(k).titulo.replace("\n", " ");

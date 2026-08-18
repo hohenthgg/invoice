@@ -11,14 +11,14 @@
 const { load } = require("./load");
 const ctx = load(["identity.js", "config.js", "extraction-dedup.js", "extraction-audit.js"],
                  ["DEDUP_MODOS", "AUDIT_MOTIVO", "NOME_PROBLEMA", "GRAVIDADE",
-                  "ESCALA_HORARIO_PADRAO"]);
+                  "ESCALA_HORARIO_PADRAO", "ESCALA_TURNOS_DA_OPERACAO"]);
 const { normalizeGroot, limparGroot, grootParaSaida, hasGroot, normalizeNome,
         normalizeDateKey, personDayKey,
         deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO,
         problemasDoNome, nomeQuebrado, NOME_PROBLEMA,
         listarTopicos, resumirTopicos, GRAVIDADE,
         ESCALA_HORARIO_PADRAO, escalaHorarioDe,
-        pareceHorario, resolverEscala } = ctx;
+        pareceHorario, resolverEscala, ESCALA_TURNOS_DA_OPERACAO } = ctx;
 
 let pass = 0, fail = 0;
 function check(ok, label, extra) {
@@ -505,6 +505,49 @@ check(pareceHorario("01:00 04:00 05:00 09:20") && pareceHorario("00:30 as 09:18"
 check(resolverEscala("Pouso Alegre SVC", "svc", "").valor === "03:00 07:00 08:00 12:48"
       && resolverEscala("Pouso Alegre SVC", "XD", "").valor === "13:00 17:00 18:00 22:45",
       "Pouso SVC: svc e XD viram os horários das faturas SMG3 e BRXMG3 — a aba mistura os dois turnos");
+
+/* Regra de PERTENCIMENTO, não de horário: o SVC mistura-se com SD e FULL;
+   o XD é apenas XD. Um SD na aba XD não é turno sem horário — é registro na
+   aba errada, e converter carimbaria o erro de válido. */
+check(ESCALA_TURNOS_DA_OPERACAO["Pouso Alegre XD"].join() === "XD",
+      "a aba XD admite um único turno", JSON.stringify(ESCALA_TURNOS_DA_OPERACAO["Pouso Alegre XD"]));
+{
+  const sd = resolverEscala("Pouso Alegre XD", "SD", "");
+  const full = resolverEscala("Pouso Alegre XD", "FULL", "");
+  check(sd.origem === "intruso" && sd.valor === "SD"
+        && full.origem === "intruso" && full.valor === "FULL",
+        "SD e FULL na aba XD são apontados como escala de outra operação, com o valor preservado",
+        JSON.stringify([sd, full]));
+  check(resolverEscala("Pouso Alegre XD", "XD", "").origem === "token"
+        && resolverEscala("Pouso Alegre XD", "xd", "").valor === "13:00 17:00 18:00 22:45",
+        "…e o XD legítimo continua virando horário normalmente");
+}
+check(resolverEscala("Pouso Alegre SVC", "SD", "").origem === "sem_mapa"
+      && resolverEscala("Pouso Alegre SVC", "FULL", "").origem === "sem_mapa",
+      "no SVC, SD e FULL pertencem à operação — faltam só os horários, não é intrusão",
+      JSON.stringify(resolverEscala("Pouso Alegre SVC", "SD", "")));
+check(resolverEscala("Poços de Caldas", "SD", "").origem === "sem_mapa",
+      "operação sem regra declarada não acusa intrusão — só a falta de horário");
+check(resolverEscala("Pouso Alegre XD", "01:00 04:00 05:00 09:20", "").origem === "arquivo",
+      "…e um horário escrito na aba XD passa direto: a regra é sobre turno, não sobre horário");
+{
+  const r = auditar({ SVC: [reg("1", "2026-08-10", "ANA SOUZA")] });
+  const t = listarTopicos(r, [], null, [], [{op:"Pouso Alegre XD", vazias:[], preenchidas:[],
+    escalasSemMapa:[], escalasIntrusas:[{token:"SD", vezes:7,
+      exemplos:[{nome:"JOAO LIMA", groot:"991", date:"2026-07-20"}]}]}]);
+  check(t.length === 2 && t.every(x => x.topico === "Escala de outra operação"
+        && x.gravidade === GRAVIDADE.ALTA),
+        "vira tópico grave, com uma linha por ocorrência conhecida mais o resumo do restante",
+        JSON.stringify(t.map(x => x.topico + "/" + x.gravidade)));
+  const nomeada = t.find(x => x.nome === "JOAO LIMA");
+  check(nomeada && nomeada.date === "2026-07-20" && nomeada.op === "Pouso Alegre XD"
+        && nomeada.groot === "991",
+        "…nomeando quem está na aba errada, para a diária ser conferida uma a uma",
+        JSON.stringify(nomeada && [nomeada.nome, nomeada.date, nomeada.groot]));
+  check(t.some(x => /mais 6/.test(x.diagnostico)),
+        "…e dizendo quantas ficaram além dos exemplos",
+        JSON.stringify(t.map(x => x.diagnostico.slice(-30))));
+}
 check(resolverEscala("Divinópolis", "01:00 04:00 05:00 09:20", "").valor === "01:00 04:00 05:00 09:20"
       && resolverEscala("Divinópolis", "01:00 04:00 05:00 09:20", "").origem === "arquivo",
       "Divinópolis: horário escrito na linha passa verbatim, sem conversão");

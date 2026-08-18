@@ -93,6 +93,17 @@ const ESCALA_TOKEN_HORARIO = {
   "Patos de Minas":   {}
 };
 
+/* Quais turnos PERTENCEM a cada operação — regra de negócio, não de horário.
+   O SVC mistura-se com SD e FULL (e registra o turno XD quando acontece);
+   o XD é APENAS XD. Um SD ou FULL na aba XD não é "turno sem horário": é um
+   registro que não pertence à operação — foi lançado na aba errada ou o
+   turno foi digitado errado. Só as operações com regra declarada policiam;
+   nas demais, token desconhecido continua sendo apenas "sem horário". */
+const ESCALA_TURNOS_DA_OPERACAO = {
+  "Pouso Alegre SVC": ["SVC","SD","FULL","XD"],
+  "Pouso Alegre XD":  ["XD"]
+};
+
 /** A célula já é um horário? Duas ou mais marcações HH:MM contam como sim —
  *  cobre "01:00 04:00 05:00 09:20" e também "00:30 as 09:18". */
 function pareceHorario(v){
@@ -103,8 +114,14 @@ function pareceHorario(v){
 /** Resolve o que a coluna ESCALA da saída deve dizer para uma linha.
  *
  *  Prioridade: coluna explícita de horário → horário escrito na própria
- *  ESCALA → turno mapeado → vazio vira o padrão da operação. Token sem
- *  mapa fica como está, com origem "sem_mapa" para o painel apontar.
+ *  ESCALA → turno mapeado → vazio vira o padrão da operação.
+ *
+ *  Duas saídas de exceção, que o painel aponta em vez de esconder:
+ *    · `intruso`  — turno que não pertence à operação (SD numa aba que só
+ *                   admite XD). Não é falta de horário: é registro na aba
+ *                   errada, e converter seria carimbar o erro de válido.
+ *    · `sem_mapa` — turno legítimo, mas sem horário levantado ainda.
+ *  Nos dois casos o valor original é preservado.
  *
  *  @returns {{valor:string, origem:string, token?:string}} */
 function resolverEscala(op, escalaBruta, horarioExplicito){
@@ -113,8 +130,11 @@ function resolverEscala(op, escalaBruta, horarioExplicito){
   const e = String(escalaBruta == null ? "" : escalaBruta).trim();
   if(pareceHorario(e)) return {valor:e, origem:"arquivo"};
   if(e){
-    const mapa = ESCALA_TOKEN_HORARIO[op] || {};
     const token = e.toUpperCase();
+    const permitidos = ESCALA_TURNOS_DA_OPERACAO[op];
+    if(permitidos && permitidos.indexOf(token) < 0)
+      return {valor:e, origem:"intruso", token:e};
+    const mapa = ESCALA_TOKEN_HORARIO[op] || {};
     if(Object.prototype.hasOwnProperty.call(mapa, token))
       return {valor:mapa[token], origem:"token", token};
     return {valor:e, origem:"sem_mapa", token:e};
@@ -123,6 +143,6 @@ function resolverEscala(op, escalaBruta, horarioExplicito){
 }
 
 if(typeof module!=="undefined"&&module.exports){
-  module.exports={ESCALA_HORARIO_PADRAO, escalaHorarioDe,
-                  ESCALA_TOKEN_HORARIO, pareceHorario, resolverEscala};
+  module.exports={ESCALA_HORARIO_PADRAO, escalaHorarioDe, ESCALA_TOKEN_HORARIO,
+                  ESCALA_TURNOS_DA_OPERACAO, pareceHorario, resolverEscala};
 }
