@@ -278,6 +278,12 @@ Antecipa o confronto que a **Fusão de Linhas** só consegue fazer depois que o 
 chega. Reconstrói o **PREF** a partir da aba `LABOR` da fatura, soma o **S&OP diário** de todas as
 operações da planilha operacional e prevê o que o cliente tende a reconhecer.
 
+O PREF é reconstruído com a **mesma regra da Fusão de Linhas** — cargo na lista, dia dentro de
+`[início, fim]` com fim vazio valendo até o fim do período, e o `% RATEIO` entrando **com o sinal
+que tem**. O sinal é o ponto: o PREF é uma quantidade **faturada**, líquida dos estornos, não um
+retrato do turno. Havendo estorno, o **headcount bruto** (só os positivos) aparece ao lado — ele
+responde "quanta gente estava no turno", mas quem vai ao confronto com o S&OP é o líquido.
+
 A regra da previsão é **assimétrica de propósito**:
 
 ```
@@ -295,11 +301,9 @@ Duas coisas que a reconstrução do PREF **não** faz:
   uma data completa antes de qualquer soma, e a soma é por data. Uma aba com uma coluna a mais no
   começo somaria o dia 16 de uma com o dia 17 da outra, em silêncio. Se as datas das abas não
   coincidirem, o app **recusa** em vez de somar.
-- **Não trata retroativo como headcount.** Uma linha de rateio negativo é ajuste financeiro:
-  somá-la ao PREF diria que havia uma pessoa a menos trabalhando naqueles dias, o que é falso.
-  Liderança e indiretos também ficam fora, e cargo que não está na lista de `CARGOS_PREF`
-  (`js/config.js`) não é chutado para dentro — vira o aviso *"cargo requer validação"*, nomeando o
-  cargo, porque um PREF subestimado em silêncio é pior que um alerta.
+- **Não chuta cargo para dentro.** Entram só os de `CARGOS_PREF` (`js/config.js`) — auxiliar e
+  operador. Liderança e indiretos saem pelo cargo, sem alarme; cargo desconhecido sai **com**
+  alarme, nomeado, porque um PREF subestimado em silêncio é pior que um alerta.
 
 Célula de S&OP vazia é **ausência, não zero**: o dia sai como `REVISÃO NECESSÁRIA`, sem número
 previsto. Zero silencioso inventaria um risco de corte que não existe.

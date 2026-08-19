@@ -427,5 +427,58 @@ const limpo2 = rodar([L({ groot:"5300001", nome:"SEM PROBLEMA", ini:d(2026,7,20)
 check(limpo2.grupos.length === 0,
       "fatura sem achado não gera grupo nenhum");
 
+/* ================================================================
+   QUADRO DO PERÍODO
+
+   A auditoria recebe só a fatura, e o quadro é o headcount que dá para
+   extrair dela sozinha. A conta é a MESMA da Fusão de Linhas e da
+   simulação de retorno — se divergir, o app passa a dizer dois números
+   diferentes para a mesma pergunta, em duas telas vizinhas.
+   ================================================================ */
+console.log("\nQuadro do período");
+
+const { valQuadroDiario } = require("../js/validacao.js");
+const quadroLabor = [
+  L({ groot:"6100001", cargo:"Auxiliar de Apoio LOG I", ini:d(2026,3,1), fim:null, rateio:1 }),
+  L({ groot:"6100002", cargo:"Operador Transpaleteira", ini:d(2026,3,1), fim:null, rateio:1 }),
+  /* estorno: reduz o que a fatura apresenta de 27/07 a 31/07 */
+  L({ groot:"6100003", cargo:"Auxiliar de Apoio LOG I", ini:d(2026,7,27), fim:d(2026,7,31), rateio:-1 }),
+  /* liderança e cargo desconhecido não entram */
+  L({ groot:"6100004", cargo:"Supervisor de Operação", ini:d(2026,3,1), fim:null, rateio:1 }),
+  L({ groot:"6100005", cargo:"Conferente de Expedição", ini:d(2026,3,1), fim:null, rateio:1 }),
+  /* a linha de ABS do template não é pessoa */
+  L({ groot:"ABS", nome:" ABSENTEISMO", cargo:" ABSENTEISMO", ini:d(2026,3,1), fim:null, rateio:1 })
+];
+const q = valQuadroDiario(quadroLabor, PERIODO);
+const noDiaQ = dt => q.dias.find(x => +x.data === +dt);
+
+check(!!q && q.dias.length === 31, "um ponto por dia do período", q && q.dias.length);
+check(noDiaQ(d(2026,7,20)).liquido === 2,
+      "fora do estorno, o quadro conta as duas pessoas elegíveis",
+      noDiaQ(d(2026,7,20)).liquido);
+check(noDiaQ(d(2026,7,29)).liquido === 1,
+      "no período do estorno o quadro cai — o rateio entra com o sinal",
+      noDiaQ(d(2026,7,29)).liquido);
+check(noDiaQ(d(2026,7,29)).bruto === 2,
+      "…e o bruto do mesmo dia continua 2: no turno havia duas pessoas",
+      noDiaQ(d(2026,7,29)).bruto);
+check(q.pessoas === 2,
+      "liderança, cargo desconhecido e a linha de ABS ficam fora da contagem de pessoas",
+      q.pessoas);
+check(q.estornos === 1, "o número de estornos é informado", q.estornos);
+check(q.min === 1 && q.max === 2, "mínimo e máximo do período", q.min+".."+q.max);
+
+/* A mesma expressão de js/fusao.js, para provar que os dois números
+   não divergem por acaso. */
+const eligQ = l => ["auxiliar de apoio log i","operador transpaleteira",
+                    "part time - auxiliar log i (3 dias)"]
+  .includes(String(l.cargo).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim());
+const contaFusaoQ = dia => quadroLabor.reduce((acc,l) => acc +
+  ((eligQ(l) && String(l.groot).toLowerCase() !== "abs"
+    && l.ini instanceof Date && l.ini <= dia
+    && (!(l.fim instanceof Date) || l.fim >= dia)) ? l.rateio : 0), 0);
+check(q.dias.every(x => x.liquido === contaFusaoQ(x.data)),
+      "o quadro bate com a conta da Fusão de Linhas em todos os 31 dias");
+
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);

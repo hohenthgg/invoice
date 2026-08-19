@@ -952,6 +952,59 @@ function valRegraHoraExtraOrfa(horaExtra, labor, achados){
 }
 
 /* ================================================================
+   QUADRO DO PERÍODO
+
+   Quanta gente a fatura apresenta, dia a dia. É a MESMA conta da Fusão
+   de Linhas e da simulação de retorno — cargo na lista do PREF, dia
+   dentro de [início, fim] com fim vazio valendo até o fim do período,
+   e o % RATEIO entrando com o sinal que tem.
+
+   Aqui ela responde outra pergunta: a auditoria recebe só a fatura, e
+   esta é a leitura do quadro que dá para extrair dela sozinha. Sai
+   junto com os apontamentos porque um GROOT contado duas vezes ou uma
+   linha duplicada aparecem neste número antes de aparecer em qualquer
+   outro lugar.
+   ================================================================ */
+const VAL_CARGOS_QUADRO = ["auxiliar de apoio log i","operador transpaleteira",
+                           "part time - auxiliar log i (3 dias)"];
+
+function valQuadroDiario(labor, periodo){
+  if(!(periodo.ini instanceof Date) || !(periodo.fim instanceof Date)) return null;
+  const elegivel = l => VAL_CARGOS_QUADRO.includes(valNorm(l.cargo).toLowerCase());
+  const linhas = labor.filter(l =>
+    !VAL_GROOT_RESERVADOS.includes(valNorm(l.groot).toLowerCase())
+    && l.ini instanceof Date && elegivel(l));
+
+  const rateio = l => (typeof l.rateio === "number" && isFinite(l.rateio)) ? l.rateio : 1;
+  const dias = [];
+  const umDia = 864e5;
+  for(let t = periodo.ini.getTime(); t <= periodo.fim.getTime(); t += umDia){
+    const d = new Date(t);
+    let liquido = 0, bruto = 0;
+    for(const l of linhas){
+      if(valDia(l.ini) > valDia(d)) continue;
+      if(l.fim instanceof Date && valDia(l.fim) < valDia(d)) continue;
+      const r = rateio(l);
+      liquido += r;
+      if(r > 0) bruto += r;
+    }
+    dias.push({ data:d, liquido:Math.round(liquido*1e6)/1e6, bruto:Math.round(bruto*1e6)/1e6 });
+  }
+  if(!dias.length) return null;
+  const vals = dias.map(x => x.liquido);
+  const pessoas = new Set(linhas.filter(l => rateio(l) > 0)
+    .map(l => valTemGroot(l.groot) ? "G:"+valGroot(l.groot) : "L:"+l.linha));
+  return {
+    dias, pessoas: pessoas.size,
+    linhas: linhas.length,
+    estornos: linhas.filter(l => rateio(l) < 0).length,
+    min: Math.min(...vals), max: Math.max(...vals),
+    /* Média por dia — o headcount que a fatura sustenta no período. */
+    media: Math.round(vals.reduce((a,b) => a+b, 0)/vals.length*100)/100
+  };
+}
+
+/* ================================================================
    ORQUESTRAÇÃO
    ================================================================ */
 function auditarFatura(dados){
@@ -1012,6 +1065,7 @@ function auditarFatura(dados){
     /* Contagem de linhas, e só. Somar os lançamentos daria um total
        monetário, que este app não escreve. */
     totais: { labor: labor.length, diaristas: diaristas.length },
+    quadro: valQuadroDiario(labor, ctx),
     resumo, grupos, achados
   };
 }
@@ -1019,5 +1073,6 @@ function auditarFatura(dados){
 /* Node (testes) e navegador carregam o mesmo arquivo. */
 if(typeof module !== "undefined" && module.exports){
   module.exports = { auditarFatura, valCompararNomes, valNorm, valGroot, valTemGroot,
-                     valSobrepoe, valEncostados, valLev, VAL_SEV, VAL_CATEGORIAS };
+                     valSobrepoe, valEncostados, valLev, valQuadroDiario,
+                     VAL_SEV, VAL_CATEGORIAS };
 }

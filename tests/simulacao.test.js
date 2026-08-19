@@ -13,23 +13,23 @@
    receita — e está errada num dos dois sentidos: com PREF 130 contra
    S&OP 138 ela prometeria 138, uma cobrança que ninguém enviou.
 
-   E o segundo erro caro:
+   E o segundo, que já esteve errado aqui:
 
-       RETROATIVO NÃO É HEADCOUNT
+       O PREF É QUANTIDADE FATURADA, NÃO RETRATO DO TURNO
 
-   Uma linha de rateio -1 referente a 20/07→31/07, lançada na fatura de
-   agosto, é ajuste FINANCEIRO. Somá-la ao PREF diria que havia uma
-   pessoa a menos trabalhando naqueles dias — ninguém sai do turno
-   porque a fatura passada cobrou a mais.
+   Uma linha de rateio -1 referente a 27/07→31/07 REDUZ o que a fatura
+   apresenta naqueles dias. Tratá-la como "ajuste financeiro que não é
+   headcount" e tirá-la da conta inflava o PREF — na fatura real eram
+   30 estornos, até 30 HC a mais num único dia de julho.
 
-   O módulo é carregado junto com dates.js, config.js e billing.js, no
-   mesmo contexto — assim a classificação de retroativo testada aqui é
-   a MESMA que a Conciliação usa, não uma cópia.
+   A regra é a mesma da Fusão de Linhas, e tem de ser: as duas
+   reconstroem o mesmo número a partir do mesmo Labor. Divergir aqui
+   daria dois PREFs para a mesma fatura.
    ================================================================ */
 "use strict";
 const { load } = require("./load.js");
 
-const ctx = load(["dates.js","config.js","billing.js","simulacao.js"],
+const ctx = load(["dates.js","config.js","simulacao.js"],
                  ["SIM_STATUS","SIM_AVISO_METADADOS","CARGOS_PREF"]);
 const { simularRetorno, simClassificarLinhas, simLinhasRetorno,
         buildCompetence, ymd, SIM_STATUS } = ctx;
@@ -141,27 +141,36 @@ check(abaixo.totais.hcEmRisco === 0 && abaixo.totais.hcAbaixo === 6*31,
       "…e o subfaturamento é contado separado, sem abater o risco");
 
 /* ================================================================
-   6. Retroativo não mexe no headcount
+   6. O estorno entra no PREF, subtraindo
    ================================================================ */
-console.log("\nRetroativo é ajuste financeiro, não headcount");
+console.log("\nO PREF é o líquido: o rateio entra com o sinal que tem");
 
 const comRetro = rodar([
   P({ groot:"D1" }),
-  /* rateio -1 num período fechado em julho, dentro de uma fatura de
-     agosto: estorno da competência anterior */
-  P({ groot:"D2", rateio:-1, inicio: ymd(2026,7,20), fim: ymd(2026,7,31) })
-], [bloco("SVC",1), bloco("SD",0)]);
-check(noDia(comRetro, ymd(2026,7,25)).pref === 1,
-      "linha retroativa negativa NÃO reduz o HC operacional do dia",
-      String(noDia(comRetro, ymd(2026,7,25)).pref));
-check(comRetro.avisos.some(a => a.tipo === "retro"),
-      "…e a exclusão vira aviso, para não sumir em silêncio");
-check(comRetro.linhas.fora.some(f => f.motivo.chave === "retro"),
-      "…com a linha listada no que ficou fora do PREF");
+  P({ groot:"D2" }),
+  /* estorno de 27/07 a 31/07: reduz o que a fatura apresenta nesses dias */
+  P({ groot:"D3", rateio:-1, inicio: ymd(2026,7,27), fim: ymd(2026,7,31) })
+], [bloco("SVC",2)]);
+check(noDia(comRetro, ymd(2026,7,29)).pref === 1,
+      "no dia coberto pelo estorno o PREF cai de 2 para 1 — é o que a fatura cobra",
+      String(noDia(comRetro, ymd(2026,7,29)).pref));
+check(noDia(comRetro, ymd(2026,7,26)).pref === 2,
+      "fora do período do estorno o PREF fica intacto",
+      String(noDia(comRetro, ymd(2026,7,26)).pref));
+check(noDia(comRetro, ymd(2026,7,29)).bruto === 2,
+      "…e o BRUTO do mesmo dia continua 2: no turno havia duas pessoas",
+      String(noDia(comRetro, ymd(2026,7,29)).bruto));
+check(comRetro.avisos.some(a => a.tipo === "estorno"),
+      "a presença de estornos vira aviso, para a queda no PREF não surpreender");
+check(comRetro.totais.estornos === 1,
+      "…e o total de linhas de estorno é informado", String(comRetro.totais.estornos));
 
-/* Sem o filtro, o PREF do dia 25/07 seria 0 em vez de 1. */
-check(noDia(comRetro, ymd(2026,7,25)).pref !== 0,
-      "sem esse filtro o dia sairia com 1 pessoa a menos, o que é falso");
+/* Este é o defeito concreto que a mudança conserta: com o estorno fora
+   da conta, o dia 29/07 sairia com 2 e o gap contra o S&OP seria 0 —
+   um dia "alinhado" que na verdade está 1 abaixo. */
+check(noDia(comRetro, ymd(2026,7,29)).gap === -1,
+      "o gap do dia usa o líquido, não o bruto",
+      String(noDia(comRetro, ymd(2026,7,29)).gap));
 
 /* ================================================================
    7. Liderança e indiretos não entram sozinhos
@@ -174,10 +183,8 @@ const comIndireto = rodar([
   P({ groot:"E3", conta:"LABOR LIDERANÇA E INDIRETOS", cargo:"Líder de Operação" })
 ], [bloco("SVC",1)]);
 check(noDia(comIndireto, PER.ini).pref === 1,
-      "liderança e indiretos não entram no PREF automaticamente",
+      "liderança e indiretos ficam fora — o cargo deles não está na lista do PREF",
       String(noDia(comIndireto, PER.ini).pref));
-check(!comIndireto.avisos.some(a => a.tipo === "cargo"),
-      "…e não geram aviso: sair é o comportamento esperado deles");
 
 const comAbs = rodar([
   P({ groot:"F1" }),
@@ -230,6 +237,55 @@ const meio = rodar([P({ groot:"K1", rateio:0.5 }), P({ groot:"K2", rateio:0.5 })
                    [bloco("SVC",1)]);
 check(noDia(meio, PER.ini).pref === 1,
       "dois rateios de 0,5 somam 1 HC — o rateio entra na conta");
+
+/* ================================================================
+   PARIDADE COM A FUSÃO DE LINHAS
+
+   As duas abas reconstroem o MESMO número a partir do mesmo Labor: a
+   Fusão para comparar com o retorno oficial, a simulação para prever
+   esse retorno. Divergirem daria dois PREFs para a mesma fatura, e foi
+   exatamente o que aconteceu enquanto este módulo excluía os estornos.
+
+   A expressão abaixo é a de js/fusao.js, copiada:
+
+       labor.reduce((s,p) => s + ((p.elig && p.pt===pt)
+         && p.ini<=d && (p.fim==null || p.fim>=d) ? p.rateio : 0), 0)
+   ================================================================ */
+console.log("\nParidade com a Fusão de Linhas");
+
+const elegivel = l => ctx.CARGOS_PREF.includes(
+  String(l.cargo).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim());
+const contaFusao = (labor, d) => labor.reduce((acc,p) =>
+  acc + ((elegivel(p) && p.inicio <= d && (p.fim == null || p.fim >= d)) ? p.rateio : 0), 0);
+
+/* Um Labor com os formatos que a fatura real tem: aberto, fechado,
+   estorno, meio rateio, cargo de liderança e cargo desconhecido. */
+const laborReal = [
+  P({ groot:"F1", inicio: ymd(2026,3,23), fim:null }),
+  P({ groot:"F2", inicio: ymd(2026,6,3),  fim: ymd(2026,8,4) }),
+  P({ groot:"F3", inicio: ymd(2026,7,20), fim: ymd(2026,7,25) }),
+  P({ groot:"F4", inicio: ymd(2026,7,27), fim: ymd(2026,7,31), rateio:-1 }),
+  P({ groot:"F5", inicio: ymd(2026,8,1),  fim:null, rateio:0.5 }),
+  P({ groot:"F6", inicio: ymd(2026,1,1),  fim:null, cargo:"Operador Transpaleteira" }),
+  P({ groot:"F7", inicio: ymd(2026,1,1),  fim:null, cargo:"Supervisor de Operação",
+      conta:"LABOR LIDERANÇA E INDIRETOS" }),
+  P({ groot:"F8", inicio: ymd(2026,1,1),  fim:null, cargo:"Conferente de Expedição" })
+];
+const paridade = rodar(laborReal, [bloco("SVC",100)]);
+const divergencias = [];
+for(const dia of paridade.dias){
+  const esperado = Math.round(contaFusao(laborReal, dia.data)*1e6)/1e6;
+  if(dia.pref !== esperado) divergencias.push(ctx.fmtYmd(dia.data)+": "+dia.pref+" != "+esperado);
+}
+check(divergencias.length === 0,
+      "o PREF de cada dia bate com a conta da Fusão de Linhas, dia a dia",
+      divergencias.slice(0,3).join(" · "));
+
+/* A prova de que o teste não é vazio: se os estornos voltassem a ser
+   excluídos, os dias cobertos por eles divergiriam. */
+const semEstorno = laborReal.filter(l => l.rateio > 0);
+check(contaFusao(laborReal, ymd(2026,7,29)) !== contaFusao(semEstorno, ymd(2026,7,29)),
+      "…e o dia do estorno realmente muda de valor entre as duas contas — o teste morde");
 
 /* ================================================================
    A saída
