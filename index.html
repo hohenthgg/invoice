@@ -42,6 +42,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg>
     Calcular ABS
   </button>
+  <button class="apptab" data-panel="validacao">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3 5-6"/><path d="M21 12c0 5-3.5 8-9 9-5.5-1-9-4-9-9V6l9-3 9 3z"/></svg>
+    Validação Template
+  </button>
   <button class="apptab" data-panel="guia">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></svg>
     Guia
@@ -452,7 +456,45 @@
   </div>
 </div>
 
-<!-- ========================== ABA 5 — GUIA ========================== -->
+<!-- ==================== ABA 5 — VALIDAÇÃO TEMPLATE ==================== -->
+<div class="apppanel" id="panel-validacao">
+
+  <p class="vt-intro">Audita uma fatura no template padrão como um auditor faria: cruza <b>GROOT ID, nome,
+    cargo, vínculo, datas e valores</b> entre as abas <b>LABOR</b> e <b>DIARISTAS</b>, separa o que é erro
+    do que é movimentação legítima de contrato ou ajuste financeiro, e explica o porquê de cada
+    apontamento. <b>Nenhuma linha da fatura é alterada</b> — a decisão é sua.</p>
+
+  <div class="vt-drop" id="vt-drop">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#ffc233" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    <b>Solte aqui a fatura .xlsx</b>
+    <span>O arquivo precisa ter as abas <code>LABOR</code> e <code>DIARISTAS</code> do template padrão.
+      As abas <code>RESUMO</code> e <code>HORA EXTRA</code>, quando existem, entram como apoio.</span>
+    <div class="vt-fname" id="vt-fname"></div>
+    <input type="file" id="vt-file" accept=".xlsx,.xls">
+  </div>
+  <div id="vt-err" class="err hidden"></div>
+
+  <div id="vt-result" class="hidden">
+    <div id="vt-cabecalho"></div>
+
+    <div class="vt-legenda">
+      <span><i class="sev-critico"></i><b>Crítico</b> — provável erro que gera faturamento incorreto</span>
+      <span><i class="sev-revisar"></i><b>Revisar</b> — suspeito, mas pode ser legítimo</span>
+      <span><i class="sev-cadastro"></i><b>Cadastro</b> — padronização ou qualidade de dado</span>
+      <span><i class="sev-info"></i><b>Informativo</b> — encontrado e aparentemente justificável</span>
+    </div>
+
+    <div class="vt-cards" id="vt-cards"></div>
+    <div class="vt-progresso" id="vt-progresso"></div>
+    <div class="vt-lista" id="vt-lista"></div>
+
+    <div class="vt-acoes-fim">
+      <button class="vt-btn" id="vt-btnExport">Baixar relatório da auditoria (.xlsx)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================== ABA 6 — GUIA ========================== -->
 <div class="apppanel" id="panel-guia">
 
   <section>
@@ -552,6 +594,11 @@
 <script src="js/extraction-dedup.js"></script>
 <script src="js/extraction-audit.js"></script>
 <script src="js/abs.js"></script>
+
+<!-- Aba 5: o motor de auditoria vem antes da tela que o consome. -->
+<script src="js/validacao.js"></script>
+<script src="js/validacao-ui.js"></script>
+
 <script src="js/tabs.js"></script>
 </body>
 </html>

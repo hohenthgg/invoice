@@ -827,8 +827,13 @@ function nomeArquivoABS(list){
   const opPart  = ops.length===1  ? ops[0]          : 'Todas as Operações';
   const dia=d=>fmtDia(d).replace('/','-')+'-'+d.getFullYear();
   const bruto=`Conciliação ABS Diaristas - ${filPart} - ${opPart} - ${dia(ini)} a ${dia(fim)}`;
-  // tira só o que é ilegal em nome de arquivo; acentos ficam, são legíveis
-  return bruto.replace(/[\\/:*?"<>|]/g,'-')+'.xlsx';
+  /* Acento no atributo `download` de um link para blob: URL faz o Chromium
+     DESCARTAR o nome inteiro e salvar como "download". Não avisa, não erra —
+     só entrega o arquivo sem nome. Por isso o acento sai aqui, e não por
+     gosto: "Conciliacao" salva certo, "Conciliação" some. Depois tira o que
+     é ilegal em nome de arquivo. */
+  return bruto.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+              .replace(/[\\/:*?"<>|]/g,'-')+'.xlsx';
 }
 async function exportarLista(list){
   const {ini,fim}=S.results;
