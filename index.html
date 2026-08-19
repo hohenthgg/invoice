@@ -593,6 +593,7 @@
         <div class="sm-eqopts">
           <label><input type="checkbox" id="sm-eqAdiar" checked> Permitir adiar data de início</label>
           <label>Pausar/retomar a partir de <input type="date" id="sm-eqPausa"></label>
+          <label><input type="checkbox" id="sm-eqIncluir" checked> Preencher a falta com diaristas do SIGO</label>
           <span class="nota">As mesmas opções da Fusão de Linhas. Data vazia = nunca pausar automaticamente.</span>
         </div>
         <div id="sm-eq"></div>
@@ -697,6 +698,19 @@
         O que sobrar sem solução vai para <b>Revisar</b>, e dia abaixo do QF vai para <b>Falta</b> —
         equalizar não inventa gente. <b>Nada é aplicado à fatura</b>: aqui o plano é sugestão, e a
         confirmação de que a movimentação existiu de verdade é da operação.</p>
+      <p><b>Exportar o Labor equalizado.</b> No fim da seção, um botão gera o <code class="inline">.xlsx</code>
+        no <b>layout do próprio template</b>: cabeçalho original, colunas na ordem original, e cada linha
+        que o plano não tocou saindo <b>exatamente como entrou</b>. As retiradas somem, os inícios e fins
+        ajustados já vêm mudados, e uma pausa vira duas linhas da mesma pessoa. Vão junto as abas
+        <code class="inline">EQUALIZACAO</code> (o que foi feito e por quê), <code class="inline">INCLUSOES</code>,
+        <code class="inline">REVISAR</code> e <code class="inline">METADADOS</code>.</p>
+      <p><b>E as pessoas que faltam já vêm preenchidas</b>, se a base do SIGO estiver carregada: nos dias
+        abaixo do QF o app escolhe diaristas <b>solicitados naquele dia e sem cobrança no LABOR</b>,
+        <b>primeiro os da ID até acabarem</b> e só então os do cliente — a mesma prioridade do abate da aba
+        Calcular ABS. Cada pessoa entra com o cargo do quadro e % rateio 1; <b>matrícula, escala e turno
+        ficam em branco</b> de propósito, porque o SIGO não os informa e preencher com o de outra pessoa
+        seria inventar. O que não houver diarista livre para cobrir sai declarado na aba
+        <code class="inline">REVISAR</code>, com o tamanho.</p>
       <p>Com a base do SIGO carregada, cada sugestão ainda mostra se aquela pessoa <b>também aparece
         como diarista</b> justamente nos dias que o plano tira do fixo — costuma ser transição de fixo
         para diária, e é onde uma dupla cobrança apareceria. A base de diaristas <b>não muda a

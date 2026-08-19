@@ -1386,3 +1386,4 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 .sm-eqdiar{background:rgba(122,167,255,.1);border-left:2px solid #7aa7ff;padding:8px 11px;border-radius:0 7px 7px 0}
 .sm-eqgrupo .det.aberto{display:block;padding:11px 13px;font-size:.78rem;line-height:1.6;color:var(--mut)}
 .sm-eqgrupo .det .dias{font-family:var(--mono);font-size:.73rem;color:var(--ink);margin-top:6px}
+.sm-eqchip.incluir{background:var(--ok);color:#04240f}

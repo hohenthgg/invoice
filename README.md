@@ -350,6 +350,32 @@ queda-e-retomada de demanda como **pausa**, não como desligamento. Excesso sem 
 Na Validação o plano é **sugestão**: nada é aplicado à fatura. A matemática fecha a curva; quem sabe
 se a movimentação aconteceu de verdade é a operação — e o aviso está na tela.
 
+#### O Labor equalizado, pronto
+
+O botão no fim da seção gera o `.xlsx` no **layout do próprio template**: cabeçalho original, colunas
+na ordem original, e cada linha que o plano não tocou saindo **exatamente como entrou** — nem as datas
+são reescritas, porque passar o que estava certo por uma releitura só para gravá-lo de volta é chance
+de estragá-lo. As retiradas somem, os inícios e fins ajustados já vêm mudados, e uma pausa vira duas
+linhas da mesma pessoa. Junto vão `EQUALIZACAO` (o que foi feito, com o motivo), `INCLUSOES`,
+`REVISAR` e `METADADOS`.
+
+E o lado da falta **já vem preenchido**, com a base SIGO carregada. Nos dias abaixo do QF o app escolhe
+diaristas **solicitados naquele dia e sem cobrança no LABOR**, **primeiro os internos até acabarem** e
+só então os do cliente — a mesma prioridade do abate "ambos" da aba Calcular ABS, pelo mesmo motivo:
+gastar diarista do cliente com interno sobrando escolhe a fonte errada, e o total não denuncia. Nunca
+entra mais gente do que a falta do dia.
+
+Cada pessoa incluída entra com o cargo mais frequente do quadro e `% RATEIO` 1. **Matrícula, regime,
+escala, turno e dias trabalhados ficam vazios** de propósito: não são deduzíveis do SIGO, e preencher
+com o valor de outra pessoa poria dado errado com cara de certo. Das colunas de contexto só são
+copiadas as que têm o **mesmo valor em toda a fatura** — fornecedor, unidade, conta —, porque aí não há
+o que escolher. Falta que não houver diarista livre para cobrir sai declarada em `REVISAR`, com o
+tamanho: um número que some seria pior que um número feio.
+
+Datas saem como **serial do Excel**, nunca como objeto de data. `aoa_to_sheet({cellDates:true})`
+converte pelo fuso local: escrito de São Paulo, 17/07 saía como 16/07 21:00 e voltava a ser lido como
+16/07 — um dia de diferença em toda linha reescrita.
+
 Com a base SIGO carregada, cada sugestão mostra ainda se a pessoa **também aparece como diarista**
 justamente nos dias que o plano tira do fixo. É a explicação operacional da correção — transição de
 fixo para diária — e é onde uma dupla cobrança apareceria. A base de diaristas **não muda a

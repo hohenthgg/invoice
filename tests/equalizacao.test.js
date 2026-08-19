@@ -370,5 +370,88 @@ check(res.acoes.every(a => gente.some(p => p.groot === a.linha.groot)),
         "as linhas do Labor saem da equalização exatamente como entraram");
 }
 
+/* ================================================================
+   QUEM ENTRA PARA COBRIR A FALTA
+
+   O outro lado do plano. Aqui o teste que morde é o da PRIORIDADE: um
+   total certo com a repartição errada gasta diarista do cliente com
+   interno sobrando, e o total não denuncia nada. É o mesmo defeito que
+   tests/abs-prioridade.js protege no abate "ambos", e a mesma regra.
+   ================================================================ */
+secao("Inclusão de diaristas para cobrir a falta");
+
+const { simInclusoes } = ctx;
+const D = ymd(2026,7,20);
+const diar = (groot, data, solic, nome) => ({ groot, data, solic, nome:nome || "P"+groot, empresa:"" });
+const lab = (groot, ini, fim, rateio) => ({ groot, nome:"FIXO "+groot, cargo:"Auxiliar de Apoio Log I",
+  conta:"LABOR DIRETO", matricula:"", inicio:ini, fim, rateio:rateio == null ? 1 : rateio, linha:1 });
+
+{
+  const r = simInclusoes({ falta:{ [D]:2 }, labor:[],
+    diaristas:[diar("1",D,"meli"), diar("2",D,"id"), diar("3",D,"meli"), diar("4",D,"id")] });
+  const solics = r.pessoas.map(p => p.solic).sort();
+  check(r.totais.incluido === 2, "cobre exatamente a falta do dia — nem mais, nem menos");
+  check(solics.join(",") === "id,id", "com ID sobrando, o do cliente NÃO é usado", solics.join(","));
+}
+{
+  const r = simInclusoes({ falta:{ [D]:3 }, labor:[],
+    diaristas:[diar("1",D,"meli"), diar("2",D,"id"), diar("3",D,"meli")] });
+  check(r.totais.id === 1 && r.totais.meli === 2,
+        "esgotado o ID, o do cliente complementa — e só o que faltou",
+        r.totais.id+" ID, "+r.totais.meli+" cliente");
+}
+{
+  /* Já está no LABOR do dia: contá-lo seria cobrar duas vezes. */
+  const r = simInclusoes({ falta:{ [D]:2 }, labor:[lab("2",D,D)],
+    diaristas:[diar("2",D,"id"), diar("5",D,"id")] });
+  check(r.totais.incluido === 1 && r.pessoas[0].groot === "5",
+        "quem já está cobrado no LABOR do dia não é incluído de novo");
+  check(r.totais.descoberto === 1, "e o que não deu para cobrir sai como descoberto, com o tamanho");
+}
+{
+  /* O mesmo GROOT com o fixo ESTORNADO naquelas datas está livre — é o
+     caso real que motivou a diária. */
+  const r = simInclusoes({ falta:{ [D]:1 }, labor:[lab("2",D,D,1), lab("2",D,D,-1)],
+    diaristas:[diar("2",D,"id")] });
+  check(r.totais.incluido === 1, "com o fixo estornado no dia, a pessoa volta a estar livre");
+}
+{
+  const d1 = ymd(2026,7,20), d2 = ymd(2026,7,21), d3 = ymd(2026,7,23);
+  const r = simInclusoes({ falta:{ [d1]:1, [d2]:1, [d3]:1 }, labor:[],
+    diaristas:[diar("7",d1,"id"), diar("7",d2,"id"), diar("7",d3,"id")] });
+  check(r.pessoas.length === 1, "a mesma pessoa em três dias é uma pessoa, não três");
+  check(r.pessoas[0].faixas.length === 2,
+        "dias seguidos viram uma faixa; o dia solto vira outra",
+        JSON.stringify(r.pessoas[0].faixas));
+}
+{
+  const r = simInclusoes({ falta:{ [D]:2.5 }, labor:[],
+    diaristas:[diar("1",D,"id"), diar("2",D,"id"), diar("3",D,"id")] });
+  check(r.totais.incluido === 2, "falta fracionária arredonda para baixo — passar do alvo é o erro");
+}
+{
+  const r = simInclusoes({ falta:{ [D]:2 }, labor:[], diaristas:[] });
+  check(r.totais.incluido === 0 && r.totais.descoberto === 2,
+        "sem base de diaristas não se inventa ninguém — a falta fica declarada");
+}
+{
+  /* Pelo caminho completo: o plano da Validação traz as inclusões
+     prontas quando a base do SIGO vem junto. */
+  const gente2 = fixture();
+  const dias = [];
+  for(let d = PER.ini; d <= PER.fim; d = ctx.addDays(d,1)) dias.push(d);
+  const base = dias.flatMap(d => [diar("8000001",d,"id"), diar("8000002",d,"meli")]);
+  const r = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diaristas:base,
+    opcoes:{ permitirAdiarInicio:true } });
+  check(!!r.inclusoes && r.inclusoes.pessoas.length > 0,
+        "o plano completo traz as inclusões junto com as retiradas");
+  check(r.inclusoes.pessoas[0].solic === "id", "e o primeiro da fila é o da ID");
+  const semBase = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF,
+    opcoes:{ permitirAdiarInicio:true } });
+  check(semBase.inclusoes === null, "sem a base, o plano não finge que sabe quem incluir");
+  check(JSON.stringify(r.acoes.map(a => a.id)) === JSON.stringify(semBase.acoes.map(a => a.id)),
+        "e as inclusões não mudam nenhuma das retiradas — são lados independentes do plano");
+}
+
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);
