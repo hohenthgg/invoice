@@ -319,6 +319,81 @@ check(contaFusao(laborReal, ymd(2026,7,29)) !== contaFusao(semEstorno, ymd(2026,
       "…e o dia do estorno realmente muda de valor entre as duas contas — o teste morde");
 
 /* ================================================================
+   DIARISTAS DISPONÍVEIS NO DIA
+
+   Quando falta gente, a pergunta seguinte é quem poderia cobrir. O
+   SIGO diz quem foi solicitado e por quem — mas estar solicitado não é
+   estar disponível: quem já aparece no LABOR do dia está sendo cobrado
+   como quadro fixo, e contá-lo de novo seria contar duas vezes.
+
+   A ocupação é medida pelo LÍQUIDO, não pela existência da linha. Uma
+   linha de rateio -1 cobrindo o dia é o estorno do fixo justamente
+   para pagar a diária: a pessoa está livre. Os três GROOTs que a
+   fatura real tem em comum com o SIGO são todos assim.
+   ================================================================ */
+console.log("\nDiaristas disponíveis no dia");
+
+const DIA = ymd(2026,7,20);
+const laborDiar = [
+  P({ groot:"111" }), P({ groot:"222" }),
+  /* 888 está cobrado no fixo: NÃO está disponível como diarista */
+  P({ groot:"888" }),
+  /* 999 tem estorno cobrindo o dia: o fixo foi devolvido, está livre */
+  P({ groot:"999", rateio:-1, inicio: ymd(2026,7,18), fim: ymd(2026,7,22) })
+];
+const comDiar = simularRetorno({
+  labor: laborDiar, blocos:[bloco("SVC", 6)], periodo:PER, comp:COMP,
+  diaristas: [
+    { data:DIA, groot:"777", solic:"id" },
+    { data:DIA, groot:"666", solic:"meli" },
+    { data:DIA, groot:"555", solic:"" },
+    { data:DIA, groot:"999", solic:"id" },
+    { data:DIA, groot:"888", solic:"id" }
+  ]
+});
+const cd = noDia(comDiar, DIA).diaristas;
+check(cd.total === 5, "todos os solicitados do dia são contados", cd && cd.total);
+check(cd.ocupados === 1 && cd.disp === 4,
+      "quem já está cobrado no LABOR do dia não conta como disponível",
+      cd && cd.ocupados+" ocupado(s), "+cd.disp+" disponível(is)");
+check(cd.dispId === 2 && cd.dispMeli === 1 && cd.dispSem === 1,
+      "o detalhe separa ID, cliente e sem solicitante",
+      cd && JSON.stringify(cd));
+/* O caso que a fatura real traz três vezes. */
+check(cd.dispId === 2,
+      "quem tem ESTORNO no LABOR cobrindo o dia conta como disponível — o fixo foi devolvido");
+
+/* A mesma pessoa pedida pelos dois no mesmo dia é uma pessoa só, e
+   conta como ID: senão o total do dia contaria gente que não existe. */
+const dupla = simularRetorno({
+  labor:[P({ groot:"111" })], blocos:[bloco("SVC", 5)], periodo:PER, comp:COMP,
+  diaristas: [{ data:DIA, groot:"444", solic:"meli" }, { data:DIA, groot:"444", solic:"id" }]
+});
+const cdd = noDia(dupla, DIA).diaristas;
+check(cdd.total === 1 && cdd.dispId === 1 && cdd.dispMeli === 0,
+      "o mesmo GROOT pedido pelos dois no mesmo dia é uma pessoa, contada como ID",
+      JSON.stringify(cdd));
+
+/* A cobertura é limitada à própria falta — nunca deixa o dia positivo. */
+const falta2 = simularRetorno({
+  labor:[P({ groot:"111" }), P({ groot:"222" })], blocos:[bloco("SVC", 4)],
+  periodo:PER, comp:COMP,
+  diaristas: Array.from({length:9},(_,i) => ({ data:DIA, groot:"90"+i, solic:"id" }))
+});
+const df = noDia(falta2, DIA);
+check(df.gap === -2 && df.diaristas.disp === 9 && df.abatePossivel === 2,
+      "com 9 disponíveis e falta de 2, a cobertura possível é 2",
+      df.gap+" / "+df.diaristas.disp+" / "+df.abatePossivel);
+check(noDia(falta2, ymd(2026,7,21)).abatePossivel === 0,
+      "num dia sem diarista solicitado, não há o que cobrir");
+
+/* Sem o SIGO, nada disso existe — a coluna simplesmente não aparece. */
+const semDiar = rodar([P()], [bloco("SVC",1)]);
+check(semDiar.dias.every(d => d.diaristas === undefined)
+   && semDiar.totais.diaristasDisp === undefined,
+      "sem a planilha de diaristas o resultado não inventa disponibilidade");
+
+/* ================================================================
    A saída
    ================================================================ */
 console.log("\nO arquivo simulado");

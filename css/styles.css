@@ -1332,3 +1332,12 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
   padding:6px 9px}
 #panel-validacao .vt-painel:not(.fonte-fixo) .sm-fixo{opacity:.4;pointer-events:none}
 #panel-validacao .vt-painel.fonte-fixo .sm-fonte .sm-drop{opacity:.4;pointer-events:none}
+/* diaristas disponíveis no dia: total em cima, origem embaixo */
+#panel-validacao .sm-tabela td.sm-diar{white-space:nowrap;color:var(--mut2)}
+#panel-validacao .sm-tabela td.sm-diar b{display:block;font-weight:700;color:var(--mut)}
+#panel-validacao .sm-tabela td.sm-diar small{display:block;font-size:.64rem;line-height:1.4}
+#panel-validacao .sm-tabela td.sm-diar small.ocup{color:var(--warn);opacity:.8}
+/* só ganha cor onde responde alguma coisa: nos dias em que falta gente */
+#panel-validacao .sm-tabela td.sm-diar.util b{color:var(--ok)}
+#panel-validacao .sm-drop.opcional{border-style:dashed;opacity:.85}
+#panel-validacao .sm-drop.opcional:hover,#panel-validacao .sm-drop.opcional.loaded{opacity:1}

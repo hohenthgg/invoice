@@ -549,6 +549,15 @@
         </div>
       </div>
       <div class="sm-passo">
+        <div class="sm-n">+</div>
+        <div class="sm-drop opcional" id="sm-dropD">
+          <div class="ttl">Diaristas — SIGO <span class="abs-opc">opcional</span></div>
+          <div class="fname" id="sm-fnD">Clique ou arraste o .xlsx</div>
+          <div class="hint">mostra, em cada dia, quantos diaristas havia para cobrir a falta</div>
+          <div class="st" id="sm-stD"></div>
+        </div>
+      </div>
+      <div class="sm-passo">
         <div class="sm-n">3</div>
         <div class="sm-acao">
           <button class="vt-btn" id="sm-btnRun" disabled>Analisar</button>
@@ -556,7 +565,7 @@
         </div>
       </div>
     </div>
-    <input type="file" id="sm-fileF" accept=".xlsx,.xls"><input type="file" id="sm-fileS" accept=".xlsx,.xls">
+    <input type="file" id="sm-fileF" accept=".xlsx,.xls"><input type="file" id="sm-fileS" accept=".xlsx,.xls"><input type="file" id="sm-fileD" accept=".xlsx,.xls">
     <div id="sm-err" class="err hidden"></div>
 
     <div id="sm-result" class="hidden">
@@ -656,6 +665,8 @@
       <p>O que a reconstrução <b>não</b> faz é somar o S&amp;OP <b>por posição de coluna</b>: cada coluna de cada aba operacional é resolvida para uma data completa antes de qualquer soma — uma aba com uma coluna a mais no começo somaria o dia 16 de uma com o dia 17 da outra, em silêncio. E cargo que não está na lista do PREF não é chutado para dentro: vira o aviso <i>“cargo fora da lista”</i>, nomeando o cargo, porque um PREF subestimado em silêncio é pior que um alerta. Liderança e indiretos saem pelo cargo, e sem alarme — sair é o esperado deles.</p>
       <p>Célula de S&amp;OP vazia é <b>ausência, não zero</b>: o dia sai como <b>revisão necessária</b>, sem número previsto. Zero silencioso inventaria um risco de corte que não existe. Se as datas das abas operacionais não coincidirem, o app <b>recusa</b> em vez de somar dias trocados.</p>
       <p>Cada dia sai com S&amp;OP por operação, S&amp;OP total, PREF, Q Pós previsto, gap, correção prevista, status e diagnóstico. <b>Passe o cursor sobre o título de qualquer coluna ou sobre qualquer cartão</b> para ver como aquele número é composto. O painel separa <b>provável redução</b>, <b>alinhado</b> e <b>possível subfaturamento</b>, do maior desvio para o menor.</p>
+      <p>Solte também, se quiser, a planilha de <b>diaristas do SIGO</b> (opcional): ao lado do gap aparece a coluna <b>Diaristas disp.</b>, com quantos havia naquele dia para cobrir a falta e a quebra entre <b>ID</b> e <b>cliente</b>. A aba do SIGO é escolhida pela <b>unidade da própria fatura</b>, lida do RESUMO — não pelo nome do arquivo.</p>
+      <p>Disponível quer dizer <b>ainda não cobrado</b>: o app cruza cada Groot ID solicitado com o <b>LABOR da mesma fatura, naquele dia</b>, e quem já está lá sai da conta — a coluna mostra <i>“N já no LABOR”</i> para você ver o que foi descontado. O cruzamento usa o <b>saldo líquido</b> do dia, não a existência da linha: quem tem o fixo <b>estornado</b> (rateio negativo) cobrindo justamente aquelas datas continua disponível, porque a devolução é o que permite pagá-lo como diária. A mesma pessoa pedida pelos dois lados no mesmo dia conta <b>uma vez, como ID</b>, na mesma prioridade da aba de absenteísmo. A cobertura possível de cada dia é <code class="inline">MIN(disponíveis, falta)</code> — o dia nunca fica positivo por sobra de diarista — e o diagnóstico do dia passa a dizer quantos havia e quanto dariam para cobrir. É <b>leitura, não abate</b>: nada entra no PREF nem no Q Pós previsto.</p>
       <p>A exportação gera quatro abas: <b>COMPARATIVO</b> (leitura humana), <b>RETORNO SIMULADO</b> — com os mesmos cabeçalhos que a <b>Fusão de Linhas</b> procura, para servir de retorno de teste lá —, <b>METADADOS</b> (o aviso de que o arquivo é simulado e as fórmulas usadas) e <b>FORA DO PREF</b> (toda linha excluída e por quê). É <b>previsão, nunca retorno confirmado</b>: o rótulo aparece na tela e no arquivo.</p>
     </div>
   </section>

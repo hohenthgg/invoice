@@ -19,7 +19,8 @@ const $ = id => document.getElementById(id);
 const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
   .toUpperCase().replace(/\s+/g," ").trim();
 
-const S = { fatura:null, sop:null, sim:null, nomeF:"", nomeS:"", fonte:"planilha" };
+const S = { fatura:null, sop:null, diar:null, sim:null,
+            nomeF:"", nomeS:"", nomeD:"", fonte:"planilha" };
 
 /* De onde vem o S&OP: da planilha operacional, dia a dia por operação,
    ou de um valor fixo que vale para todos os dias do período. O fixo
@@ -111,7 +112,70 @@ function lerFatura(wb){
       rateio: parseRateio(r[iRa]) });
   }
   if(!linhas.length) return { erro:'A aba "'+nome+'" não tem linhas com dado.' };
-  return { aba:nome, linhas, comp };
+  return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb) };
+}
+
+/* O nome da unidade, do RESUMO — é ele que escolhe a aba do SIGO. */
+function unidadeDaFatura(wb){
+  const resumo = acharAba(wb,"RESUMO");
+  if(!resumo) return "";
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[resumo],{header:1,defval:""});
+  for(const r of rows.slice(0,20)){
+    for(let c=0;c<r.length-1;c++){
+      if(norm(r[c]) === "NOME UNIDADE"){
+        const v = String(r[c+1] ?? "").trim();
+        if(v) return v;
+      }
+    }
+  }
+  return "";
+}
+
+/* ================================================================
+   LEITURA — DIARISTAS (SIGO)
+
+   Uma aba por filial, cabeçalho na linha 4: DATA SOLICITAÇÃO,
+   SOLICITANTE, GROOT ID. A aba usada é a que casa com a unidade da
+   fatura — somar as filiais todas daria um número que não é desta
+   fatura.
+   ================================================================ */
+function lerDiaristasSigo(wb, unidade){
+  const candidatas = [];
+  for(const nomeAba of wb.SheetNames){
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba],{header:1,defval:""});
+    const h = acharCabecalho(rows,["GROOT ID","DATA","SOLICITANTE"]);
+    if(h) candidatas.push({ aba:nomeAba, rows, h });
+  }
+  if(!candidatas.length){
+    return { erro:"Nenhuma aba no formato SIGO (cabeçalho com DATA SOLICITAÇÃO, SOLICITANTE e GROOT ID)." };
+  }
+  const alvo = norm(unidade);
+  const escolhida = alvo
+    ? candidatas.find(c => norm(c.aba) === alvo) || candidatas.find(c => norm(c.aba).includes(alvo))
+      || candidatas.find(c => alvo.includes(norm(c.aba)))
+    : null;
+  if(!escolhida){
+    return { erro:'Não achei no SIGO uma aba para a unidade "'+(unidade || "(não identificada na fatura)")
+      + '". Abas disponíveis: '+candidatas.map(c => c.aba).join(", ")+"." };
+  }
+
+  const c = escolhida.h.cels;
+  const iD=col(c,"DATA SOLICITACAO","DATA"), iS=col(c,"SOLICITANTE"), iG=col(c,"GROOT ID"),
+        iN=col(c,"NOME"), iE=col(c,"EMPRESA");
+  const regs = [];
+  for(let i=escolhida.h.idx+1;i<escolhida.rows.length;i++){
+    const r = escolhida.rows[i]; if(!r) continue;
+    const data = parseExcelDate(r[iD]);
+    const groot = String(r[iG] ?? "").replace(/\D/g,"");
+    if(!isValidYmd(data) || !groot) continue;
+    /* Quem PEDIU decide de quem é o diarista; a agência não importa. */
+    const txt = norm(r[iS]);
+    const solic = !txt ? "" : (txt.includes("MELI") ? "meli" : "id");
+    regs.push({ data, groot, solic, nome:String(r[iN] ?? "").trim(),
+                empresa: iE >= 0 ? String(r[iE] ?? "").trim() : "" });
+  }
+  if(!regs.length) return { erro:'A aba "'+escolhida.aba+'" não tem linha com data e GROOT legíveis.' };
+  return { aba:escolhida.aba, regs, abas:candidatas.map(c => c.aba) };
 }
 
 /* ================================================================
@@ -223,29 +287,50 @@ function bindDrop(idDrop, idFile, fn){
   ["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => {
     ev.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", ev => { if(ev.dataTransfer.files[0]) fn(ev.dataTransfer.files[0], drop); });
-  file.onchange = () => { if(file.files[0]) fn(file.files[0], drop); };
+  /* Zerar o value depois de usar: sem isso, escolher o MESMO arquivo de
+     novo não dispara `change`, e quem corrigiu a ordem de carga fica
+     clicando sem resposta. */
+  file.onchange = () => { const f = file.files[0]; file.value = ""; if(f) fn(f, drop); };
 }
 
+const CAMPOS = { fatura:["sm-stF","sm-fnF"], sop:["sm-stS","sm-fnS"], diar:["sm-stD","sm-fnD"] };
+
 function carregar(qual, file, drop){
-  const st = $(qual === "fatura" ? "sm-stF" : "sm-stS");
-  $(qual === "fatura" ? "sm-fnF" : "sm-fnS").textContent = file.name;
+  const [idSt, idFn] = CAMPOS[qual];
+  const st = $(idSt);
+  $(idFn).textContent = file.name;
   st.textContent = "Lendo…"; st.className = "st";
   drop.classList.remove("loaded","err");
   const rd = new FileReader();
   rd.onload = e => {
     try{
       const wb = XLSX.read(e.target.result,{type:"array",cellDates:true});
-      const r = qual === "fatura" ? lerFatura(wb) : lerSop(wb);
+      const r = qual === "fatura" ? lerFatura(wb)
+              : qual === "sop"    ? lerSop(wb)
+                                  : lerDiaristasSigo(wb, S.fatura ? S.fatura.unidade : "");
       if(r.erro){ st.textContent = "✗ "+r.erro; st.className = "st bad"; drop.classList.add("err");
-                  S[qual === "fatura" ? "fatura" : "sop"] = null; return pronto(); }
+                  S[qual] = null; return pronto(); }
       if(qual === "fatura"){
         S.fatura = r; S.nomeF = file.name;
         st.textContent = "✓ aba "+r.aba+" · "+r.linhas.length+" linha(s)"
-          + (r.comp ? " · competência "+String(r.comp.m).padStart(2,"0")+"/"+r.comp.y : "");
-      } else {
+          + (r.comp ? " · competência "+String(r.comp.m).padStart(2,"0")+"/"+r.comp.y : "")
+          + (r.unidade ? " · unidade "+r.unidade : "");
+        /* chegou a fatura: o SIGO que estava esperando pode ser lido */
+        if(S.diarPendente && S.dropDiar){
+          const pend = S.diarPendente; S.diarPendente = null;
+          carregar("diar", pend, S.dropDiar);
+        }
+      } else if(qual === "sop"){
         S.sop = r; S.nomeS = file.name;
         st.textContent = "✓ "+r.blocos.length+" bloco(s): "+r.blocos.map(b=>b.rotulo).join(" + ")
           + (r.recusadas.length ? " · "+r.recusadas.length+" aba(s) ignorada(s)" : "");
+      } else {
+        S.diar = r; S.nomeD = file.name;
+        const nId = r.regs.filter(x => x.solic === "id").length;
+        const nMeli = r.regs.filter(x => x.solic === "meli").length;
+        const nSem = r.regs.length - nId - nMeli;
+        st.textContent = "✓ aba "+r.aba+" · "+r.regs.length+" solicitação(ões) · "
+          + nId+" ID · "+nMeli+" cliente"+(nSem ? " · "+nSem+" sem solicitante" : "");
       }
       st.className = "st ok"; drop.classList.add("loaded");
       pronto();
@@ -327,7 +412,10 @@ function rodar(blocos, per, fonte, valorFixo){
     ? buildCompetence(S.fatura.comp.y, S.fatura.comp.m)
     : buildCompetence(ymdParts(per.fim).y, ymdParts(per.fim).m);
 
-  const sim = simularRetorno({ labor:S.fatura.linhas, blocos, periodo:per, comp });
+  const diaristas = S.diar
+    ? S.diar.regs.filter(x => x.data >= per.ini && x.data <= per.fim)
+    : [];
+  const sim = simularRetorno({ labor:S.fatura.linhas, blocos, periodo:per, comp, diaristas });
   if(sim.erro) return falhar($("sm-err"), sim.erro);
   sim.fonte = fonte;
   sim.valorFixo = valorFixo;
@@ -385,6 +473,14 @@ const TIP = {
   diasAlinhados: "Dias em que PREF e S&OP são iguais — nenhuma correção prevista.",
   diasReducao: "Dias com PREF acima do S&OP.",
   diasSub: "Dias com PREF abaixo do S&OP.",
+  diaristas: "Diaristas <b>solicitados no SIGO</b> naquele dia, contados uma vez por pessoa. "
+      + "Não entram os que <b>já constam no LABOR do dia</b> — esses já estão sendo cobrados como "
+      + "quadro fixo, e contá-los de novo seria contar duas vezes. Quem tem estorno no LABOR "
+      + "cobrindo o dia <b>conta</b>: o fixo foi devolvido justamente para pagar a diária. "
+      + "O detalhe separa quem foi pedido pela <b>ID</b> de quem foi pedido pelo <b>cliente</b>.",
+  totalDiaristas: "Soma dos diaristas disponíveis em todos os dias, em pessoa-dia.",
+  abate: "Quanto da falta os diaristas disponíveis dariam para cobrir: em cada dia, o menor entre "
+       + "os disponíveis e a própria falta. Um dia nunca fica positivo por sobra de diarista.",
   diasRevisao: "Dias que não puderam ser reconstruídos — S&OP sem valor para o dia, ou linha do "
              + "Labor que não pôde ser classificada. Saem sem número previsto, de propósito."
 };
@@ -458,6 +554,13 @@ function render(){
     ["Dias com possível subfaturamento", t.subfaturamento, "PREF abaixo do S&OP", t.subfaturamento ? "warn" : "ok", TIP.diasSub]
   ];
   if(t.revisao) cards.push(["Dias para revisão", t.revisao, "não reconstruídos", "warn", TIP.diasRevisao]);
+  if(t.diaristasDisp !== undefined){
+    cards.push(["Diaristas disponíveis", n2(t.diaristasDisp),
+      "pessoa-dia" + (t.diaristasOcupados ? " · "+t.diaristasOcupados+" já no LABOR" : ""),
+      "", TIP.totalDiaristas]);
+    cards.push(["Falta que os diaristas cobririam", n2(t.abatePossivel), "HC-dia",
+      t.abatePossivel > 0 ? "ok" : "", TIP.abate]);
+  }
   $("sm-cards").innerHTML = cards.map(([l,v,s,cls,tip]) =>
     '<div class="sm-card'+(cls?" "+cls:"")+'" data-tip="'+esc(tip)+'"><div class="v">'+esc(String(v))+'</div>'
     + '<div class="l">'+esc(l)+'</div><div class="s">'+esc(s)+'</div></div>').join("");
@@ -483,11 +586,29 @@ function desenharDesvios(dias){
     + '</div></div>').join("");
 }
 
+/* Total do dia, com a origem embaixo. Ganha destaque só quando falta
+   gente — é aí que a disponibilidade responde alguma coisa. */
+function celulaDiaristas(d){
+  const c = d.diaristas;
+  if(!c) return '<td>—</td>';
+  const util = d.gap !== null && d.gap < 0;
+  const partes = [];
+  if(c.dispId)   partes.push(c.dispId+" ID");
+  if(c.dispMeli) partes.push(c.dispMeli+" cliente");
+  if(c.dispSem)  partes.push(c.dispSem+" s/ solic.");
+  return '<td class="sm-diar'+(util && c.disp ? " util" : "")+'">'
+    + '<b>'+n2(c.disp)+'</b>'
+    + (partes.length ? '<small>'+esc(partes.join(" · "))+'</small>' : "")
+    + (c.ocupados ? '<small class="ocup">'+c.ocupados+' já no LABOR</small>' : "")
+    + '</td>';
+}
+
 function desenharTabela(sim){
   const th = (rotulo, tip) => '<th data-tip="'+esc(tip)+'">'+rotulo+'</th>';
   /* A coluna por operação só existe quando há mais de uma: com um bloco
      só — o caso do S&OP fixo — ela repetiria o total logo ao lado. */
   const detalhar = sim.blocos.length > 1;
+  const temDiar = sim.dias.some(d => d.diaristas);
   const cabBlocos = detalhar ? sim.blocos.map(b => th(esc(b),
     "Linha <b>Esperado</b> da aba de <b>"+esc(b)+"</b>, na coluna deste dia. "
     + "A coluna é resolvida para a data completa antes de entrar na soma.")).join("") : "";
@@ -499,6 +620,7 @@ function desenharTabela(sim){
     + '<td class="forte">'+n2(d.pref)+'</td>'
     + '<td class="forte">'+n2(d.qPos)+'</td>'
     + '<td class="'+(d.gap > 0 ? "pos" : d.gap < 0 ? "neg" : "")+'">'+sinal(d.gap)+'</td>'
+    + (temDiar ? celulaDiaristas(d) : "")
     + '<td class="'+(d.correcao < 0 ? "neg" : "")+'">'+sinal(d.correcao)+'</td>'
     + '<td><span class="sm-st st-'+d.status+'">'+esc(SIM_STATUS_LABEL[d.status])+'</span></td>'
     + '<td class="diag">'+esc(d.diagnostico)+'</td></tr>').join("");
@@ -507,6 +629,7 @@ function desenharTabela(sim){
     + th("PREF", tipPref())
     + th("Q Pós", TIP.qPos)
     + th("Gap", TIP.gap)
+    + (temDiar ? th("Diaristas disp.", TIP.diaristas) : "")
     + th("Correção", TIP.corr)
     + th("Status", TIP.status)
     + th("Diagnóstico", TIP.diag)
@@ -624,6 +747,21 @@ function formatarDatas(ws, linhas, coluna){
    ================================================================ */
 bindDrop("sm-dropF","sm-fileF",(f,d) => carregar("fatura",f,d));
 bindDrop("sm-dropS","sm-fileS",(f,d) => carregar("sop",f,d));
+/* O SIGO depende da fatura — é ela que diz de qual unidade ler. Em vez
+   de recusar quem soltou na ordem trocada, o arquivo fica guardado e é
+   lido assim que a fatura chega. */
+bindDrop("sm-dropD","sm-fileD",(f,d) => {
+  S.dropDiar = d;
+  if(!S.fatura){
+    S.diarPendente = f;
+    $("sm-fnD").textContent = f.name;
+    const st = $("sm-stD");
+    st.textContent = "aguardando a fatura — é ela que diz de qual unidade ler o SIGO";
+    st.className = "st warn";
+    return;
+  }
+  carregar("diar",f,d);
+});
 document.querySelectorAll('input[name="sm-fonte"]').forEach(r => r.onchange = pronto);
 const campoFixo = $("sm-sopFixo");
 if(campoFixo) campoFixo.oninput = pronto;
