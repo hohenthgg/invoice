@@ -700,11 +700,15 @@
         O que sobrar sem solução vai para <b>Revisar</b>, e dia abaixo do QF vai para <b>Falta</b> —
         equalizar não inventa gente. <b>Nada é aplicado à fatura</b>: aqui o plano é sugestão, e a
         confirmação de que a movimentação existiu de verdade é da operação.</p>
-      <p><b>Exportar a fatura equalizada.</b> No fim da seção, um botão gera o <code class="inline">.xlsx</code>
-        <b>no layout da fatura</b> — as duas abas que o cliente lê, <code class="inline">Labor</code> e
-        <code class="inline">Diaristas</code>, com as mesmas colunas, larguras, cabeçalho amarelo e bordas
-        do modelo. No <code class="inline">Labor</code>, as retiradas somem, os inícios e fins ajustados já
-        vêm mudados, e uma pausa vira duas linhas da mesma pessoa.</p>
+      <p><b>Exportar a fatura equalizada.</b> No fim da seção, um botão devolve a <b>fatura inteira</b> —
+        as mesmas abas que entraram, com estilos e fórmulas —, com o LABOR e o DIARISTAS reescritos pelo
+        plano: as retiradas somem, os inícios e fins ajustados já vêm mudados, e uma pausa vira duas linhas
+        da mesma pessoa. Não é preciso colar nada de volta à mão.</p>
+      <p><b>A quinta ação: retirar diária acima do QF.</b> As quatro fases do motor mexem no quadro fixo.
+        Se depois delas ainda sobra excesso, ele não é fixo — é diária lançada por cima de um quadro já no
+        teto, e cortar mais gente fixa criaria falta em outro dia. Então sai a diária excedente, nunca mais
+        que o excesso do dia. A ordem é a do abate da aba ABS <b>ao contrário</b>: para cobrir falta gasta-se
+        a interna primeiro; para devolver excesso, sai a interna primeiro e a do cliente fica por último.</p>
       <p><b>O quadro do dia é o fixo do LABOR mais as diárias que a fatura já lança</b> na aba
         DIARISTAS, e é esse total que vai ao confronto com o QF. A diária conta na curva — vaga ocupada
         é vaga ocupada — mas a equalização não mexe nela: quem ela ajusta é o quadro fixo.</p>

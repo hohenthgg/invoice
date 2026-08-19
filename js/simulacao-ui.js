@@ -120,8 +120,9 @@ function lerFatura(wb){
       bruta: r.slice() });
   }
   if(!linhas.length) return { erro:'A aba "'+nome+'" não tem linhas com dado.' };
+  const diarias = lerDiariasDaFatura(wb);
   return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb),
-    diarias: lerDiariasDaFatura(wb),
+    diarias, layoutDiarias: lerDiariasDaFatura.layout || null,
     layout:{ topo: rows.slice(0, h.idx+1), largura: Math.max(h.cels.length,
       ...linhas.map(l => l.bruta.length)),
       cols:{ groot:iG, nome:iN, cargo:iC, conta:iCt, regime:iR, inicio:iI, fim:iF,
@@ -139,6 +140,7 @@ function lerFatura(wb){
    dobrada. Uma vaga ocupada por diária é uma vaga ocupada.
    ================================================================ */
 function lerDiariasDaFatura(wb){
+  lerDiariasDaFatura.layout = null;
   const nome = acharAba(wb,"DIARISTAS","DIARISTA");
   if(!nome) return [];
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,defval:""});
@@ -146,8 +148,13 @@ function lerDiariasDaFatura(wb){
   if(!h) return [];
   const c = h.cels;
   const iG=col(c,"GROOT ID"), iN=col(c,"NOME"), iC=col(c,"CARGO"), iE=col(c,"ESCALA"),
-        iD=col(c,"DATA"), iQ=col(c,"QUANTIDADE");
+        iD=col(c,"DATA"), iQ=col(c,"QUANTIDADE"), iO=col(c,"OBSERVACOES","OBSERVAÇÕES");
   if(iG < 0 || iD < 0) return [];
+  lerDiariasDaFatura.layout = { aba:nome, topo:h.idx+1, largura:Math.max(c.length,
+    ...rows.slice(h.idx+1).map(r => (r||[]).length)),
+    cols:{ groot:iG, nome:iN, cargo:iC, escala:iE, data:iD, qtd:iQ, obs:iO,
+           fixas:["FORNECEDOR","PERIODO","PERIODO - MES/ANO","UNIDADE","DESCRICAO CONTA",
+                  "CONTA CONTABIL","UNIDADE + UF"].map(x => col(c,x)) } };
   const out = [];
   for(let i=h.idx+1;i<rows.length;i++){
     const r = rows[i]; if(!r) continue;
@@ -158,7 +165,8 @@ function lerDiariasDaFatura(wb){
     out.push({ groot, nome:String(r[iN] ?? "").trim(),
       cargo: iC >= 0 ? String(r[iC] ?? "").trim() : "",
       escala: iE >= 0 ? String(r[iE] ?? "").trim() : "",
-      data, quantidade: isFinite(q) && q !== 0 ? q : 1 });
+      data, quantidade: isFinite(q) && q !== 0 ? q : 1,
+      bruta: r.slice(), linha:i+1 });
   }
   return out;
 }
@@ -360,6 +368,10 @@ function carregar(qual, file, drop){
                   S[qual] = null; return pronto(); }
       if(qual === "fatura"){
         S.fatura = r; S.nomeF = file.name;
+        /* O arquivo cru fica guardado: a exportação devolve a FATURA
+           INTEIRA com duas abas trocadas, e as outras onze só continuam
+           lá se vierem do original. */
+        S.fatura.buffer = e.target.result;
         st.textContent = "✓ aba "+r.aba+" · "+r.linhas.length+" linha(s)"
           + (r.comp ? " · competência "+String(r.comp.m).padStart(2,"0")+"/"+r.comp.y : "")
           + (r.unidade ? " · unidade "+r.unidade : "");
@@ -852,6 +864,35 @@ function desenharEqualizacao(){
           + 'como fixo seria cobrar outra coisa.</p></div></div>').join("")
       + '</div>' : "";
 
+  /* O corte de diária é a quinta ação, e vem depois das quatro do motor
+     justamente porque só existe quando elas não deram conta. */
+  const cortes = (plano.corte && plano.corte.cortes.length) ? (() => {
+    const t = plano.corte.totais;
+    const porDia = new Map();
+    for(const c of plano.corte.cortes){
+      if(!porDia.has(c.data)) porDia.set(c.data, []);
+      porDia.get(c.data).push(c);
+    }
+    return '<div class="sm-eqgrupo"><header><span class="sm-eqchip cortar">Retirar diária</span>'
+      + '<span class="n">'+n2(t.cortado)+' pessoa-dia</span></header>'
+      + '<div class="det aberto"><p>Nestes dias o <b>quadro fixo já está no teto</b> e o que passa '
+      + 'do QF é diária lançada por cima. Cortar mais gente fixa criaria falta em outro dia, então '
+      + 'quem sai é a diária excedente — <b>a interna primeiro, a do cliente por último</b> '
+      + '('+t.id+' interna(s) · '+t.meli+' do cliente'
+      + (t.sem ? ' · '+t.sem+' sem solicitante no SIGO' : "")+'), '
+      + 'e nunca mais do que o excesso do dia.</p></div>'
+      + [...porDia.entries()].sort((a,b) => a[0]-b[0]).map(([d,cs]) =>
+          '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
+          + '<div class="cab"><div class="nm">'+fmtYmd(d)
+          + '<small>'+cs.length+' diária(s) acima do QF</small></div>'
+          + '<div class="mud">−'+cs.length+'<small>'+esc(cs.map(c =>
+              c.solic === "id" ? "interna" : c.solic === "meli" ? "cliente" : "s/ solic.")
+              .join(" · "))+'</small></div></div>'
+          + '<div class="det"><p>'+cs.map(c => esc(c.nome || "(sem nome)")
+              + ' <b>'+esc(c.groot)+'</b>').join(' · ')+'</p></div></div>').join("")
+      + '</div>';
+  })() : "";
+
   const listaDias = (o, neg) => Object.keys(o).map(Number).sort((a,b)=>a-b)
     .map(d => fmtShort(d)+" ("+sinal(neg ? -o[d] : o[d])+")").join(" · ");
   const revisar = Object.keys(plano.revisar).length
@@ -873,7 +914,7 @@ function desenharEqualizacao(){
     + '<div class="sm-eqselo">Este plano equaliza <b>matematicamente</b> o Labor ao QF. '
     + 'Confirme se corresponde à movimentação operacional real antes de aplicar — '
     + 'nada é alterado na fatura por aqui.</div>'
-    + grupos + grupoInc + revisar + falta
+    + grupos + cortes + grupoInc + revisar + falta
     + '<div class="vt-acoes-fim"><button class="vt-btn" id="sm-btnExportEq">'
     + 'Exportar fatura equalizada (.xlsx)</button></div>';
   const btn = $("sm-btnExportEq");
@@ -924,25 +965,15 @@ const TPL = {
   centro:     { horizontal:"center", vertical:"middle" },
   centroWrap: { horizontal:"center", vertical:"middle", wrapText:true }
 };
-const TPL_LABOR = {
-  colunas:  ["GROOT ID","NOME","MATRICULA","REGIME DE CONTRATO ","CARGO","DATA DE INÍCIO",
-             "DATA FIM","% RATEIO","DIAS TRABALHADOS X FOLGA","ESCALA"],
-  larguras: [7.54296875,39.1796875,9.1796875,17.08984375,17.26953125,
-             11.6328125,8.6328125,7.453125,21.1796875,17],
-  formatos: { 6:"mm-dd-yy", 7:"mm-dd-yy", 8:"0%", 9:"0%" },
-  bordaCorpo: "cinza", cabSemFundo: true
-};
-const TPL_DIARISTAS = {
-  colunas:  ["GROOT ID","NOME","CARGO","ESCALA","DATA","QUANTIDADE"],
-  larguras: [7.54296875,35.26953125,17.26953125,17,8.6328125,10.1796875],
-  formatos: { 5:"mm-dd-yy" },
-  cabWrap:  true, fillCorpo: true, bordaCorpo: "clara"
-};
 /* As abas de documentação usam o mesmo cabeçalho amarelo — é o mesmo
    arquivo —, mas texto à esquerda: são frases, não números. */
 const TPL_DOC = { esquerda:true };
 
 const ymdParaData = v => { const p = ymdParts(v); return new Date(Date.UTC(p.y, p.m-1, p.d)); };
+/* Data → serial do Excel, pelos componentes UTC: sem fuso, sem deriva. */
+const SERIAL0 = Date.UTC(1899,11,30);
+const dataParaSerial = d => Math.round(
+  (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - SERIAL0)/864e5);
 const semAcento = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
 /* GROOT e matrícula são número na fatura; sair como texto muda a cara
    da coluna e quebra ordenação. */
@@ -1006,44 +1037,152 @@ function escalaDoDiarista(unidade){
   return ops.length === 1 ? escalaHorarioDe(ops[0]) : "";
 }
 
+/* A FATURA INTEIRA, COM DUAS ABAS TROCADAS
+
+   O arquivo que sai é o arquivo que entrou: as treze abas do template,
+   com os estilos, as fórmulas e tudo o que o app nem lê — e o LABOR e o
+   DIARISTAS reescritos com o resultado do plano. Exportar só duas abas
+   soltas obrigava a colar de volta à mão, e colar à mão é onde a
+   correção volta a virar erro.
+
+   Por isso o arquivo cru fica guardado na carga: ExcelJS o abre inteiro,
+   as duas abas são reescritas EM CIMA das próprias, herdando o estilo da
+   linha que já estava lá, e as abas de documentação entram no fim. */
+function estiloDaLinha(ws, linha, largura){
+  const est = [];
+  const r = ws.getRow(linha);
+  for(let i=1;i<=largura;i++){
+    const c = r.getCell(i);
+    est.push({ font:c.font, fill:c.fill, border:c.border, alignment:c.alignment, numFmt:c.numFmt });
+  }
+  return est;
+}
+
+/** Troca os dados de uma aba mantendo o cabeçalho e o visual dela.
+ *
+ *  Escreve NO LUGAR, célula a célula, em vez de apagar as linhas e
+ *  recriá-las: `spliceRows` não remove nada nesta fatura — as linhas
+ *  carregam fórmula, e a remoção sai silenciosamente sem efeito, o que
+ *  fazia o arquivo sair com o Labor DUPLICADO (170 viravam 340). Escrever
+ *  por cima ainda tem a vantagem de cada célula guardar o próprio
+ *  formato: copiar o formato de uma linha-modelo transformava número em
+ *  data em coluna com máscara de data.
+ *
+ *  Atribuir um valor a uma célula com fórmula troca a fórmula pelo valor,
+ *  que é o que se quer — o arquivo tem de sair com o resultado do plano,
+ *  não com a conta que produzia o número antigo. */
+function reescreverAba(ws, linhasCabecalho, dados, largura){
+  const est = estiloDaLinha(ws, linhasCabecalho + 1, largura);
+  const antigas = Math.max(0, ws.rowCount - linhasCabecalho);
+  const total = Math.max(antigas, dados.length);
+  for(let i=0;i<total;i++){
+    const linha = ws.getRow(linhasCabecalho + 1 + i);
+    const vals = dados[i];
+    const nova = i >= antigas;
+    for(let c=1;c<=largura;c++){
+      const cel = linha.getCell(c);
+      const v = vals ? vals[c-1] : null;
+      /* Data vira SERIAL, nunca objeto Date: o ExcelJS grava Date pelo
+         fuso local — escrito de São Paulo, uma data de meia-noite UTC
+         saía como 03:00:28 do mesmo dia, e num fuso a leste sairia no
+         dia anterior. O serial não tem fuso, e a célula já traz o
+         formato de data do próprio arquivo. */
+      cel.value = (v === undefined || v === "") ? null
+                : (v instanceof Date ? dataParaSerial(v) : v);
+      if(nova){
+        const e = est[c-1];
+        if(e){
+          if(e.font) cel.font = e.font;
+          if(e.fill) cel.fill = e.fill;
+          if(e.border) cel.border = e.border;
+          if(e.alignment) cel.alignment = e.alignment;
+          if(e.numFmt) cel.numFmt = e.numFmt;
+        }
+        if(v instanceof Date && !cel.numFmt) cel.numFmt = "dd/mm/yyyy";
+      }
+    }
+  }
+}
+
 async function exportarEqualizado(){
   const sim = S.sim, plano = S.plano, fat = S.fatura;
   if(!sim || !plano || plano.erro || !fat) return;
+  if(!fat.buffer){ falhar($("sm-err"), "Recarregue a fatura: o arquivo original é necessário "
+    + "para devolver a planilha inteira com as abas trocadas."); return; }
+  const lay = fat.layout, C = lay.cols;
   const dentro = simClassificarLinhas(fat.linhas).dentro;
   const acaoDe = new Map();
   plano.acoes.forEach(a => acaoDe.set(dentro[a.id], a));
   const dt = v => isValidYmd(v) ? ymdParaData(v) : null;
 
-  /* ---- aba Labor: o quadro fixo depois do plano ---- */
+  /* ---- LABOR: o quadro fixo depois do plano ---- */
   const linhasLabor = [];
   let mantidas = 0, removidas = 0, ajustadas = 0;
   for(const l of fat.linhas){
     const a = acaoDe.get(l);
+    if(!a){ mantidas++; linhasLabor.push(l.bruta.slice()); continue; }
     const segs = segmentosApos(l, a);
     if(!segs.length){ removidas++; continue; }
-    if(a) ajustadas++; else mantidas++;
-    for(const seg of segs) linhasLabor.push([
-      numSePuder(l.groot), l.nome, numSePuder(l.matricula), l.regime, l.cargo,
-      dt(seg.ini), dt(seg.fim),
-      (typeof l.rateio === "number" && isFinite(l.rateio)) ? l.rateio : 1,
-      l.diasFolga, l.escala ]);
+    ajustadas++;
+    for(const seg of segs){
+      const row = l.bruta.slice();
+      if(C.inicio >= 0) row[C.inicio] = dt(seg.ini) || "";
+      if(C.fim >= 0)    row[C.fim]    = dt(seg.fim) || "";
+      linhasLabor.push(row);
+    }
   }
 
-  /* ---- aba Diaristas: quem entra para cobrir a falta ---- */
+  /* ---- DIARISTAS: as da fatura menos as cortadas, mais as novas ---- */
+  const layD = fat.layoutDiarias;
   const incluir = $("sm-eqIncluir");
   const inc = (incluir && incluir.checked) ? plano.inclusoes : null;
   const escala = escalaDoDiarista(fat.unidade);
-  /* As diárias que a fatura JÁ lança saem primeiro, como estão: o
-     arquivo é a fatura equalizada inteira, não só o que o app acrescentou.
-     Substituí-las apagaria cobrança legítima. */
-  const jaNaFatura = (fat.diarias || []).filter(d =>
-    d.data >= sim.periodo.ini && d.data <= sim.periodo.fim);
-  const linhasDiar = jaNaFatura
-    .slice().sort((a,b) => a.data - b.data || String(a.nome).localeCompare(String(b.nome)))
-    .map(d => [numSePuder(d.groot), d.nome, d.cargo || "Diarista",
-               d.escala || escala, ymdParaData(d.data), d.quantidade]);
-  if(inc) for(const p of inc.pessoas) for(const d of p.dias)
-    linhasDiar.push([numSePuder(p.groot), p.nome, "Diarista", escala, ymdParaData(d), 1]);
+
+  /* Cada corte tira UMA pessoa-dia; casar por (groot, data) e consumir
+     um por vez evita apagar duas linhas quando a fatura repete a pessoa
+     no mesmo dia. */
+  const aCortar = new Map();
+  for(const c of (plano.corte ? plano.corte.cortes : []))
+    aCortar.set(c.groot+"|"+c.data, (aCortar.get(c.groot+"|"+c.data) || 0) + 1);
+
+  const linhasDiar = [];
+  let cortadas = 0;
+  for(const d of (fat.diarias || [])){
+    const k = simGrootNum(d.groot)+"|"+d.data;
+    if(aCortar.get(k) > 0){ aCortar.set(k, aCortar.get(k)-1); cortadas++; continue; }
+    linhasDiar.push(d.bruta ? d.bruta.slice() : []);
+  }
+  let novas = 0;
+  if(inc && layD){
+    const CD = layD.cols;
+    const constante = idx => {
+      if(idx < 0) return "";
+      let achou;
+      for(const d of (fat.diarias || [])){
+        const x = d.bruta ? d.bruta[idx] : "";
+        if(x === "" || x === null || x === undefined) continue;
+        const k = x instanceof Date ? +x : x;
+        if(achou === undefined) achou = { k, x };
+        else if(achou.k !== k) return "";
+      }
+      return achou ? achou.x : "";
+    };
+    const fixas = CD.fixas.map(i => [i, constante(i)]);
+    for(const p of inc.pessoas) for(const d of p.dias){
+      const row = new Array(layD.largura).fill("");
+      fixas.forEach(([i,v]) => { if(i >= 0) row[i] = v; });
+      if(CD.groot >= 0)  row[CD.groot]  = numSePuder(p.groot);
+      if(CD.nome >= 0)   row[CD.nome]   = p.nome;
+      if(CD.cargo >= 0)  row[CD.cargo]  = "Diarista";
+      if(CD.escala >= 0) row[CD.escala] = escala;
+      if(CD.data >= 0)   row[CD.data]   = ymdParaData(d);
+      if(CD.qtd >= 0)    row[CD.qtd]    = 1;
+      if(CD.obs >= 0)    row[CD.obs]    = "INCLUIDO PELA EQUALIZACAO - diarista "
+        + (p.solic === "id" ? "ID" : p.solic === "meli" ? "do cliente" : "sem solicitante")
+        + " no SIGO";
+      linhasDiar.push(row); novas++;
+    }
+  }
 
   /* ---- o dossiê do que foi feito ---- */
   const eqLinhas = plano.acoes.map(a => [
@@ -1051,6 +1190,12 @@ async function exportarEqualizado(){
     dt(a.linha.inicio), dt(a.linha.fim), dt(a.novoInicio), dt(a.novoFim),
     a.pausas.map(p => fmtYmd(p.fim)+" a "+fmtYmd(p.ini)).join(" · "),
     -a.impacto.hc, a.impacto.dias, a.motivo]);
+  for(const c of (plano.corte ? plano.corte.cortes : []))
+    eqLinhas.push(["Retirar diária", numSePuder(c.groot), c.nome, "Diarista",
+      dt(c.data), dt(c.data), null, null, "", -c.quantidade, 1,
+      "Diária lançada acima do QF num dia em que o quadro fixo já estava no teto. "
+      + "Sai a interna primeiro; a do cliente é a última ("
+      + (c.solic === "id" ? "interna" : c.solic === "meli" ? "do cliente" : "sem solicitante no SIGO")+")."]);
   if(!eqLinhas.length) eqLinhas.push(["(nada a ajustar)"]);
 
   const incLinhas = [];
@@ -1062,18 +1207,9 @@ async function exportarEqualizado(){
   if(!incLinhas.length) incLinhas.push(["(ninguém a incluir)"]);
 
   const revLinhas = [];
-  const diariasDe = {};
-  for(const d of plano.dias) diariasDe[d.data] = d.diarias || 0;
   for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
-    /* Excesso que cabe dentro das diárias do dia tem outra explicação:
-       o quadro fixo já está no teto e o que passa é diária já lançada,
-       em que a equalização não mexe. Dizer "partir um contrato" aí
-       mandaria o usuário procurar no lugar errado. */
     revLinhas.push(["Excesso sem solução", dt(+d), q,
-      diariasDe[+d] >= q
-        ? "O quadro fixo já está no teto; o que passa do QF são as "+diariasDe[+d]
-          + " diária(s) já lançadas neste dia, em que a equalização não mexe."
-        : "Zerar exigiria partir um contrato — avaliar caso a caso."]);
+      "Nem as quatro ações sobre o quadro fixo nem a retirada de diária resolveram este dia."]);
   if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
     { if(c.descoberto > 0) revLinhas.push(["Falta descoberta", dt(+d), c.descoberto,
       "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
@@ -1081,56 +1217,60 @@ async function exportarEqualizado(){
     revLinhas.push(["Falta", dt(+d), q, "Quadro abaixo do QF; nenhuma inclusão foi gerada."]);
   if(!revLinhas.length) revLinhas.push(["(nada a revisar)"]);
 
+  const fechados = plano.dias.filter(d => d.difPos === 0).length;
   const metaLinhas = [
-    ["Arquivo", "Labor equalizado gerado pela Validação Template"],
+    ["Arquivo", "Fatura equalizada pela Validação Template — as abas "+fat.aba+" e "
+      + (layD ? layD.aba : "DIARISTAS")+" foram reescritas; as demais saíram como estavam"],
     ["Fatura de origem", S.nomeF],
     ["Unidade", fat.unidade || "—"],
     ["Período", fmtYmd(plano.periodo.ini)+" a "+fmtYmd(plano.periodo.fim)],
     ["QF do cliente (alvo)", plano.alvo],
+    ["Dias que fecham no QF", fechados+" de "+plano.dias.length],
     ["Permitir adiar início", plano.opcoes.permitirAdiarInicio ? "sim" : "não"],
     ["Pausar a partir de", plano.opcoes.pausaDesde ? fmtYmd(plano.opcoes.pausaDesde) : "não"],
-    ["Linhas mantidas sem alteração", mantidas],
-    ["Linhas ajustadas", ajustadas],
-    ["Linhas removidas", removidas],
-    ["Linhas na aba Diaristas", linhasDiar.length],
-    ["  · diárias que a fatura já tinha", jaNaFatura.length],
-    ["  · diárias acrescentadas pelo app", linhasDiar.length - jaNaFatura.length],
-    ["Pessoas incluídas", inc ? inc.totais.pessoas : 0],
+    ["", ""],
+    ["Linhas do LABOR mantidas", mantidas],
+    ["Linhas do LABOR ajustadas", ajustadas],
+    ["Linhas do LABOR removidas", removidas],
+    ["Diárias da fatura mantidas", linhasDiar.length - novas],
+    ["Diárias retiradas por estar acima do QF", cortadas],
+    ["  · internas", plano.corte ? plano.corte.totais.id : 0],
+    ["  · do cliente", plano.corte ? plano.corte.totais.meli : 0],
+    ["  · sem solicitante no SIGO", plano.corte ? plano.corte.totais.sem : 0],
+    ["Diárias acrescentadas para cobrir falta", novas],
     ["  · da ID", inc ? inc.totais.id : 0],
     ["  · do cliente", inc ? inc.totais.meli : 0],
-    ["  · sem solicitante", inc ? inc.totais.sem : 0],
-    ["Falta coberta (pessoa-dia)", inc ? inc.totais.incluido : 0],
     ["Pessoa-dia conferidos contra o SIGO", inc ? inc.totais.verificados : 0],
     ["  · recusados por não estar na base no dia", inc ? inc.totais.recusados : 0],
     ["Falta descoberta (pessoa-dia)", inc ? inc.totais.descoberto : 0],
     ["Excesso antes do plano (HC-dia)", plano.totais.excessoAntes],
     ["Excesso depois do plano (HC-dia)", plano.totais.excessoDepois],
-    ["Diárias já lançadas (pessoa-dia)", plano.totais.diarias],
     ["", ""],
-    ["AVISO", "As alterações equalizam MATEMATICAMENTE o Labor ao QF. Confirme se "
+    ["AVISO", "As alterações equalizam MATEMATICAMENTE o quadro ao QF. Confirme se "
       + "correspondem à movimentação operacional real antes de enviar."],
-    ["Onde está a inclusão", "Quem entra para cobrir a falta é DIARISTA e está na aba "
-      + "Diaristas, uma linha por pessoa-dia — não no Labor. Por isso o Labor desta "
-      + "exportação fica ABAIXO do QF nos dias cobertos por diária: o quadro fixo é "
-      + "esse mesmo, e a diferença é diária."],
-    ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada no dia e sem cobrança "
-      + "naquele dia — nem no LABOR, nem como diária já lançada nesta fatura. Prioridade "
-      + "para os diaristas da ID; o do cliente só entra depois de esgotados os internos."],
-    ["Conferência das datas", "Cada pessoa-dia acrescentado foi reconferido contra a base do "
-      + "SIGO, linha a linha, ANTES de virar linha do arquivo: ninguém entra num dia em que "
-      + "não foi solicitado, e dia sem solicitação não é preenchido para emendar intervalo. "
-      + "O que não passasse seria descartado e contado acima."],
-    ["O que é o quadro do dia", "Quadro fixo do LABOR MAIS as diárias já lançadas na fatura. "
-      + "É esse total que vai ao confronto com o QF: a vaga ocupada por diária é vaga "
-      + "ocupada, e a falta do dia já vem descontada dela."],
-    ["Campos em branco", "Matrícula, regime, dias trabalhados e turno das pessoas incluídas "
-      + "não são deduzíveis do SIGO e por isso não são escritos. A ESCALA é a da operação "
-      + "da unidade; unidade que casa com mais de uma operação sai em branco."]];
+    ["O que é o quadro do dia", "Quadro fixo do LABOR MAIS as diárias da aba de diaristas. "
+      + "É esse total que vai ao confronto com o QF."],
+    ["Ordem das ações", "Primeiro as quatro do motor sobre o quadro FIXO — retirar linha, adiar "
+      + "início, pausar/retomar, antecipar fim —, nenhuma delas criando falta em outro dia. O que "
+      + "sobrar de excesso depois disso não é fixo: é diária acima do QF, e sai por último."],
+    ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada NAQUELE DIA e sem cobrança "
+      + "no dia — nem no LABOR, nem como diária já lançada. Prioridade para os diaristas da ID; "
+      + "o do cliente só entra depois de esgotados os internos. Cada pessoa-dia é reconferido "
+      + "contra a base antes de virar linha."],
+    ["Campos em branco", "Matrícula, regime, turno e valores das linhas acrescentadas não são "
+      + "deduzíveis do SIGO e por isso não são escritos. A ESCALA é a da operação da unidade."]];
 
+  /* ---- monta o arquivo por cima do original ---- */
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Validação Template";
-  abaEstilizada(wb, "Labor", TPL_LABOR, linhasLabor);
-  abaEstilizada(wb, "Diaristas", TPL_DIARISTAS, linhasDiar);
+  await wb.xlsx.load(fat.buffer);
+  const wsL = wb.getWorksheet(fat.aba);
+  if(wsL) reescreverAba(wsL, lay.topo.length, linhasLabor, lay.largura);
+  if(layD){
+    const wsD = wb.getWorksheet(layD.aba);
+    if(wsD) reescreverAba(wsD, layD.topo, linhasDiar, layD.largura);
+  }
+  for(const nome of ["EQUALIZACAO","INCLUSOES","REVISAR","METADADOS"])
+    if(wb.getWorksheet(nome)) wb.removeWorksheet(wb.getWorksheet(nome).id);
   abaEstilizada(wb, "EQUALIZACAO", { ...TPL_DOC,
     colunas:["Ação","GROOT ID","Nome","Cargo","Início atual","Fim atual","Início novo",
              "Fim novo","Pausas","HC","Dias","Motivo"],
@@ -1139,14 +1279,13 @@ async function exportarEqualizado(){
     colunas:["GROOT ID","Nome","Solicitante","De","Até","Dias","Observação"],
     larguras:[12,34,16,12,12,7,52] }, incLinhas);
   abaEstilizada(wb, "REVISAR", { ...TPL_DOC,
-    colunas:["Tipo","Data","Quantidade","Observação"],
-    larguras:[22,12,12,72] }, revLinhas);
+    colunas:["Tipo","Data","Quantidade","Observação"], larguras:[22,12,12,72] }, revLinhas);
   abaEstilizada(wb, "METADADOS", { ...TPL_DOC,
-    colunas:["Campo","Valor"], larguras:[34,110] }, metaLinhas);
+    colunas:["Campo","Valor"], larguras:[40,110] }, metaLinhas);
 
   const per = String(fat.comp ? fat.comp.y*100 + fat.comp.m : "");
   /* Acento no `download` de um blob: faz o Chromium descartar o nome. */
-  const nome = semAcento("Labor_equalizado_"+(fat.unidade || "fatura")+"_"+per+".xlsx")
+  const nome = semAcento("Fatura_equalizada_"+(fat.unidade || "fatura")+"_"+per+".xlsx")
     .replace(/[^\w.\-]+/g,"_");
   const buf = await wb.xlsx.writeBuffer();
   const link = document.createElement("a");

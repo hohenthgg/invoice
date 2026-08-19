@@ -658,5 +658,88 @@ secao("Diárias já lançadas na fatura");
         "diária em OUTRO dia não bloqueia a pessoa — a ocupação é por dia");
 }
 
+/* ================================================================
+   FASE 5 — RETIRAR A DIÁRIA ACIMA DO QF
+
+   As quatro fases do motor mexem no quadro FIXO. Quando elas terminam e
+   ainda sobra excesso, o excesso não é mais fixo — é diária lançada por
+   cima de um quadro que já está no teto, e cortar mais gente fixa para
+   compensar criaria falta em outro dia.
+
+   O que morde aqui é a ORDEM: um total certo com a repartição errada
+   devolve a diária do cliente enquanto sobra interna, e o total não
+   denuncia. É o mesmo defeito do abate "ambos", pelo avesso.
+   ================================================================ */
+secao("Retirar diária acima do QF");
+
+const { simCortarDiarias } = ctx;
+const dia = (groot, data, extra) => ({ groot, data, quantidade:1, nome:"P"+groot, ...extra });
+
+{
+  const D3 = ymd(2026,7,24);
+  const r = simCortarDiarias({ residual:{ [D3]:2 },
+    diarias:[dia("1",D3), dia("2",D3), dia("3",D3), dia("4",D3)],
+    diaristas:[diar("1",D3,"meli"), diar("2",D3,"id"), diar("3",D3,"meli"), diar("4",D3,"id")] });
+  check(r.totais.cortado === 2, "corta exatamente o excesso do dia — nem mais, nem menos");
+  check(r.totais.id === 2 && r.totais.meli === 0,
+        "sai a interna primeiro; a do cliente é a última a sair",
+        r.totais.id+" internas, "+r.totais.meli+" do cliente");
+}
+{
+  const D3 = ymd(2026,7,24);
+  const r = simCortarDiarias({ residual:{ [D3]:3 },
+    diarias:[dia("1",D3), dia("2",D3), dia("3",D3)],
+    diaristas:[diar("1",D3,"meli"), diar("2",D3,"id"), diar("3",D3,"meli")] });
+  check(r.totais.id === 1 && r.totais.meli === 2,
+        "esgotada a interna, a do cliente entra no corte — e só o que faltou");
+}
+{
+  /* Nunca passar do excesso: com 5 de excesso e 2 diárias, saem 2 e o
+     resto fica declarado. Cortar quadro fixo aqui criaria falta. */
+  const D3 = ymd(2026,7,24);
+  const r = simCortarDiarias({ residual:{ [D3]:5 },
+    diarias:[dia("1",D3), dia("2",D3)], diaristas:[] });
+  check(r.totais.cortado === 2 && r.totais.restante === 3,
+        "só há o que cortar até acabar a diária; o resto sai declarado",
+        JSON.stringify(r.totais));
+}
+{
+  const D3 = ymd(2026,7,24), D4 = ymd(2026,7,25);
+  const r = simCortarDiarias({ residual:{ [D3]:1 },
+    diarias:[dia("1",D4), dia("2",D4)], diaristas:[] });
+  check(r.totais.cortado === 0 && r.totais.restante === 1,
+        "diária de OUTRO dia não serve para resolver este — o corte é por dia");
+}
+{
+  const r = simCortarDiarias({ residual:{}, diarias:[dia("1",ymd(2026,7,24))], diaristas:[] });
+  check(r.cortes.length === 0, "dia sem excesso não perde diária nenhuma");
+}
+{
+  /* Pelo caminho completo: o plano corta a diária só depois de as quatro
+     fases terem feito o que podiam no quadro fixo. */
+  /* Quadro fixo EXATAMENTE no QF o período inteiro: nenhuma das quatro
+     fases pode cortar ninguém sem furar outro dia. O excesso dos três
+     dias com diária é, por construção, só diária. */
+  const gente2 = [];
+  for(let i=0;i<QF;i++) gente2.push({ groot:"95"+String(i).padStart(4,"0"),
+    nome:"FIXO "+i, matricula:"M"+i, cargo:"Auxiliar de Apoio Log I", conta:"LABOR DIRETO",
+    inicio:PER.ini, fim:null, rateio:1, linha:i+2 });
+  const diarias = [];
+  for(const d of [ymd(2026,7,20), ymd(2026,7,21), ymd(2026,8,1)])
+    for(let k=0;k<5;k++) diarias.push({ groot:"92"+k, data:d, quantidade:1 });
+  const r = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
+  check(r.acoes.length === 0,
+        "o motor não mexe no quadro fixo quando cortar criaria falta em outro dia",
+        JSON.stringify(r.acoes.map(a => a.tipo)));
+  check(r.corte.totais.cortado === 15, "e o excesso sai inteiro em diária: 3 dias × 5",
+        String(r.corte.totais.cortado));
+  check(r.corte.cortes.every(c => diarias.some(d => d.groot === c.groot && d.data === c.data)),
+        "…e toda diária cortada existia mesmo na fatura, naquele dia");
+  check(r.dias.every(d => d.difPos <= 0),
+        "depois do plano inteiro nenhum dia fica acima do QF",
+        JSON.stringify(r.dias.filter(d => d.difPos > 0).map(d => d.data+":"+d.difPos)));
+  check(r.totais.excessoDepois === 0, "e o excesso do período zera");
+}
+
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);

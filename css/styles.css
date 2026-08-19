@@ -1388,3 +1388,4 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 .sm-eqgrupo .det .dias{font-family:var(--mono);font-size:.73rem;color:var(--ink);margin-top:6px}
 .sm-eqchip.incluir{background:var(--ok);color:#04240f}
 .sm-tabela td .sm-comp{display:block;color:var(--mut);font-size:.66rem;font-weight:400;margin-top:2px;white-space:nowrap}
+.sm-eqchip.cortar{background:#ff8a5c;color:#3a1204}
