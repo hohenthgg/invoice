@@ -38,17 +38,18 @@
        operador; liderança e indiretos ficam fora por não estarem lá;
      · DATA DE INÍCIO legível, e o dia dentro de [início, fim], com fim
        vazio valendo até o fim do período;
-     · o % RATEIO entra COM O SINAL QUE TEM.
+     · % RATEIO MAIOR QUE ZERO.
 
-   O sinal é onde este módulo já esteve errado. O PREF é uma quantidade
-   FATURADA — o que a fatura apresenta, líquido dos estornos — e não um
-   retrato do turno. Excluir os rateios negativos por serem "ajuste
-   financeiro" inflava o PREF: nesta fatura eram 30 linhas de estorno,
-   que somavam até 30 HC a mais num único dia de julho.
+   O rateio ≤ 0 é ESTORNO: devolução do que já foi cobrado, e não gente
+   no quadro do dia. O confronto com o S&OP e com o QF é sobre quantas
+   pessoas o dia tem, então o estorno não é relevante para ele e fica
+   fora da contagem — as linhas seguem no arquivo exportado, apenas não
+   entram na conta.
 
-   As duas leituras continuam disponíveis: `pref` é o líquido, que vai
-   ao confronto com o S&OP, e `bruto` conta só os positivos — quanta
-   gente estava no turno. Só o primeiro é o PREF.
+   Isto vale nas DUAS abas. A Fusão de Linhas aplica a mesma regra ao
+   montar o `elig` do seu Labor, porque as duas reconstroem o mesmo
+   número a partir do mesmo arquivo: divergir aqui daria dois PREFs
+   para a mesma fatura.
    ================================================================ */
 "use strict";
 
@@ -74,7 +75,8 @@ const SIM_FORA = {
      lista de cargos, como na Fusão de Linhas. */
   INDIRETO:    { chave:"indireto",  texto:"cargo de liderança/indiretos — não entra no PREF" },
   CARGO:       { chave:"cargo",     texto:"cargo fora da lista do PREF" },
-  SEM_INICIO:  { chave:"sem_inicio",texto:"sem DATA DE INÍCIO legível" }
+  SEM_INICIO:  { chave:"sem_inicio",texto:"sem DATA DE INÍCIO legível" },
+  ESTORNO:     { chave:"estorno",   texto:"rateio ≤ 0 — estorno, não é gente no quadro" }
 };
 
 const simNorm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
@@ -89,17 +91,10 @@ const simEhAbs = l => simNorm(l.groot) === "abs" || /absenteismo/.test(simNorm(l
    do PREF, DATA DE INÍCIO legível, fora a linha de ABS — e o rateio
    entra COM O SINAL QUE TEM.
 
-   O sinal é o ponto, e é onde esta função já esteve errada. O PREF é
-   uma quantidade FATURADA, não um retrato do turno: é o que a fatura
-   apresenta ao cliente, líquido dos estornos. Uma linha de rateio -1
-   referente a 27/07→31/07 reduz o que está sendo cobrado naqueles
-   dias, e ignorá-la fazia o PREF sair alto — 30 linhas de estorno
-   inflavam julho inteiro, até 30 HC num único dia.
 
-   O headcount operacional bruto (só os positivos) continua sendo
-   calculado e sai como `prefBruto`, porque as duas leituras são úteis:
-   uma responde "quanto estou cobrando", a outra "quanta gente estava
-   no turno". Só a primeira é o PREF.
+   O rateio ≤ 0 fica fora: é estorno, devolução do que já foi cobrado,
+   não pessoa no quadro. A linha continua no arquivo — o que ela não faz
+   é entrar na contagem que vai ao confronto com o S&OP e com o QF.
    ================================================================ */
 function simClassificarLinhas(labor){
   const dentro = [], fora = [];
@@ -110,6 +105,7 @@ function simClassificarLinhas(labor){
     if(!CARGOS_PREF.includes(simNorm(l.cargo))){
       marca(simEhIndireto(l.conta) ? SIM_FORA.INDIRETO : SIM_FORA.CARGO); continue;
     }
+    if(simRateio(l) <= 0){ marca(SIM_FORA.ESTORNO); continue; }
     dentro.push(l);
   }
   return { dentro, fora };
@@ -152,12 +148,14 @@ function simOcupadoNoLabor(labor){
     if(!porGroot.has(g)) porGroot.set(g, []);
     porGroot.get(g).push(l);
   }
+  /* Mesma regra do PREF: o lançamento de rateio ≤ 0 não conta. Se a
+     linha positiva está ativa no dia, a pessoa está cobrada — e o
+     estorno ao lado não a devolve para o mercado. */
   return (g, d) => {
     const ls = porGroot.get(g);
     if(!ls) return false;
-    let liq = 0;
-    for(const l of ls) if(simAtivo(l,d)) liq += simRateio(l);
-    return liq > 0;
+    for(const l of ls) if(simAtivo(l,d) && simRateio(l) > 0) return true;
+    return false;
   };
 }
 
@@ -281,12 +279,12 @@ function simularRetorno(dados){
       + "então NÃO foram somadas — o PREF pode estar subestimado nos dias em que elas estão ativas. "
       + "Confirme se o cargo entra no PREF antes de usar a previsão." });
   }
-  const nNeg = dentro.filter(l => simRateio(l) < 0).length;
+  const nNeg = fora.filter(f => f.motivo.chave === "estorno").length;
   if(nNeg) avisos.push({ tipo:"estorno", texto:
-    nNeg+" linha(s) do PREF têm rateio negativo e entram SUBTRAINDO, como na Fusão de Linhas. "
-    + "São estornos e ajustes retroativos, e o PREF é a quantidade faturada — o que a fatura "
-    + "apresenta, líquido deles. O headcount bruto do turno, só com os lançamentos positivos, "
-    + "aparece separado em cada dia." });
+    nNeg+" linha(s) com % RATEIO ≤ 0 ficaram FORA da contagem. São estornos e ajustes "
+    + "retroativos — devolução do que já foi cobrado, não gente no quadro do dia —, e o "
+    + "confronto com o S&OP é sobre quantas pessoas o dia tem. As linhas continuam no "
+    + "arquivo exportado, apenas não entram na conta." });
   const nSemInicio = fora.filter(f => f.motivo.chave === "sem_inicio").length;
   if(nSemInicio) avisos.push({ tipo:"indefinida", texto:
     nSemInicio+" linha(s) ficaram fora do PREF por não ter DATA DE INÍCIO legível. Sem a data "
@@ -323,7 +321,7 @@ function simularRetorno(dados){
       if(!simAtivo(l,d)) continue;
       const r = simRateio(l);
       pref += r;
-      if(r > 0) bruto += r;
+      bruto += r;                 // `dentro` já não tem rateio ≤ 0
     }
     pref = Math.round(pref*1e6)/1e6;
     bruto = Math.round(bruto*1e6)/1e6;

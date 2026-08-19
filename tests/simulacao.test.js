@@ -141,36 +141,45 @@ check(abaixo.totais.hcEmRisco === 0 && abaixo.totais.hcAbaixo === 6*31,
       "…e o subfaturamento é contado separado, sem abater o risco");
 
 /* ================================================================
-   6. O estorno entra no PREF, subtraindo
+   6. O estorno NÃO entra na contagem
+
+   Rateio ≤ 0 é devolução do que já foi cobrado, não gente no quadro do
+   dia. O confronto com o S&OP pergunta quantas PESSOAS o dia tem, e
+   para essa pergunta o estorno não é relevante — a linha continua no
+   arquivo, apenas fora da conta.
    ================================================================ */
-console.log("\nO PREF é o líquido: o rateio entra com o sinal que tem");
+console.log("\nO estorno fica fora: rateio ≤ 0 não é pessoa no quadro");
 
 const comRetro = rodar([
   P({ groot:"D1" }),
   P({ groot:"D2" }),
-  /* estorno de 27/07 a 31/07: reduz o que a fatura apresenta nesses dias */
+  /* estorno de 27/07 a 31/07 */
   P({ groot:"D3", rateio:-1, inicio: ymd(2026,7,27), fim: ymd(2026,7,31) })
 ], [bloco("SVC",2)]);
-check(noDia(comRetro, ymd(2026,7,29)).pref === 1,
-      "no dia coberto pelo estorno o PREF cai de 2 para 1 — é o que a fatura cobra",
+check(noDia(comRetro, ymd(2026,7,29)).pref === 2,
+      "no dia coberto pelo estorno o PREF continua 2 — o estorno não desconta pessoa",
       String(noDia(comRetro, ymd(2026,7,29)).pref));
 check(noDia(comRetro, ymd(2026,7,26)).pref === 2,
       "fora do período do estorno o PREF fica intacto",
       String(noDia(comRetro, ymd(2026,7,26)).pref));
-check(noDia(comRetro, ymd(2026,7,29)).bruto === 2,
-      "…e o BRUTO do mesmo dia continua 2: no turno havia duas pessoas",
-      String(noDia(comRetro, ymd(2026,7,29)).bruto));
-check(comRetro.avisos.some(a => a.tipo === "estorno"),
-      "a presença de estornos vira aviso, para a queda no PREF não surpreender");
-check(comRetro.totais.estornos === 1,
-      "…e o total de linhas de estorno é informado", String(comRetro.totais.estornos));
-
-/* Este é o defeito concreto que a mudança conserta: com o estorno fora
-   da conta, o dia 29/07 sairia com 2 e o gap contra o S&OP seria 0 —
-   um dia "alinhado" que na verdade está 1 abaixo. */
-check(noDia(comRetro, ymd(2026,7,29)).gap === -1,
-      "o gap do dia usa o líquido, não o bruto",
+check(noDia(comRetro, ymd(2026,7,29)).gap === 0,
+      "e o dia fecha alinhado com o S&OP, sem queda inventada pelo estorno",
       String(noDia(comRetro, ymd(2026,7,29)).gap));
+check(comRetro.avisos.some(a => a.tipo === "estorno"),
+      "a presença de estornos vira aviso — ficar de fora não é ficar escondido");
+check(comRetro.linhas.fora.some(f => f.motivo.chave === "estorno"),
+      "…e a linha sai nomeada na lista do que ficou fora, com o motivo");
+{
+  const so = rodar([P({ groot:"E1", rateio:-1 })], [bloco("SVC",1)]);
+  check(noDia(so, ymd(2026,7,20)).pref === 0,
+        "um Labor só de estorno não produz PREF negativo",
+        String(noDia(so, ymd(2026,7,20)).pref));
+}
+{
+  const zero = rodar([P({ groot:"Z1" }), P({ groot:"Z2", rateio:0 })], [bloco("SVC",1)]);
+  check(noDia(zero, ymd(2026,7,20)).pref === 1,
+        "rateio 0 também fica fora — não é meia pessoa, é nenhuma");
+}
 
 /* ================================================================
    7. Liderança e indiretos não entram sozinhos
@@ -286,8 +295,11 @@ console.log("\nParidade com a Fusão de Linhas");
 
 const elegivel = l => ctx.CARGOS_PREF.includes(
   String(l.cargo).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim());
+/* A mesma expressão da Fusão de Linhas, com o mesmo `elig`: cargo da
+   lista E rateio > 0. */
 const contaFusao = (labor, d) => labor.reduce((acc,p) =>
-  acc + ((elegivel(p) && p.inicio <= d && (p.fim == null || p.fim >= d)) ? p.rateio : 0), 0);
+  acc + ((elegivel(p) && p.rateio > 0 && p.inicio <= d && (p.fim == null || p.fim >= d))
+    ? p.rateio : 0), 0);
 
 /* Um Labor com os formatos que a fatura real tem: aberto, fechado,
    estorno, meio rateio, cargo de liderança e cargo desconhecido. */
@@ -312,10 +324,11 @@ check(divergencias.length === 0,
       "o PREF de cada dia bate com a conta da Fusão de Linhas, dia a dia",
       divergencias.slice(0,3).join(" · "));
 
-/* A prova de que o teste não é vazio: se os estornos voltassem a ser
-   excluídos, os dias cobertos por eles divergiriam. */
-const semEstorno = laborReal.filter(l => l.rateio > 0);
-check(contaFusao(laborReal, ymd(2026,7,29)) !== contaFusao(semEstorno, ymd(2026,7,29)),
+/* A prova de que o teste não é vazio: se o estorno voltasse a entrar
+   com o sinal, o dia coberto por ele divergiria. */
+const comSinal = (labor, d) => labor.reduce((acc,p) =>
+  acc + ((elegivel(p) && p.inicio <= d && (p.fim == null || p.fim >= d)) ? p.rateio : 0), 0);
+check(contaFusao(laborReal, ymd(2026,7,29)) !== comSinal(laborReal, ymd(2026,7,29)),
       "…e o dia do estorno realmente muda de valor entre as duas contas — o teste morde");
 
 /* ================================================================
@@ -338,7 +351,10 @@ const laborDiar = [
   P({ groot:"111" }), P({ groot:"222" }),
   /* 888 está cobrado no fixo: NÃO está disponível como diarista */
   P({ groot:"888" }),
-  /* 999 tem estorno cobrindo o dia: o fixo foi devolvido, está livre */
+  /* 999 tem o fixo E um estorno cobrindo o dia. O estorno não a
+     devolve para o mercado: ela segue cobrada como quadro fixo, e
+     contá-la de novo como diarista seria contar duas vezes. */
+  P({ groot:"999" }),
   P({ groot:"999", rateio:-1, inicio: ymd(2026,7,18), fim: ymd(2026,7,22) })
 ];
 const comDiar = simularRetorno({
@@ -353,15 +369,16 @@ const comDiar = simularRetorno({
 });
 const cd = noDia(comDiar, DIA).diaristas;
 check(cd.total === 5, "todos os solicitados do dia são contados", cd && cd.total);
-check(cd.ocupados === 1 && cd.disp === 4,
+check(cd.ocupados === 2 && cd.disp === 3,
       "quem já está cobrado no LABOR do dia não conta como disponível",
       cd && cd.ocupados+" ocupado(s), "+cd.disp+" disponível(is)");
-check(cd.dispId === 2 && cd.dispMeli === 1 && cd.dispSem === 1,
+check(cd.dispId === 1 && cd.dispMeli === 1 && cd.dispSem === 1,
       "o detalhe separa ID, cliente e sem solicitante",
       cd && JSON.stringify(cd));
-/* O caso que a fatura real traz três vezes. */
-check(cd.dispId === 2,
-      "quem tem ESTORNO no LABOR cobrindo o dia conta como disponível — o fixo foi devolvido");
+/* O outro sentido da regra do rateio ≤ 0: se o estorno devolvesse a
+   pessoa ao mercado, ela apareceria disponível E cobrada no fixo. */
+check(cd.dispId === 1,
+      "o ESTORNO não devolve a pessoa: com o fixo ativo, ela segue ocupada");
 
 /* A mesma pessoa pedida pelos dois no mesmo dia é uma pessoa só, e
    conta como ID: senão o total do dia contaria gente que não existe. */

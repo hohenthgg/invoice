@@ -295,10 +295,14 @@ chega. Reconstrói o **PREF** a partir da aba `LABOR` da fatura, soma o **S&OP d
 operações da planilha operacional e prevê o que o cliente tende a reconhecer.
 
 O PREF é reconstruído com a **mesma regra da Fusão de Linhas** — cargo na lista, dia dentro de
-`[início, fim]` com fim vazio valendo até o fim do período, e o `% RATEIO` entrando **com o sinal
-que tem**. O sinal é o ponto: o PREF é uma quantidade **faturada**, líquida dos estornos, não um
-retrato do turno. O **headcount bruto** (só os positivos) responde "quanta gente estava no turno" e sai no arquivo
-exportado; na tela fica o líquido, que é quem vai ao confronto com o S&OP.
+`[início, fim]` com fim vazio valendo até o fim do período, e **`% RATEIO` maior que zero**.
+
+O rateio ≤ 0 é **estorno**: devolução do que já foi cobrado, não gente no quadro do dia. O confronto
+com o S&OP e com o QF pergunta **quantas pessoas o dia tem**, e para essa pergunta o estorno não é
+relevante — a linha continua no arquivo exportado, apenas fora da conta. A Fusão de Linhas aplica a
+mesma regra no `elig` do seu Labor, porque as duas reconstroem o mesmo número a partir do mesmo
+arquivo: divergir aqui daria dois PREFs para a mesma fatura. Quantas linhas ficaram de fora aparece
+como aviso na tela — ficar fora da conta não é ficar escondido.
 
 O S&OP tem **duas fontes**, escolhidas na tela: a **planilha operacional**, dia a dia somando as
 operações, ou um **valor fixo do mês** digitado à mão, igual em todos os dias — nesse caso a
@@ -420,9 +424,9 @@ do SIGO é escolhida pela **unidade da própria fatura**, lida do `RESUMO` — n
 
 Disponível quer dizer **ainda não cobrado**. Cada Groot ID solicitado é cruzado com o `LABOR` da
 mesma fatura **naquele dia**, e quem já está lá sai da conta — a coluna mostra `N já no LABOR`, para
-o desconto ficar visível em vez de implícito. O cruzamento usa o **saldo líquido** do dia, não a
-existência da linha: quem tem o fixo **estornado** (rateio negativo) cobrindo justamente aquelas
-datas continua disponível, porque a devolução é exatamente o que permite pagá-lo como diária. A
+o desconto ficar visível em vez de implícito. Vale a mesma regra do rateio: o estorno ao lado do
+fixo **não** devolve a pessoa ao mercado — se há lançamento positivo ativo no dia, ela segue cobrada,
+e contá-la como diarista disponível seria contá-la duas vezes. A
 mesma pessoa pedida pelos dois lados no mesmo dia é **uma pessoa, contada como interna** — a mesma
 prioridade do abate "ambos" da aba Calcular ABS.
 
@@ -587,9 +591,10 @@ dois sentidos com os números reais de Varginha — 16/07 = 120 + 16, 19/07 = 80
 entram sozinhos, que cargo desconhecido vira aviso em vez de palpite, e que célula de S&OP vazia
 vira revisão em vez de zero. Um bloco garante a **paridade com a Fusão de Linhas** — o PREF de cada
 dia é confrontado com a conta da Fusão, dia a dia, e o teste morde: o dia do estorno muda de valor
-se o sinal do rateio for ignorado. Outro cobre os **diaristas disponíveis**: quem já está cobrado no
-LABOR do dia não conta, quem está lá com o fixo estornado conta, o mesmo Groot pedido pelos dois
-lados é uma pessoa contada como interna, e sem a planilha o resultado não inventa disponibilidade.
+se o rateio ≤ 0 voltar a entrar com o sinal. Outro cobre os **diaristas disponíveis**: quem já está
+cobrado no LABOR do dia não conta, o estorno ao lado do fixo não libera ninguém, o mesmo Groot pedido
+pelos dois lados é uma pessoa contada como interna, e sem a planilha o resultado não inventa
+disponibilidade.
 
 `tests/equalizacao.test.js` cobre o motor de equalização, que até então rodava só no navegador e
 nunca teve teste. Metade dos casos são as **recusas** — não retira quem cobre um dia sem excesso, não
