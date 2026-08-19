@@ -11,7 +11,7 @@
    mas não paga o que nem sequer foi enviado. A tentação de escrever
    `Q PÓS = S&OP` é grande — a fórmula fica mais simples e "prevê" mais
    receita — e está errada num dos dois sentidos: com PREF 130 contra
-   S&OP 138 ela prometeria 138, dinheiro que ninguém pediu.
+   S&OP 138 ela prometeria 138, uma cobrança que ninguém enviou.
 
    E o segundo erro caro:
 

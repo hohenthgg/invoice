@@ -4,7 +4,7 @@
    Confronta o quadro S&OP diário (sem over) com quem esteve presente,
    e compensa o déficit de cada dia com os diaristas SOLICITADOS PELA
    ID LOGISTICS naquele dia — a agência não importa, e o diarista pedido
-   pelo MELI fica fora: é custo do MELI, não cobertura do quadro. O abate
+   pelo MELI fica fora: é do MELI, não cobertura do quadro. O abate
    é limitado ao próprio déficit, de modo que um dia nunca fica
    "positivo" por excesso de diarista.
 
@@ -365,7 +365,7 @@ async function handleSigo(files,drop){
         const idn=String(id??'').replace(/\D/g,'');
         if(!idn) return; // somente ID
         /* Quem pediu decide se o diarista compensa: o abate de ABS só pode
-           usar diarista SOLICITADO PELA ID LOGISTICS — o do MELI é custo do
+           usar diarista SOLICITADO PELA ID LOGISTICS — o do MELI é do
            MELI, não cobertura do quadro. A agência (MOURA, TSI…) não importa. */
         const solicTxt=norm(row.getCell(3).value);
         const solic=!solicTxt? '' : (solicTxt.includes('meli')? 'meli' : 'id');

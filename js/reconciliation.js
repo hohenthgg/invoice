@@ -549,28 +549,15 @@ function makeItem(o){
     modeloRow:o.modeloRow||null,          // TEMPLATE de estrutura, dentro da N+1
     identidadeRaw:ident&&ident.raw?ident.raw:null,   // IDENTIDADE, preferencialmente da N
     identidadeCampos:ident?{groot:ident.groot, nome:ident.nome, matricula:ident.matricula}:null,
-    impacto:impactoFinanceiro(o),
     // decisão do usuário — nasce sempre pendente, nunca em "aceitar"
     decisao:"MANTER", sugestao:null, observacao:""
   };
 }
 
-/* Impacto financeiro só quando a tarifa é inequívoca. Sem ela, o app diz
-   que não calculou — nunca inventa valor. */
-function impactoFinanceiro(o){
-  const raw=o.identidadeOrigem&&o.identidadeOrigem.raw;
-  const tarifa=raw&&typeof raw.valor==="number"&&isFinite(raw.valor)&&raw.valor>0?raw.valor:null;
-  if(!tarifa){
-    return {calculado:false,
-      motivo:"Impacto financeiro não calculado: a planilha não traz uma tarifa que permita "
-        +"converter FTE em valor com segurança."};
-  }
-  const orig=o.cobranca&&o.cobranca.cobrado?o.cobranca.fte*tarifa:null;
-  const esp=o.esperado?o.esperado.fte*tarifa:null;
-  const ach=o.achado?o.achado.fte*tarifa:null;
-  return {calculado:true, tarifa, original:orig, esperado:esp, encontrado:ach,
-    diferenca:(esp!==null&&ach!==null)?ach-esp:null};
-}
+/* O app não converte FTE em dinheiro nem escreve valor monetário: a
+   conciliação é medida em FTE e em dias, que é o que a decisão precisa.
+   A conversão existia aqui e foi retirada — quem precisa do impacto em
+   moeda aplica a tarifa fora do app, onde a tarifa é conhecida. */
 
 const ORDEM_STATUS=[RECON_STATUS.AUSENTE, RECON_STATUS.SINAL, RECON_STATUS.DUPLICADO,
   RECON_STATUS.PERIODO, RECON_STATUS.FTE, RECON_STATUS.SEM_ORIGEM,

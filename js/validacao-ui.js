@@ -208,10 +208,11 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;
 const fmtD = d => d instanceof Date
   ? String(d.getUTCDate()).padStart(2,"0")+"/"+String(d.getUTCMonth()+1).padStart(2,"0")+"/"+d.getUTCFullYear()
   : "—";
-const fmtM = v => (v === null || v === undefined || !isFinite(Number(v)))
-  ? "—" : Number(v).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
 
 const SEV_LABEL = { critico:"Crítico", revisar:"Revisar", cadastro:"Cadastro", info:"Informativo" };
+/* O lançamento aparece pelo SINAL — positivo é cobrança, negativo é
+   estorno. A grandeza não é escrita em lugar nenhum do app. */
+const LANC_LABEL = { positivo:"positivo", negativo:"negativo", neutro:"" };
 
 function render(){
   const a = V.auditoria;
@@ -225,8 +226,8 @@ function render(){
     + '<div><span>Arquivo</span><b>'+esc(V.arquivo)+'</b></div>'
     + '<div><span>Período faturado</span><b>'+fmtD(p.ini)+" a "+fmtD(p.fim)+'</b>'
     + '<i>'+esc(p.origem || "")+'</i></div>'
-    + '<div><span>LABOR</span><b>'+a.totais.labor+' linhas</b><i>'+fmtM(a.totais.valorLabor)+'</i></div>'
-    + '<div><span>DIARISTAS</span><b>'+a.totais.diaristas+' linhas</b><i>'+fmtM(a.totais.valorDiaristas)+'</i></div>'
+    + '<div><span>LABOR</span><b>'+a.totais.labor+' linhas</b></div>'
+    + '<div><span>DIARISTAS</span><b>'+a.totais.diaristas+' linhas</b></div>'
     + '</div>';
 
   const total = a.achados.length;
@@ -276,7 +277,7 @@ function cardAchado(x){
   if(x.cargo) meta.push(["Cargo", x.cargo]);
   if(x.aba) meta.push(["Aba", x.aba]);
   if(x.datas) meta.push(["Datas", x.datas]);
-  if(x.valor !== null && x.valor !== undefined) meta.push(["Valor", fmtM(x.valor)]);
+  if(x.lancamento) meta.push(["Lançamento", x.lancamento]);
 
   /* Toda opção é uma decisão registrável — inclusive "Manter lançamento",
      que também é uma escolha. Clicar de novo na mesma volta a Pendente. */
@@ -309,9 +310,10 @@ function tabelaRegistros(regs){
     + '<td>'+esc(r.nome || "—")+'</td>'
     + '<td>'+esc(r.cargo || "—")+(r.regime ? '<small> · '+esc(r.regime)+'</small>' : "")+'</td>'
     + '<td>'+(r.data instanceof Date ? fmtD(r.data) : fmtD(r.ini)+" → "+fmtD(r.fim))+'</td>'
-    + '<td class="'+(Number(r.valor) < 0 ? "neg" : "")+'">'+fmtM(r.valor)+'</td></tr>').join("");
+    + '<td class="'+(r.lancamento === "negativo" ? "neg" : "")+'">'
+    + esc(LANC_LABEL[r.lancamento] ?? "")+'</td></tr>').join("");
   return '<div class="vt-regs"><table>'
-    + '<thead><tr><th>Origem</th><th>GROOT</th><th>Nome</th><th>Cargo</th><th>Período</th><th>Valor</th></tr></thead>'
+    + '<thead><tr><th>Origem</th><th>GROOT</th><th>Nome</th><th>Cargo</th><th>Período</th><th>Lançamento</th></tr></thead>'
     + '<tbody>'+linhas+'</tbody></table></div>';
 }
 
@@ -321,24 +323,24 @@ function tabelaRegistros(regs){
 function exportar(){
   const a = V.auditoria;
   if(!a) return;
-  const aoa = [["Severidade","Regra","Título","GROOT","Nome","Cargo","Aba","Datas","Valor",
+  const aoa = [["Severidade","Regra","Título","GROOT","Nome","Cargo","Aba","Datas","Lançamento",
                 "Por que foi sinalizado","Sugestão","Decisão"]];
   for(const x of a.achados){
     aoa.push([ SEV_LABEL[x.severidade], x.regra, x.titulo, x.groot, x.nome, x.cargo, x.aba, x.datas,
-      x.valor === null ? "" : Number(x.valor), x.raciocinio, x.sugestao,
+      x.lancamento || "", x.raciocinio, x.sugestao,
       V.marcas[x.id] || "Pendente" ]);
   }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws["!cols"] = [{wch:12},{wch:26},{wch:40},{wch:11},{wch:34},{wch:24},{wch:16},{wch:30},
-                 {wch:14},{wch:120},{wch:80},{wch:12}];
+                 {wch:20},{wch:120},{wch:80},{wch:12}];
   XLSX.utils.book_append_sheet(wb, ws, "Achados");
 
   const resumo = [["Arquivo", V.arquivo],
     ["Período", fmtD(a.periodo.ini)+" a "+fmtD(a.periodo.fim)],
     ["Origem do período", a.periodo.origem || ""],
-    ["Linhas LABOR", a.totais.labor], ["Valor LABOR", a.totais.valorLabor],
-    ["Linhas DIARISTAS", a.totais.diaristas], ["Valor DIARISTAS", a.totais.valorDiaristas],
+    ["Linhas LABOR", a.totais.labor],
+    ["Linhas DIARISTAS", a.totais.diaristas],
     [], ["Crítico", a.resumo.critico], ["Revisar", a.resumo.revisar],
     ["Cadastro", a.resumo.cadastro], ["Informativo", a.resumo.info]];
   const wsR = XLSX.utils.aoa_to_sheet(resumo);

@@ -98,11 +98,11 @@ function simClassificarLinhas(labor, janela){
     if(!isValidYmd(l.inicio)){ marca(SIM_FORA.SEM_INICIO); continue; }
 
     /* Rateio negativo nunca é headcount, qualquer que seja o período.
-       Vem antes de classifyLine de propósito: para o dinheiro, um
-       negativo dentro da própria janela é ambíguo e a Conciliação o
-       manda para revisão manual — mas para o HEADCOUNT não há
-       ambiguidade nenhuma. Ninguém sai do turno porque a fatura
-       passada cobrou a mais. */
+       Vem antes de classifyLine de propósito: na conciliação de
+       cobrança, um negativo dentro da própria janela é ambíguo e vai
+       para revisão manual — mas para o HEADCOUNT não há ambiguidade
+       nenhuma. Ninguém sai do turno porque a fatura passada cobrou a
+       mais. */
     if(typeof l.rateio === "number" && l.rateio < 0){
       marca(SIM_FORA.RETRO); continue;
     }

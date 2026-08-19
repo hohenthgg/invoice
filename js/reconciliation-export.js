@@ -45,7 +45,7 @@ const CONCIL_SHEET="CONCILIAÇÃO";
 const CONCIL_HEADERS=["GROOT ID","NOME","COMPETÊNCIA ORIGEM","COMPETÊNCIA DESTINO",
   "CLASSIFICAÇÃO DA LINHA","STATUS","ALERTAS","CONFIANÇA","BASE DA CONFIANÇA",
   "COBRANÇA ORIGINAL","AJUSTE ESPERADO","AJUSTE ENCONTRADO","DECISÃO DO USUÁRIO",
-  "PERÍODO FINAL","FTE FINAL","ALTERAÇÃO APLICADA","IMPACTO FINANCEIRO",
+  "PERÍODO FINAL","FTE FINAL","ALTERAÇÃO APLICADA",
   "OBSERVAÇÃO DO USUÁRIO","MOTIVO"];
 
 function descreverAjuste(a){
@@ -59,13 +59,6 @@ function descreverCobranca(c){
   if(!c.cobrado) return "não cobrada — "+c.base;
   return fmtShort(c.start)+" a "+fmtShort(c.end)+" · "+c.days+" dia"+(c.days===1?"":"s")
     +" · FTE "+c.fte.toFixed(4).replace(".",",");
-}
-function descreverImpacto(i){
-  if(!i) return "—";
-  if(!i.calculado) return i.motivo;
-  const br=v=>v===null||v===undefined?"—":v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-  return "original "+br(i.original)+" · esperado "+br(i.esperado)
-    +" · encontrado "+br(i.encontrado)+" · diferença "+br(i.diferenca);
 }
 /* Período e FTE que o usuário de fato escolheu, quando aceitou a sugestão. */
 function periodoFinal(it){
@@ -289,7 +282,7 @@ function montarAbaConciliacao(wb, items){
   const ws=wb.addWorksheet(CONCIL_SHEET,{views:[{state:"frozen",ySplit:1}]});
   ws.columns=[{width:14},{width:32},{width:16},{width:16},{width:22},{width:22},{width:28},
     {width:18},{width:44},{width:34},{width:34},{width:34},{width:20},{width:26},{width:12},
-    {width:40},{width:44},{width:34},{width:60}];
+    {width:40},{width:44},{width:60}];
 
   const hr=ws.addRow(CONCIL_HEADERS);
   hr.height=24;
@@ -314,7 +307,6 @@ function montarAbaConciliacao(wb, items){
       DECISAO_LABEL[it.decisao]||it.decisao,
       periodoFinal(it), fteFinal(it),
       descreverAlteracao(it),
-      descreverImpacto(it.impacto),
       it.observacao||"",
       it.diagnostico
     ]);

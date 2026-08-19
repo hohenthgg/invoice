@@ -373,9 +373,6 @@ function detalhe(it){
     ${dimensoes(it)}
 
     <div class="rc-diag"><b>Diagnóstico</b><p>${esc2(it.diagnostico)}</p></div>
-    ${it.impacto?`<div class="rc-impacto">${it.impacto.calculado
-      ? `<b>Impacto financeiro</b> · original ${brl(it.impacto.original)} · esperado ${brl(it.impacto.esperado)} · encontrado ${brl(it.impacto.encontrado)} · diferença ${brl(it.impacto.diferenca)}`
-      : esc2(it.impacto.motivo)}</div>`:""}
     ${it.decisao==="ACEITAR"?painelAjuste(it):painelSugestaoDisponivel(it)}
   </td></tr>`;
 }
@@ -383,10 +380,6 @@ function detalhe(it){
 function bloco(titulo, corpo){
   return `<div class="rc-col"><h4>${titulo}</h4>${corpo}</div>`;
 }
-function brl(v){
-  return (v===null||v===undefined)?"—":v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
-}
-
 /* Checklist das dimensões comparadas — mostra o que fechou e o que não. */
 const DIM_ROT={identidade:"Identidade", competencia:"Competência", periodo:"Período",
   sinal:"Sinal", fte:"FTE"};
