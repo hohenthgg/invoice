@@ -139,12 +139,12 @@ const simAtivo = (l,d) => l.inicio <= d && (!isValidYmd(l.fim) || l.fim >= d);
    ================================================================ */
 function simGrootNum(v){ return String(v ?? "").replace(/\D/g,""); }
 
-function simDisponibilidade(diaristas, labor, dias){
-  if(!diaristas || !diaristas.length) return null;
-
-  /* Líquido do LABOR por GROOT e por dia — todas as linhas, não só as
-     do PREF: a pergunta é se a pessoa já está cobrada, em qualquer
-     cargo. */
+/* Já está cobrado? O LÍQUIDO do LABOR por GROOT e por dia — todas as
+   linhas, não só as do PREF: a pergunta é se a pessoa já está sendo
+   cobrada, em qualquer cargo. Uma definição só, porque três lugares
+   perguntam a mesma coisa (disponibilidade, inclusão e o cruzamento das
+   sugestões) e três cópias divergiriam. */
+function simOcupadoNoLabor(labor){
   const porGroot = new Map();
   for(const l of labor){
     const g = simGrootNum(l.groot);
@@ -152,18 +152,20 @@ function simDisponibilidade(diaristas, labor, dias){
     if(!porGroot.has(g)) porGroot.set(g, []);
     porGroot.get(g).push(l);
   }
-  const ocupado = (g, d) => {
+  return (g, d) => {
     const ls = porGroot.get(g);
     if(!ls) return false;
     let liq = 0;
     for(const l of ls) if(simAtivo(l,d)) liq += simRateio(l);
     return liq > 0;
   };
+}
 
-  /* Uma pessoa por dia, e a ID tem precedência: o mesmo GROOT pedido
-     pelos dois no mesmo dia é uma pessoa só, contada como ID. */
+/* Uma pessoa por dia, e a ID tem precedência: o mesmo GROOT pedido
+   pelos dois no mesmo dia é uma pessoa só, contada como ID. */
+function simDiaristasPorDia(diaristas){
   const porDia = new Map();
-  for(const r of diaristas){
+  for(const r of (diaristas || [])){
     const g = simGrootNum(r.groot);
     if(!g || !isValidYmd(r.data)) continue;
     if(!porDia.has(r.data)) porDia.set(r.data, new Map());
@@ -172,6 +174,13 @@ function simDisponibilidade(diaristas, labor, dias){
     if(atual === "id") continue;                       // já é ID, nada supera
     m.set(g, r.solic === "id" ? "id" : (atual || r.solic || ""));
   }
+  return porDia;
+}
+
+function simDisponibilidade(diaristas, labor, dias){
+  if(!diaristas || !diaristas.length) return null;
+  const ocupado = simOcupadoNoLabor(labor);
+  const porDia = simDiaristasPorDia(diaristas);
 
   const mapa = {};
   for(const d of dias){
@@ -396,6 +405,88 @@ const SIM_EQ_MOTIVO = {
     + "início do vale e reabre no fim: mesma pessoa, mesmo GROOT, dois períodos."
 };
 
+/* ================================================================
+   QUEM ENTRA PARA COBRIR A FALTA
+
+   O outro lado da equalização. Onde o quadro fica ABAIXO do QF, o motor
+   não mexe em ninguém — inventar pessoa não é trabalho dele. Mas o SIGO
+   sabe quem foi solicitado em cada dia, e essas pessoas existem: dá para
+   preencher a falta com gente de verdade, nomeada, em vez de deixar uma
+   linha "faltam 18" para alguém resolver à mão.
+
+   Três regras, e todas já valem em outro lugar do app:
+
+     1. PRIMEIRO OS DA ID, ATÉ ACABAR. Só então o do cliente entra. É a
+        mesma prioridade do abate "ambos" da aba Calcular ABS: diarista
+        pedido pelo cliente é custo do cliente, e gastá-lo enquanto sobra
+        interno seria escolher a fonte errada.
+     2. QUEM JÁ ESTÁ COBRADO NÃO ENTRA. A ocupação é a do LÍQUIDO do
+        LABOR no dia — quem tem o fixo estornado naquelas datas está
+        livre, e é justamente o caso que motivou a diária.
+     3. NUNCA PASSAR DA FALTA. Entra `min(disponíveis, falta)`; um dia
+        não fica positivo por sobra de diarista.
+
+   O que não der para cobrir sai como descoberto, com o tamanho. Um
+   número que some seria pior do que um número feio.
+   ================================================================ */
+const SIM_PRIO_SOLIC = { id:0, meli:1, "":2 };
+
+function simInclusoes(dados){
+  const falta = dados.falta || {};
+  const diaristas = dados.diaristas || [];
+  const ocupado = simOcupadoNoLabor(dados.labor || []);
+  const porDia = simDiaristasPorDia(diaristas);
+
+  const nomes = new Map();
+  for(const r of diaristas){
+    const g = simGrootNum(r.groot);
+    if(g && r.nome && !nomes.has(g)) nomes.set(g, String(r.nome).trim());
+  }
+
+  const escolhidos = new Map();      // groot → { groot, nome, solic, dias:[] }
+  const dias = {};
+  let pedido = 0, incluido = 0, descoberto = 0;
+
+  for(const d of Object.keys(falta).map(Number).sort((a,b) => a-b)){
+    /* Falta fracionária arredonda PARA BAIXO: cobrir 2,5 com 3 pessoas
+       passaria do alvo, e passar é o erro que este módulo evita. */
+    const n = Math.floor(falta[d] + 1e-9);
+    pedido += falta[d];
+    const m = porDia.get(d) || new Map();
+    const cand = [...m.entries()]
+      .filter(([g]) => !ocupado(g,d))
+      .map(([g,solic]) => ({ g, solic: solic || "", jaUsado: escolhidos.has(g) }))
+      .sort((a,b) =>
+        (SIM_PRIO_SOLIC[a.solic] ?? 2) - (SIM_PRIO_SOLIC[b.solic] ?? 2)   // ID primeiro, até acabar
+        || (b.jaUsado - a.jaUsado)          // reaproveita quem já entrou: menos nomes, menos linhas
+        || a.g.localeCompare(b.g));         // e um critério estável para o resto
+    const leva = cand.slice(0, Math.max(0,n));
+    const cont = { falta:falta[d], incluido:leva.length, id:0, meli:0, sem:0,
+                   disponiveis:cand.length, descoberto:Math.max(0, falta[d] - leva.length) };
+    for(const c of leva){
+      cont[c.solic === "id" ? "id" : c.solic === "meli" ? "meli" : "sem"]++;
+      if(!escolhidos.has(c.g))
+        escolhidos.set(c.g, { groot:c.g, nome:nomes.get(c.g) || "", solic:c.solic, dias:[] });
+      escolhidos.get(c.g).dias.push(d);
+    }
+    incluido += leva.length;
+    descoberto += cont.descoberto;
+    dias[d] = cont;
+  }
+
+  const pessoas = [...escolhidos.values()].map(p => ({ ...p,
+    dias:p.dias.slice().sort((a,b) => a-b), total:p.dias.length }));
+  pessoas.forEach(p => { p.faixas = simFaixas(p.dias); });
+  pessoas.sort((a,b) => (SIM_PRIO_SOLIC[a.solic] ?? 2) - (SIM_PRIO_SOLIC[b.solic] ?? 2)
+    || b.total - a.total || (a.nome || a.groot).localeCompare(b.nome || b.groot));
+
+  const conta = t => pessoas.filter(p => p.solic === t).length;
+  return { pessoas, dias, totais:{
+    pedido: Math.round(pedido*100)/100,
+    incluido, descoberto: Math.round(descoberto*100)/100,
+    pessoas: pessoas.length, id: conta("id"), meli: conta("meli"), sem: conta("") } };
+}
+
 function simPlanoEqualizacao(dados){
   const labor = dados.labor || [];
   const alvo = Number(dados.alvo);
@@ -489,9 +580,14 @@ function simPlanoEqualizacao(dados){
   const revisar = chavesYmd(plano.incluir.__revisar?.[SIM_GRUPO]);
   const falta   = chavesYmd(plano.incluir[SIM_GRUPO]?.dias);
 
+  /* A falta é o outro lado do mesmo plano: com a base do SIGO carregada,
+     ela deixa de ser "faltam 18" e vira 18 pessoas com nome. */
+  const inclusoes = (dados.diaristas && dados.diaristas.length)
+    ? simInclusoes({ falta, diaristas:dados.diaristas, labor }) : null;
+
   const conta = t => acoes.filter(a => a.tipo === t).length;
   return {
-    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta,
+    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta, inclusoes,
     opcoes:{ permitirAdiarInicio: opc.permitirAdiarInicio !== false,
              pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null },
     totais:{
@@ -541,6 +637,6 @@ function simLinhasRetorno(sim){
 
 if(typeof module !== "undefined" && module.exports){
   module.exports = { simularRetorno, simClassificarLinhas, simLinhasRetorno,
-                     simPlanoEqualizacao, SIM_GRUPO,
+                     simPlanoEqualizacao, simInclusoes, SIM_GRUPO,
                      SIM_STATUS, SIM_STATUS_LABEL, SIM_AVISO_METADADOS };
 }

@@ -110,10 +110,20 @@ function lerFatura(wb){
       regime: iR >= 0 ? String(r[iR] ?? "").trim() : "",
       matricula: iMt >= 0 ? String(r[iMt] ?? "").trim() : "",
       inicio: parseExcelDate(r[iI]), fim: parseExcelDate(r[iF]),
-      rateio: parseRateio(r[iRa]) });
+      rateio: parseRateio(r[iRa]),
+      /* A linha crua e a posição das colunas ficam guardadas porque a
+         exportação devolve o LABOR no layout do próprio template — as
+         colunas que o app não lê têm de sair como entraram. */
+      bruta: r.slice() });
   }
   if(!linhas.length) return { erro:'A aba "'+nome+'" não tem linhas com dado.' };
-  return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb) };
+  return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb),
+    layout:{ topo: rows.slice(0, h.idx+1), largura: Math.max(h.cels.length,
+      ...linhas.map(l => l.bruta.length)),
+      cols:{ groot:iG, nome:iN, cargo:iC, conta:iCt, regime:iR, inicio:iI, fim:iF,
+             rateio:iRa, matricula:iMt, obs:col(c,"OBSERVACOES","OBSERVAÇÕES"),
+             fixas:["FORNECEDOR","PERIODO","PERIODO - MES/ANO","UNIDADE","DESCRICAO CONTA",
+                    "CONTA CONTABIL","UNIDADE + UF","EMPRESA"].map(x => col(c,x)) } } };
 }
 
 /* O nome da unidade, do RESUMO — é ele que escolhe a aba do SIGO. */
@@ -729,9 +739,10 @@ function desenharEqualizacao(){
     + item("Excesso após o plano", n2(t.excessoDepois)+" HC-dia")
     + '</div>';
 
-  if(!plano.acoes.length && !Object.keys(plano.revisar).length){
+
+  if(!plano.acoes.length && !Object.keys(plano.revisar).length && !Object.keys(plano.falta).length){
     $("sm-eq").innerHTML = resumo + '<div class="sm-eqok"><b>Nada a equalizar.</b> '
-      + 'O Labor não passa do QF em nenhum dia do período.</div>';
+      + 'O quadro já bate com o QF em todos os dias do período.</div>';
     return;
   }
 
@@ -754,6 +765,32 @@ function desenharEqualizacao(){
 
   /* `falta` guarda o tamanho da falta como número positivo; na tela ela
      é uma queda em relação ao QF e sai com sinal negativo. */
+  /* As pessoas que faltam, com nome — só existe com a base do SIGO. */
+  const inc = plano.inclusoes;
+  const grupoInc = (inc && inc.pessoas.length)
+    ? '<div class="sm-eqgrupo"><header><span class="sm-eqchip incluir">Incluir</span>'
+      + '<span class="n">'+inc.totais.pessoas+' pessoa(s) · '+inc.totais.incluido+' pessoa-dia</span></header>'
+      + '<div class="det aberto"><p>Diaristas solicitados no SIGO e <b>sem cobrança no LABOR</b> '
+      + 'naqueles dias. Primeiro os da <b>ID</b>, até acabar; o do cliente só entra depois '
+      + '('+inc.totais.id+' ID · '+inc.totais.meli+' cliente'
+      + (inc.totais.sem ? ' · '+inc.totais.sem+' sem solicitante' : "")+'). '
+      + (inc.totais.descoberto > 0
+          ? 'Ainda ficam <b>'+n2(inc.totais.descoberto)+'</b> pessoa-dia sem cobertura — não havia '
+            + 'diarista livre bastante no SIGO.'
+          : 'A falta do período fica <b>inteiramente coberta</b>.')
+      + '</p></div>'
+      + inc.pessoas.map(p =>
+          '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
+          + '<div class="cab"><div class="nm">'+esc(p.nome || "(sem nome no SIGO)")
+          + '<small>Groot '+esc(p.groot)+' · diarista '
+          + (p.solic === "id" ? "ID" : p.solic === "meli" ? "do cliente" : "sem solicitante")+'</small></div>'
+          + '<div class="mud">'+esc(p.faixas.map(faixaTxt).join(", "))
+          + '<small>+'+p.total+' dia(s)</small></div></div>'
+          + '<div class="det"><p>Entra no LABOR exportado com '+p.faixas.length+' linha(s), '
+          + 'cargo do quadro e % rateio 1. Matrícula, escala e turno ficam <b>em branco</b> — '
+          + 'o SIGO não os informa, e preencher com o de outra pessoa seria inventar.</p></div></div>').join("")
+      + '</div>' : "";
+
   const listaDias = (o, neg) => Object.keys(o).map(Number).sort((a,b)=>a-b)
     .map(d => fmtShort(d)+" ("+sinal(neg ? -o[d] : o[d])+")").join(" · ");
   const revisar = Object.keys(plano.revisar).length
@@ -762,7 +799,7 @@ function desenharEqualizacao(){
       + '<div class="det aberto"><p>Nestes dias sobra quadro que nenhuma das quatro ações resolve '
       + 'sem partir um contrato de um jeito que o motor não faz sozinho. Avalie caso a caso.</p>'
       + '<p class="dias">'+listaDias(plano.revisar,false)+'</p></div></div>' : "";
-  const falta = Object.keys(plano.falta).length
+  const falta = (Object.keys(plano.falta).length && !grupoInc)
     ? '<div class="sm-eqgrupo falta"><header><span class="sm-eqchip falta">Falta</span>'
       + '<span class="n">'+Object.keys(plano.falta).length+' dia(s)</span></header>'
       + '<div class="det aberto"><p>Nestes dias o Labor está <b>abaixo</b> do QF. A equalização não '
@@ -773,7 +810,228 @@ function desenharEqualizacao(){
     + '<div class="sm-eqselo">Este plano equaliza <b>matematicamente</b> o Labor ao QF. '
     + 'Confirme se corresponde à movimentação operacional real antes de aplicar — '
     + 'nada é alterado na fatura por aqui.</div>'
-    + grupos + revisar + falta;
+    + grupos + grupoInc + revisar + falta
+    + '<div class="vt-acoes-fim"><button class="vt-btn" id="sm-btnExportEq">'
+    + 'Exportar Labor equalizado (.xlsx)</button></div>';
+  const btn = $("sm-btnExportEq");
+  if(btn) btn.onclick = exportarEqualizado;
+}
+
+/* ================================================================
+   EXPORTAÇÃO DO LABOR EQUALIZADO
+
+   O arquivo sai no layout do PRÓPRIO template: o cabeçalho original,
+   as colunas na ordem original, e cada linha que não mudou saindo
+   exatamente como entrou — inclusive as colunas que o app nem lê. É a
+   mesma ideia da exportação da Fusão de Linhas, com a diferença de que
+   aqui as pessoas que faltam já vêm PREENCHIDAS, e não numa aba de
+   "a incluir" para alguém resolver à mão.
+
+   O que uma linha nova NÃO tem, fica em branco. Matrícula, escala,
+   turno, dias trabalhados e tudo o que depende de contrato não são
+   deduzíveis do SIGO, e preencher com o valor de outra pessoa poria
+   dado errado com cara de certo. Das colunas de contexto só são
+   copiadas as que têm o MESMO valor em toda a fatura — fornecedor,
+   unidade, conta —, porque aí não há o que escolher.
+   ================================================================ */
+/* Data vira SERIAL do Excel, nunca objeto Date.
+   `aoa_to_sheet({cellDates:true})` converte Date pelo fuso LOCAL: escrito
+   de São Paulo, 17/07 saiu como 16/07 21:00 e voltou a ser lido como
+   16/07 — um dia inteiro de diferença em toda linha reescrita, e quatro
+   estornos passaram a valer um dia antes. O serial não tem fuso. */
+const SERIAL0 = Date.UTC(1899,11,30);
+const dataParaSerial = d => Math.round(
+  (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - SERIAL0)/864e5);
+const ymdParaSerial = v => { const p = ymdParts(v);
+  return Math.round((Date.UTC(p.y, p.m-1, p.d) - SERIAL0)/864e5); };
+const semAcento = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+
+/* Os segmentos [início, fim] de uma linha depois do plano. Uma pausa
+   parte a vigência em dois períodos — mesma pessoa, duas linhas. */
+function segmentosApos(l, a){
+  if(!a) return [{ ini:l.inicio, fim:l.fim }];
+  if(a.tipo === "retirar") return [];
+  const ini = a.novoInicio != null ? a.novoInicio : l.inicio;
+  const fim = a.novoFim != null ? a.novoFim : l.fim;
+  const segs = []; let cursor = ini;
+  for(const p of (a.pausas || []).slice().sort((x,y) => x.fim - y.fim)){
+    segs.push({ ini:cursor, fim:p.fim }); cursor = p.ini;
+  }
+  segs.push({ ini:cursor, fim });
+  return segs;
+}
+
+function exportarEqualizado(){
+  const sim = S.sim, plano = S.plano, fat = S.fatura;
+  if(!sim || !plano || plano.erro || !fat || !fat.layout) return;
+  const lay = fat.layout, C = lay.cols;
+  const dentro = simClassificarLinhas(fat.linhas).dentro;
+  const acaoDe = new Map();
+  plano.acoes.forEach(a => acaoDe.set(dentro[a.id], a));
+
+  const aoa = lay.topo.map(r => r.slice());
+  let mantidas = 0, removidas = 0, ajustadas = 0;
+  for(const l of fat.linhas){
+    const a = acaoDe.get(l);
+    /* Linha que o plano não tocou sai EXATAMENTE como entrou — nem as
+       datas são reescritas. Passar todas por uma releitura só para
+       gravá-las de volta é chance de estragar o que estava certo. */
+    if(!a){ mantidas++; aoa.push(l.bruta.slice()); continue; }
+    const segs = segmentosApos(l, a);
+    if(!segs.length){ removidas++; continue; }
+    ajustadas++;
+    for(const seg of segs){
+      const row = l.bruta.slice();
+      if(C.inicio >= 0) row[C.inicio] = isValidYmd(seg.ini) ? ymdParaSerial(seg.ini) : "";
+      if(C.fim >= 0)    row[C.fim]    = isValidYmd(seg.fim) ? ymdParaSerial(seg.fim) : "";
+      aoa.push(row);
+    }
+  }
+
+  /* ---- as pessoas que faltam, já preenchidas ---- */
+  const incluir = $("sm-eqIncluir");
+  const inc = (incluir && incluir.checked) ? plano.inclusoes : null;
+  const linhasNovas = [];
+  if(inc && inc.pessoas.length){
+    /* Só entra a coluna cujo valor é o MESMO em toda a fatura: aí não
+       há escolha a fazer. Divergiu, fica em branco. */
+    const constante = idx => {
+      if(idx < 0) return "";
+      let achou;
+      for(const l of dentro){
+        const x = l.bruta[idx];
+        if(x === "" || x === null || x === undefined) continue;
+        const k = x instanceof Date ? +x : x;
+        if(achou === undefined) achou = { k, x };
+        else if(achou.k !== k) return "";
+      }
+      return achou ? achou.x : "";
+    };
+    const fixas = lay.cols.fixas.map(i => [i, constante(i)]);
+    const cont = new Map();
+    dentro.forEach(l => cont.set(l.cargo, (cont.get(l.cargo) || 0) + 1));
+    const cargoPadrao = [...cont.entries()].sort((a,b) => b[1] - a[1])[0]?.[0] || "";
+
+    for(const p of inc.pessoas) for(const f of p.faixas){
+      const row = new Array(lay.largura).fill("");
+      fixas.forEach(([i,v]) => { if(i >= 0) row[i] = v; });
+      if(C.groot >= 0)  row[C.groot]  = p.groot;
+      if(C.nome >= 0)   row[C.nome]   = p.nome;
+      if(C.cargo >= 0)  row[C.cargo]  = cargoPadrao;
+      if(C.inicio >= 0) row[C.inicio] = ymdParaSerial(f.de);
+      if(C.fim >= 0)    row[C.fim]    = ymdParaSerial(f.ate);
+      if(C.rateio >= 0) row[C.rateio] = 1;
+      if(C.obs >= 0)    row[C.obs]    = "INCLUIDO PELA EQUALIZACAO - diarista "
+        + (p.solic === "id" ? "ID" : p.solic === "meli" ? "do cliente" : "sem solicitante")
+        + " no SIGO";
+      aoa.push(row);
+      linhasNovas.push(row);
+    }
+  }
+
+  /* ---- o dossiê do que foi feito ---- */
+  const dt = v => isValidYmd(v) ? ymdParaSerial(v) : "";
+  const eqAoa = [["Ação","GROOT ID","Nome","Cargo","Início atual","Fim atual",
+                  "Início novo","Fim novo","Pausas","HC","Dias","Motivo"]];
+  for(const a of plano.acoes) eqAoa.push([
+    EQ_ROTULO[a.tipo], a.linha.groot, a.linha.nome, a.linha.cargo,
+    dt(a.linha.inicio), dt(a.linha.fim), dt(a.novoInicio), dt(a.novoFim),
+    a.pausas.map(p => fmtYmd(p.fim)+" a "+fmtYmd(p.ini)).join(" · "),
+    -a.impacto.hc, a.impacto.dias, a.motivo]);
+  if(eqAoa.length === 1) eqAoa.push(["(nada a ajustar)","","","","","","","","","","",""]);
+
+  const incAoa = [["GROOT ID","Nome","Solicitante","De","Até","Dias","Observação"]];
+  if(inc) for(const p of inc.pessoas) for(const f of p.faixas)
+    incAoa.push([p.groot, p.nome,
+      p.solic === "id" ? "ID" : p.solic === "meli" ? "Cliente" : "(sem solicitante)",
+      dt(f.de), dt(f.ate),
+      p.dias.filter(d => d >= f.de && d <= f.ate).length,
+      "Solicitado no SIGO e sem cobrança no LABOR nestes dias"]);
+  if(incAoa.length === 1) incAoa.push(["(ninguém a incluir)","","","","","",""]);
+
+  const revAoa = [["Tipo","Data","Quantidade","Observação"]];
+  for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
+    revAoa.push(["Excesso sem solução", dt(+d), q,
+      "Zerar exigiria partir um contrato — avaliar caso a caso."]);
+  if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
+    { if(c.descoberto > 0) revAoa.push(["Falta descoberta", dt(+d), c.descoberto,
+      "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
+  if(!inc) for(const [d,q] of Object.entries(plano.falta).sort((a,b) => a[0]-b[0]))
+    revAoa.push(["Falta", dt(+d), q, "Quadro abaixo do QF; nenhuma inclusão foi gerada."]);
+  if(revAoa.length === 1) revAoa.push(["(nada a revisar)","","",""]);
+
+  const metaAoa = [["Campo","Valor"],
+    ["Arquivo", "Labor equalizado gerado pela Validação Template"],
+    ["Fatura de origem", S.nomeF],
+    ["Unidade", fat.unidade || "—"],
+    ["Período", fmtYmd(plano.periodo.ini)+" a "+fmtYmd(plano.periodo.fim)],
+    ["QF do cliente (alvo)", plano.alvo],
+    ["Permitir adiar início", plano.opcoes.permitirAdiarInicio ? "sim" : "não"],
+    ["Pausar a partir de", plano.opcoes.pausaDesde ? fmtYmd(plano.opcoes.pausaDesde) : "não"],
+    ["Linhas mantidas sem alteração", mantidas],
+    ["Linhas ajustadas", ajustadas],
+    ["Linhas removidas", removidas],
+    ["Linhas incluídas", linhasNovas.length],
+    ["Pessoas incluídas", inc ? inc.totais.pessoas : 0],
+    ["  · da ID", inc ? inc.totais.id : 0],
+    ["  · do cliente", inc ? inc.totais.meli : 0],
+    ["  · sem solicitante", inc ? inc.totais.sem : 0],
+    ["Falta coberta (pessoa-dia)", inc ? inc.totais.incluido : 0],
+    ["Falta descoberta (pessoa-dia)", inc ? inc.totais.descoberto : 0],
+    ["Excesso antes do plano (HC-dia)", plano.totais.excessoAntes],
+    ["Excesso depois do plano (HC-dia)", plano.totais.excessoDepois],
+    ["", ""],
+    ["AVISO", "As alterações equalizam MATEMATICAMENTE o Labor ao QF. Confirme se "
+      + "correspondem à movimentação operacional real antes de enviar."],
+    ["Linhas incluídas", "Vêm da base SIGO: pessoa solicitada no dia e sem cobrança no LABOR "
+      + "daquele dia. Prioridade para os diaristas da ID; o do cliente só entra depois de "
+      + "esgotados os internos."],
+    ["Campos em branco", "Matrícula, regime, escala, turno e dias trabalhados das linhas "
+      + "incluídas ficam VAZIOS de propósito: não são deduzíveis do SIGO. Cargo usa o mais "
+      + "frequente do quadro da fatura, e as colunas de contexto só foram copiadas onde o "
+      + "valor é o mesmo em toda a fatura."]];
+
+  const wb = XLSX.utils.book_new();
+  const wsL = XLSX.utils.aoa_to_sheet(serializarDatas(aoa));
+  formatarColunasData(wsL, aoa, [C.inicio, C.fim]);
+  XLSX.utils.book_append_sheet(wb, wsL, "LABOR");
+  const add = (nome, dados, cols, colsData) => {
+    const ws = XLSX.utils.aoa_to_sheet(serializarDatas(dados));
+    formatarColunasData(ws, dados, colsData || []);
+    ws["!cols"] = cols.map(w => ({ wch:w }));
+    XLSX.utils.book_append_sheet(wb, ws, nome);
+  };
+  add("EQUALIZACAO", eqAoa, [16,12,34,26,12,12,12,12,26,7,7,90], [4,5,6,7]);
+  add("INCLUSOES", incAoa, [12,34,16,12,12,7,52], [3,4]);
+  add("REVISAR", revAoa, [22,12,12,72], [1]);
+  add("METADADOS", metaAoa, [34,110]);
+
+  const per = String(fat.comp ? fat.comp.y*100 + fat.comp.m : "");
+  const nome = semAcento("Labor_equalizado_"+(fat.unidade || "fatura")+"_"+per+".xlsx")
+    .replace(/[^\w.\-]+/g,"_");
+  XLSX.writeFile(wb, nome);
+
+  const btn = $("sm-btnExportEq");
+  if(btn) btn.textContent = "Baixado ✓ — " + nome;
+}
+
+/* Qualquer Date que tenha vindo do arquivo original vira serial, para
+   valer a mesma regra que as datas escritas por aqui. */
+function serializarDatas(aoa){
+  return aoa.map(row => row.map(v => v instanceof Date ? dataParaSerial(v) : v));
+}
+
+/* E o serial vira data de verdade na tela do Excel, não número solto. */
+function formatarColunasData(ws, aoa, colunas){
+  const ref = XLSX.utils.decode_range(ws["!ref"]);
+  for(let r=0;r<=ref.e.r;r++) for(let c=0;c<=ref.e.c;c++){
+    const orig = aoa[r] && aoa[r][c];
+    const ehData = orig instanceof Date
+      || (colunas.includes(c) && typeof orig === "number" && r > 0);
+    if(!ehData) continue;
+    const cel = ws[XLSX.utils.encode_cell({ r, c })];
+    if(cel && typeof cel.v === "number"){ cel.t = "n"; cel.z = "dd/mm/yyyy"; }
+  }
 }
 
 /* ================================================================
@@ -906,7 +1164,7 @@ document.querySelectorAll('input[name="sm-fonte"]').forEach(r => r.onchange = pr
 const campoFixo = $("sm-sopFixo");
 if(campoFixo) campoFixo.oninput = pronto;
 pronto();   // deixa o passo 3 e o destaque da fonte coerentes já na abertura
-[$("sm-eqAdiar"), $("sm-eqPausa")].forEach(el => { if(el) el.onchange = () => { if(S.sim) desenharEqualizacao(); }; });
+[$("sm-eqAdiar"), $("sm-eqPausa"), $("sm-eqIncluir")].forEach(el => { if(el) el.onchange = () => { if(S.sim) desenharEqualizacao(); }; });
 const btnRun = $("sm-btnRun"); if(btnRun) btnRun.onclick = analisar;
 const btnExp = $("sm-btnExport"); if(btnExp) btnExp.onclick = exportar;
 
