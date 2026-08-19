@@ -820,7 +820,11 @@ function desenharEqualizacao(){
           ? 'Ainda ficam <b>'+n2(inc.totais.descoberto)+'</b> pessoa-dia sem cobertura — não havia '
             + 'diarista livre bastante no SIGO.'
           : 'A falta do período fica <b>inteiramente coberta</b>.')
-      + '</p></div>'
+      + ' Os <b>'+inc.totais.verificados+'</b> pessoa-dia escolhidos foram reconferidos contra a '
+      + 'base antes de entrar'
+      + (inc.totais.recusados ? ', e <b>'+inc.totais.recusados+'</b> foram recusados por não '
+          + 'constar no dia' : ' — nenhum entrou num dia em que não foi solicitado')
+      + '.</p></div>'
       + inc.pessoas.map(p =>
           '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
           + '<div class="cab"><div class="nm">'+esc(p.nome || "(sem nome no SIGO)")
@@ -1082,6 +1086,8 @@ async function exportarEqualizado(){
     ["  · do cliente", inc ? inc.totais.meli : 0],
     ["  · sem solicitante", inc ? inc.totais.sem : 0],
     ["Falta coberta (pessoa-dia)", inc ? inc.totais.incluido : 0],
+    ["Pessoa-dia conferidos contra o SIGO", inc ? inc.totais.verificados : 0],
+    ["  · recusados por não estar na base no dia", inc ? inc.totais.recusados : 0],
     ["Falta descoberta (pessoa-dia)", inc ? inc.totais.descoberto : 0],
     ["Excesso antes do plano (HC-dia)", plano.totais.excessoAntes],
     ["Excesso depois do plano (HC-dia)", plano.totais.excessoDepois],
@@ -1096,6 +1102,10 @@ async function exportarEqualizado(){
     ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada no dia e sem cobrança "
       + "naquele dia — nem no LABOR, nem como diária já lançada nesta fatura. Prioridade "
       + "para os diaristas da ID; o do cliente só entra depois de esgotados os internos."],
+    ["Conferência das datas", "Cada pessoa-dia acrescentado foi reconferido contra a base do "
+      + "SIGO, linha a linha, ANTES de virar linha do arquivo: ninguém entra num dia em que "
+      + "não foi solicitado, e dia sem solicitação não é preenchido para emendar intervalo. "
+      + "O que não passasse seria descartado e contado acima."],
     ["O que é o quadro do dia", "Quadro fixo do LABOR MAIS as diárias já lançadas na fatura. "
       + "É esse total que vai ao confronto com o QF: a vaga ocupada por diária é vaga "
       + "ocupada, e a falta do dia já vem descontada dela."],

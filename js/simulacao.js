@@ -467,8 +467,26 @@ function simInclusoes(dados){
     if(g && r.nome && !nomes.has(g)) nomes.set(g, String(r.nome).trim());
   }
 
+  /* ÍNDICE CRU DA BASE — pessoa e dia exatamente como estão nas linhas
+     do SIGO, sem passar pela dedução de prioridade que monta `porDia`.
+
+     Ele existe para RECONFERIR o que foi escolhido. A garantia de que
+     ninguém entra num dia em que não foi solicitado hoje vale por
+     construção — os candidatos saem de `porDia`, que é montado por dia
+     —, e garantia por construção é a que um refactor apaga sem ninguém
+     ver: bastaria alguém preencher o intervalo entre dois dias soltos
+     para inventar diária que a base não tem. Conferir contra `porDia`
+     não conferiria nada, porque é a mesma fonte da escolha; por isso o
+     índice é construído do zero, direto das linhas. */
+  const naBase = new Set();
+  for(const r of diaristas){
+    const g = simGrootNum(r.groot);
+    if(g && isValidYmd(r.data)) naBase.add(g + "|" + r.data);
+  }
+
   const escolhidos = new Map();      // groot → { groot, nome, solic, dias:[] }
   const dias = {};
+  const conferencia = { verificados:0, recusados:[] };
   let pedido = 0, incluido = 0, descoberto = 0;
 
   for(const d of Object.keys(falta).map(Number).sort((a,b) => a-b)){
@@ -484,7 +502,15 @@ function simInclusoes(dados){
         (SIM_PRIO_SOLIC[a.solic] ?? 2) - (SIM_PRIO_SOLIC[b.solic] ?? 2)   // ID primeiro, até acabar
         || (b.jaUsado - a.jaUsado)          // reaproveita quem já entrou: menos nomes, menos linhas
         || a.g.localeCompare(b.g));         // e um critério estável para o resto
-    const leva = cand.slice(0, Math.max(0,n));
+    const escolhidas = cand.slice(0, Math.max(0,n));
+    /* Toda pessoa-dia passa pelo índice cru antes de virar linha. O que
+       não estiver lá é descartado e contado, não corrigido em silêncio. */
+    const leva = [];
+    for(const c of escolhidas){
+      conferencia.verificados++;
+      if(naBase.has(c.g + "|" + d)) leva.push(c);
+      else conferencia.recusados.push({ groot:c.g, data:d });
+    }
     const cont = { falta:falta[d], incluido:leva.length, id:0, meli:0, sem:0,
                    disponiveis:cand.length, descoberto:Math.max(0, falta[d] - leva.length) };
     for(const c of leva){
@@ -505,7 +531,9 @@ function simInclusoes(dados){
     || b.total - a.total || (a.nome || a.groot).localeCompare(b.nome || b.groot));
 
   const conta = t => pessoas.filter(p => p.solic === t).length;
-  return { pessoas, dias, totais:{
+  return { pessoas, dias, conferencia, totais:{
+    recusados: conferencia.recusados.length,
+    verificados: conferencia.verificados,
     pedido: Math.round(pedido*100)/100,
     incluido, descoberto: Math.round(descoberto*100)/100,
     pessoas: pessoas.length, id: conta("id"), meli: conta("meli"), sem: conta("") } };
