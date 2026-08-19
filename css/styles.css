@@ -650,9 +650,6 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
   border-radius:var(--radius-sm);padding:11px 14px}
 #panel-conciliacao .rc-classe b{font-size:.76rem;color:var(--ink)}
 #panel-conciliacao .rc-classe p{font-size:.76rem;color:var(--mut);line-height:1.6;margin-top:4px}
-#panel-conciliacao .rc-impacto{margin-top:11px;font-size:.75rem;color:var(--mut);
-  border-top:1px solid var(--line);padding-top:10px}
-#panel-conciliacao .rc-impacto b{color:var(--ink)}
 
 /* dimensões comparadas */
 #panel-conciliacao .rc-dims{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:13px}

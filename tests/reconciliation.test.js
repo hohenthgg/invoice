@@ -467,15 +467,20 @@ console.log("\nIdentidade da linha criada (estrutura N+1, identidade N)");
 }
 
 /* ================================================================
-   IMPACTO FINANCEIRO
+   NADA DE VALOR MONETÁRIO
+
+   A conciliação é medida em FTE e em dias. A conversão de FTE em
+   moeda existiu aqui e foi retirada: o app não escreve valor
+   monetário em lugar nenhum, nem na tela nem no arquivo exportado.
    ================================================================ */
-console.log("\nImpacto financeiro");
+console.log("\nA conciliação não produz valor monetário");
 {
-  const maio  = [linha({ nome: "SemTarifa", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
-  const it = itemDe(conciliar(maio, []), "SemTarifa");
-  check(it && it.impacto.calculado === false && /não calculado/i.test(it.impacto.motivo),
-        "sem tarifa confiável, o impacto não é calculado nem inventado",
-        it && it.impacto.motivo.slice(0,60));
+  const maio = [linha({ nome: "Alguem", inicio: ymd(2026,5,1), fim: ymd(2026,5,20) })];
+  const it = itemDe(conciliar(maio, []), "Alguem");
+  check(!!it && it.impacto === undefined,
+        "nenhum apontamento carrega impacto em moeda");
+  check(!!it && !/R\$/.test(JSON.stringify(it)),
+        "e nada no apontamento vem formatado como moeda");
 }
 
 /* ================================================================

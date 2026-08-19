@@ -98,11 +98,18 @@ function valFmt(d){
   const p = n => String(n).padStart(2,"0");
   return p(d.getUTCDate()) + "/" + p(d.getUTCMonth()+1) + "/" + d.getUTCFullYear();
 }
-function valMoeda(v){
+/* O app não escreve valor monetário em lugar nenhum — nem na tela, nem
+   no relatório. O que o raciocínio precisa do lançamento é só o SINAL:
+   positivo é cobrança, negativo é estorno, e é essa diferença que
+   separa dupla cobrança de ajuste retroativo. A grandeza não muda
+   nenhuma conclusão, então não é escrita. */
+function valSinal(v){
   const n = Number(v);
-  if(!isFinite(n)) return "—";
-  return n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+  if(!isFinite(n) || n === 0) return "neutro";
+  return n > 0 ? "positivo" : "negativo";
 }
+const valEhNegativo = v => valSinal(v) === "negativo";
+const valEhPositivo = v => valSinal(v) === "positivo";
 
 /* Distância de edição, limitada — só precisamos saber se é pequena. */
 function valLev(a,b){
@@ -225,7 +232,11 @@ function valCriarAchado(o){
     cargo: o.cargo ?? "",
     aba: o.aba ?? "",
     datas: o.datas ?? "",
-    valor: o.valor ?? null,
+    /* sinal do lançamento, nunca a grandeza */
+    lancamento: o.lancamento ?? "",
+    /* peso serve só para ordenar os achados dentro da severidade; não é
+       exibido em lugar nenhum, e por isso não é menção monetária */
+    peso: o.peso ?? 0,
     raciocinio: o.raciocinio,
     sugestao: o.sugestao ?? "",
     opcoes: o.opcoes ?? ["Corrigido","Aceito/justificado","Ignorar"],
@@ -237,7 +248,7 @@ function valRegistro(r){
   return {
     aba: r.aba, linha: r.linha, groot: r.groot, nome: r.nome, cargo: r.cargo,
     regime: r.regime ?? "", ini: r.ini ?? null, fim: r.fim ?? null,
-    data: r.data ?? null, qtd: r.qtd ?? null, unit: r.unit ?? null, valor: r.valor ?? null
+    data: r.data ?? null, qtd: r.qtd ?? null, lancamento: valSinal(r.valor)
   };
 }
 
@@ -274,13 +285,14 @@ function valRegraGrootCompartilhado(labor, ctx, achados){
       const dias = valDiasSobrepostos(a,b,ctx.fim);
       const encostados = valEncostados(a,b) || valEncostados(b,a);
       const cargosIguais = valNorm(a.cargo) === valNorm(b.cargo);
-      const ambosPositivos = Number(a.valor) > 0 && Number(b.valor) > 0;
-      const algumNegativo = Number(a.valor) < 0 || Number(b.valor) < 0;
+      const ambosPositivos = valEhPositivo(a.valor) && valEhPositivo(b.valor);
+      const algumNegativo = valEhNegativo(a.valor) || valEhNegativo(b.valor);
       const emAberto = [a,b].filter(x => !(x.fim instanceof Date)).length;
       const registros = [valRegistro(a), valRegistro(b)];
       const base = { groot, nome:a.nome+"  ×  "+b.nome, aba:"LABOR",
         datas: valFmt(a.ini)+"→"+valFmt(a.fim)+"  ×  "+valFmt(b.ini)+"→"+valFmt(b.fim),
-        valor: Number(a.valor||0) + Number(b.valor||0), registros };
+        lancamento: valSinal(a.valor)+" / "+valSinal(b.valor),
+        peso: Math.abs(Number(a.valor)||0) + Math.abs(Number(b.valor)||0), registros };
 
       /* ---- mesma pessoa ---------------------------------------- */
       if(cmp.relacao === "iguais" || cmp.relacao === "variacao"){
@@ -322,8 +334,8 @@ function valRegraGrootCompartilhado(labor, ctx, achados){
               + (isFinite(dias) ? dias+" dia(s)" : "todo o período")+". Enquanto a efetivação encosta um "
               + "período no outro, aqui eles convivem — a pessoa aparece contratada duas vezes nos mesmos dias."
               + (ambosPositivos
-                  ? " Os dois lançamentos são positivos ("+valMoeda(a.valor)+" e "+valMoeda(b.valor)
-                    + "), então os dias sobrepostos estão sendo cobrados em dobro."
+                  ? " Os dois lançamentos são positivos, então os dias sobrepostos estão sendo"
+                    + " cobrados em dobro."
                   : " Um dos lançamentos é negativo, o que sugere estorno ou ajuste retroativo "
                     + "em vez de cobrança dupla — confirme antes de tratar como erro.")
               + (emAberto === 2 ? " Os dois estão em aberto (sem DATA FIM), então a sobreposição não se fecha sozinha." : ""),
@@ -377,13 +389,13 @@ function valRegraGrootCompartilhado(labor, ctx, achados){
           + "consequência financeira menor do que a cobrança simultânea.");
       }
       if(ambosPositivos && sobrepoe){
-        partes.push("Os dois lançamentos são positivos ("+valMoeda(a.valor)+" e "+valMoeda(b.valor)
-          + "): as duas pessoas estão sendo efetivamente cobradas ao mesmo tempo pelo mesmo identificador.");
+        partes.push("Os dois lançamentos são positivos: as duas pessoas estão sendo efetivamente "
+          + "cobradas ao mesmo tempo pelo mesmo identificador.");
       } else if(algumNegativo){
-        const neg = Number(a.valor) < 0 ? a : b;
-        partes.push("O lançamento de \""+neg.nome.trim()+"\" é negativo ("+valMoeda(neg.valor)
-          + "), o que sugere estorno ou correção já em curso — possivelmente o próprio conserto deste "
-          + "problema. Confirme se o estorno cobre exatamente o que foi cobrado a mais.");
+        const neg = valEhNegativo(a.valor) ? a : b;
+        partes.push("O lançamento de \""+neg.nome.trim()+"\" é negativo, o que sugere estorno ou "
+          + "correção já em curso — possivelmente o próprio conserto deste problema. Confirme se o "
+          + "estorno cobre exatamente o período que foi cobrado a mais.");
       }
       partes.push(sobrepoe && ambosPositivos
         ? "Improvável ser alteração cadastral. Recomenda-se identificar qual das duas pessoas tem o GROOT correto e corrigir a outra."
@@ -435,8 +447,7 @@ function valRegraLaborDiarista(labor, diaristas, ctx, achados){
     });
     if(!hits.length) return;
 
-    const negativo = Number(r.valor) < 0;
-    const totalDiarias = hits.reduce((s,h) => s + (Number(h.valor)||0), 0);
+    const negativo = valEhNegativo(r.valor);
     const datas = hits.map(h => valFmt(h.data)).join(", ");
     const semFim = !(r.fim instanceof Date);
 
@@ -447,20 +458,19 @@ function valRegraLaborDiarista(labor, diaristas, ctx, achados){
                        : "Mesma pessoa no LABOR e como diarista nos mesmos dias",
       groot: valGroot(r.groot), nome: r.nome, cargo: r.cargo, aba:"LABOR + DIARISTAS",
       datas: valFmt(r.ini)+"→"+valFmt(r.fim)+" · diárias em "+datas,
-      valor: Number(r.valor||0),
+      lancamento: valSinal(r.valor), peso: Math.abs(Number(r.valor)||0),
       raciocinio:
         "O GROOT "+valGroot(r.groot)+" ("+r.nome.trim()+") tem vínculo LABOR de "+valFmt(r.ini)
         + (semFim ? " em aberto — considerado até o fim do período faturado, "+valFmt(ctx.fim)+" — "
                   : " a "+valFmt(r.fim)+", ")
-        + "e "+hits.length+" diária(s) lançada(s) dentro desse intervalo ("+datas+"), somando "
-        + valMoeda(totalDiarias)+". "
+        + "e "+hits.length+" diária(s) lançada(s) dentro desse intervalo ("+datas+"). "
         + (negativo
-            ? "O lançamento LABOR, porém, é negativo ("+valMoeda(r.valor)+"). Isso muda a leitura: um valor "
+            ? "O lançamento LABOR, porém, é negativo. Isso muda a leitura: um lançamento "
               + "negativo costuma representar estorno, desligamento retroativo ou outro ajuste de "
               + "faturamento — inclusive a própria devolução do fixo para pagar os dias como diária. "
               + "Não trate como dupla cobrança sem checar: o que precisa ser confirmado é se o estorno "
               + "cobre exatamente os dias em que a diária foi paga."
-            : "O lançamento LABOR é positivo ("+valMoeda(r.valor)+"), então nesses dias a pessoa está sendo "
+            : "O lançamento LABOR é positivo, então nesses dias a pessoa está sendo "
               + "cobrada duas vezes: uma pelo quadro fixo e outra pela diária. É dupla cobrança até prova "
               + "em contrário."),
       sugestao: negativo
@@ -485,24 +495,24 @@ function valRegraGrootAusente(linhas, aba, achados){
 
     const cargoN = valNorm(r.cargo).toLowerCase();
     const critico = VAL_CARGOS_CRITICOS.some(c => cargoN.includes(c));
-    const valor = Number(r.valor);
     achados.push(valCriarAchado({
       id:"SG-"+aba+"-"+idx,
       regra:"GROOT ID ausente", severidade: critico ? VAL_SEV.CRITICO : VAL_SEV.REVISAR,
       titulo:"Lançamento sem GROOT ID", groot:"", nome:r.nome, cargo:r.cargo, aba,
       datas: r.data instanceof Date ? valFmt(r.data) : valFmt(r.ini)+"→"+valFmt(r.fim),
-      valor: isFinite(valor) ? valor : null,
+      lancamento: valSinal(r.valor), peso: Math.abs(Number(r.valor)||0),
       raciocinio:
         "A linha de \""+String(r.nome).trim()+"\" ("+(r.cargo || "cargo em branco")+", aba "+aba
-        + ") tem lançamento financeiro de "+valMoeda(valor)+" e nenhum GROOT ID. "
+        + ") tem lançamento e nenhum GROOT ID. "
         + (critico
             ? "O cargo é operacional, e é exatamente nesses — auxiliar e operador — que o cliente concilia "
               + "pessoa a pessoa pelo GROOT. Sem o identificador, a linha não tem como ser conferida do "
               + "outro lado e tende a ser glosada."
             : "O cargo não está entre os que o cliente concilia pessoa a pessoa, então a ausência pesa menos "
               + "— mas continua impedindo o rastreio da linha.")
-        + (valor < 0 ? " O valor é negativo: sendo um estorno, o GROOT é ainda mais necessário para o "
-                     + "cliente casar a devolução com a cobrança original." : ""),
+        + (valEhNegativo(r.valor)
+            ? " O lançamento é negativo: sendo um estorno, o GROOT é ainda mais necessário para o "
+              + "cliente casar a devolução com a cobrança original." : ""),
       sugestao:"Busque o GROOT ID desta pessoa no cadastro e preencha a coluna antes de enviar a fatura.",
       registros:[valRegistro(r)]
     }));
@@ -552,7 +562,7 @@ function valRegraGrootFormato(todas, achados){
       id:"FM-"+g, regra:"GROOT ID fora do padrão",
       severidade: soComprimento ? VAL_SEV.CADASTRO : VAL_SEV.REVISAR,
       titulo:"Identificador fora do padrão predominante",
-      groot:g, nome:r.nome, cargo:r.cargo, aba:r.aba, valor:null,
+      groot:g, nome:r.nome, cargo:r.cargo, aba:r.aba,
       raciocinio:
         "O GROOT \""+bruto.trim()+"\" "+problemas.join(" e ")+". "
         + (padrao
@@ -590,7 +600,7 @@ function valRegraHomonimos(todas, achados){
       id:"HM-"+nome.replace(/\s+/g,"_"), regra:"Homônimo ou cadastro duplicado",
       severidade:VAL_SEV.REVISAR, titulo:"Mesmo nome com GROOT IDs diferentes",
       groot: ids.join(" / "), nome: regs[0].nome, cargo: regs[0].cargo,
-      aba: [...new Set(regs.map(r=>r.aba))].join(" + "), valor:null,
+      aba: [...new Set(regs.map(r=>r.aba))].join(" + "),
       raciocinio:
         "\""+String(regs[0].nome).trim()+"\" aparece com "+ids.length+" identificadores diferentes ("
         + ids.join(", ")+"). Ou são duas pessoas de mesmo nome — o que acontece e é legítimo — ou a mesma "
@@ -615,16 +625,15 @@ function valRegraDiariaDuplicada(diaristas, achados){
   }
   for(const [k,regs] of mapa){
     if(regs.length < 2) continue;
-    const total = regs.reduce((s,r)=>s+(Number(r.valor)||0),0);
     const cargosDistintos = new Set(regs.map(r=>valNorm(r.cargo))).size > 1;
     achados.push(valCriarAchado({
       id:"DD-"+k, regra:"Diária duplicada", severidade:VAL_SEV.CRITICO,
       titulo:"Mesma pessoa com mais de uma diária no mesmo dia",
       groot: valGroot(regs[0].groot), nome: regs[0].nome, cargo: regs[0].cargo, aba:"DIARISTAS",
-      datas: valFmt(regs[0].data), valor: total,
+      datas: valFmt(regs[0].data), peso: regs.length,
       raciocinio:
         "O GROOT "+valGroot(regs[0].groot)+" ("+String(regs[0].nome).trim()+") tem "+regs.length
-        + " diárias lançadas em "+valFmt(regs[0].data)+", somando "+valMoeda(total)+". "
+        + " diárias lançadas em "+valFmt(regs[0].data)+". "
         + "Uma pessoa trabalha no máximo uma diária por dia, então uma das linhas é repetição."
         + (cargosDistintos
             ? " As linhas têm tipos de diária diferentes ("
@@ -650,12 +659,12 @@ function valRegraAritmetica(diaristas, achados){
       id:"AR-"+idx, regra:"Valor final incompatível", severidade:VAL_SEV.CRITICO,
       titulo:"VALOR FINAL diferente de QUANTIDADE × VALOR UNITÁRIO",
       groot: valGroot(d.groot), nome:d.nome, cargo:d.cargo, aba:"DIARISTAS",
-      datas: valFmt(d.data), valor:v,
+      datas: valFmt(d.data), peso: Math.abs(v-esperado),
       raciocinio:
-        "A linha traz quantidade "+q+" e valor unitário "+valMoeda(u)+", o que dá "+valMoeda(esperado)
-        + ", mas o VALOR FINAL lançado é "+valMoeda(v)+" — diferença de "+valMoeda(v-esperado)
-        + ". Como o total da fatura soma o VALOR FINAL, a diferença entra na cobrança do jeito que está. "
-        + "Costuma ser fórmula sobrescrita por digitação manual.",
+        "Nesta linha o VALOR FINAL não corresponde a QUANTIDADE × VALOR UNITÁRIO — a quantidade "
+        + "lançada é "+q+" e o produto das duas colunas não bate com a terceira. Como o total da "
+        + "fatura soma o VALOR FINAL, a diferença entra na cobrança do jeito que está. Costuma ser "
+        + "fórmula sobrescrita por digitação manual. Confira as três células desta linha na planilha.",
       sugestao:"Restaure a fórmula da coluna VALOR FINAL (quantidade × valor unitário) nesta linha.",
       registros:[valRegistro(d)]
     }));
@@ -670,11 +679,11 @@ function valRegraDatasInvertidas(labor, achados){
       id:"DI-"+idx, regra:"Datas invertidas", severidade:VAL_SEV.CRITICO,
       titulo:"DATA FIM anterior à DATA DE INÍCIO",
       groot: valGroot(r.groot), nome:r.nome, cargo:r.cargo, aba:"LABOR",
-      datas: valFmt(r.ini)+"→"+valFmt(r.fim), valor:Number(r.valor||0),
+      datas: valFmt(r.ini)+"→"+valFmt(r.fim), lancamento: valSinal(r.valor),
       raciocinio:
         "O vínculo começa em "+valFmt(r.ini)+" e termina em "+valFmt(r.fim)+" — antes de começar. "
         + "O período é impossível, então qualquer cálculo de dias sobre esta linha sai errado, "
-        + "inclusive o rateio que gera o valor cobrado ("+valMoeda(r.valor)+").",
+        + "inclusive o rateio que gera a cobrança dela.",
       sugestao:"Confira qual das duas datas está trocada e corrija antes de recalcular a linha.",
       registros:[valRegistro(r)]
     }));
@@ -693,12 +702,12 @@ function valRegraForaDoPeriodo(diaristas, ctx, achados){
       id:"FP-"+idx, regra:"Data fora do período", severidade:VAL_SEV.REVISAR,
       titulo:"Diária lançada fora do período faturado",
       groot: valGroot(d.groot), nome:d.nome, cargo:d.cargo, aba:"DIARISTAS",
-      datas: valFmt(d.data), valor:Number(d.valor||0),
+      datas: valFmt(d.data), lancamento: valSinal(d.valor),
       raciocinio:
         "A diária de "+String(d.nome).trim()+" está lançada em "+valFmt(d.data)+", fora do período "
         + "faturado ("+valFmt(ctx.ini)+" a "+valFmt(ctx.fim)+"). Pode ser retroativo legítimo de uma "
-        + "competência anterior que não foi cobrada, ou data digitada com mês errado — o valor de "
-        + valMoeda(d.valor)+" entra nesta fatura de qualquer forma.",
+        + "competência anterior que não foi cobrada, ou data digitada com mês errado — de um jeito "
+        + "ou de outro a linha entra nesta fatura.",
       sugestao:"Confirme se é retroativo aprovado. Não sendo, corrija a data ou mova a linha para a competência correta.",
       registros:[valRegistro(d)]
     }));
@@ -719,9 +728,9 @@ function valRegraCamposVazios(linhas, aba, achados){
       titulo: semNome ? "Lançamento sem nome" : "Lançamento sem cargo",
       groot: valGroot(r.groot), nome:r.nome, cargo:r.cargo, aba,
       datas: r.data instanceof Date ? valFmt(r.data) : valFmt(r.ini)+"→"+valFmt(r.fim),
-      valor: Number(r.valor),
+      lancamento: valSinal(r.valor),
       raciocinio:
-        "A linha tem lançamento financeiro de "+valMoeda(r.valor)+" e está "
+        "A linha tem lançamento e está "
         + (semNome ? "sem nome" : "sem cargo")+(semNome && semCargo ? " e sem cargo" : "")+". "
         + "Uma linha que cobra precisa dizer por quem e a que título — sem isso ela não é conferível "
         + "nem por você nem pelo cliente.",
@@ -749,7 +758,7 @@ function valRegraRegimeInconsistente(labor, achados){
     achados.push(valCriarAchado({
       id:"RG-"+chave, regra:"Grafia inconsistente", severidade:VAL_SEV.CADASTRO,
       titulo:"Mesmo regime de contrato escrito de formas diferentes",
-      groot:"", nome:"", cargo:"", aba:"LABOR", valor:null,
+      groot:"", nome:"", cargo:"", aba:"LABOR",
       raciocinio:
         "O regime aparece como "+lista.map(([f,n]) => "\""+f+"\" ("+n+"x)").join(" e ")
         + ". É o mesmo vínculo escrito de jeitos diferentes: não altera valor, mas qualquer "
@@ -789,12 +798,12 @@ function valRegraTarifaDestoante(diaristas, achados){
         regra:"Tarifa destoante", severidade:VAL_SEV.REVISAR,
         titulo:"Valor unitário fora do praticado no mesmo tipo de diária",
         groot: valGroot(d.groot), nome:d.nome, cargo:d.cargo, aba:"DIARISTAS",
-        datas: valFmt(d.data), valor:Number(d.valor||0),
+        datas: valFmt(d.data), peso: desvio,
         raciocinio:
-          "Esta diária de \""+d.cargo+"\" foi lançada a "+valMoeda(u)+", enquanto a mediana das "
-          + regs.length+" diárias do mesmo tipo nesta fatura é "+valMoeda(mediana)+" — "
-          + Math.round(desvio*100)+"% de diferença. Pode ser tarifa nova entrando em vigor no meio do "
-          + "período, ou valor digitado por cima da fórmula.",
+          "Esta diária de \""+d.cargo+"\" tem VALOR UNITÁRIO "+Math.round(desvio*100)+"% "
+          + (u > mediana ? "acima" : "abaixo")+" da mediana das "+regs.length
+          + " diárias do mesmo tipo nesta fatura. Pode ser tarifa nova entrando em vigor no meio do "
+          + "período, ou célula digitada por cima da fórmula.",
         sugestao:"Confirme a tarifa vigente para a data. Sendo reajuste, marque como justificado.",
         registros:[valRegistro(d)]
       }));
@@ -816,16 +825,15 @@ function valRegraLinhaDuplicada(labor, achados){
   for(const [k,itens] of mapa){
     if(itens.length < 2) continue;
     const regs = itens.map(i=>i.r);
-    const total = regs.reduce((s,x)=>s+(Number(x.valor)||0),0);
     achados.push(valCriarAchado({
       id:"LDup-"+k, regra:"Linha duplicada", severidade:VAL_SEV.CRITICO,
       titulo:"Linhas idênticas no LABOR",
       groot: valGroot(regs[0].groot), nome:regs[0].nome, cargo:regs[0].cargo, aba:"LABOR",
-      datas: valFmt(regs[0].ini)+"→"+valFmt(regs[0].fim), valor: total,
+      datas: valFmt(regs[0].ini)+"→"+valFmt(regs[0].fim), peso: itens.length,
       raciocinio:
         itens.length+" linhas do LABOR trazem o mesmo GROOT, o mesmo período, o mesmo cargo e o mesmo "
-        + "regime para "+String(regs[0].nome).trim()+", somando "+valMoeda(total)+". "
-        + "Não há informação que as diferencie: uma delas é repetição, e o valor está sendo cobrado "
+        + "regime para "+String(regs[0].nome).trim()+". "
+        + "Não há informação que as diferencie: uma delas é repetição, e a linha está sendo cobrada "
         + itens.length+" vezes.",
       sugestao:"Mantenha uma única linha e remova as repetições.",
       registros: regs.map(valRegistro)
@@ -846,7 +854,7 @@ function valRegraHoraExtraOrfa(horaExtra, labor, achados){
       id:"HE-"+idx, regra:"Hora extra sem vínculo", severidade:VAL_SEV.REVISAR,
       titulo:"Hora extra de quem não está no LABOR",
       groot: valGroot(h.groot), nome:h.nome, cargo:h.cargo, aba:"HORA EXTRA",
-      datas:"—", valor: Number(h.valor||0),
+      datas:"—", lancamento: valSinal(h.valor),
       raciocinio:
         "O GROOT "+valGroot(h.groot)+" ("+String(h.nome).trim()+") tem hora extra lançada mas não aparece "
         + "em nenhuma linha do LABOR desta fatura. Ou a pessoa saiu do quadro e a hora extra é retroativa, "
@@ -884,12 +892,12 @@ function auditarFatura(dados){
   valRegraLinhaDuplicada(labor, achados);
   valRegraHoraExtraOrfa(horaExtra, labor, achados);
 
-  /* Crítico primeiro; dentro da severidade, o de maior valor absoluto —
-     o dinheiro ordena o que se olha antes. */
+  /* Crítico primeiro; dentro da severidade, o de maior peso — quantas
+     linhas o achado envolve e quão longe do normal ele está. */
   achados.sort((a,b) => {
     const d = VAL_SEV_ORDEM.indexOf(a.severidade) - VAL_SEV_ORDEM.indexOf(b.severidade);
     if(d) return d;
-    return Math.abs(Number(b.valor)||0) - Math.abs(Number(a.valor)||0);
+    return (Number(b.peso)||0) - (Number(a.peso)||0);
   });
 
   const resumo = { critico:0, revisar:0, cadastro:0, info:0 };
@@ -897,11 +905,9 @@ function auditarFatura(dados){
 
   return {
     periodo: ctx,
-    totais: {
-      labor: labor.length, diaristas: diaristas.length,
-      valorLabor: labor.reduce((s,r)=>s+(Number(r.valor)||0),0),
-      valorDiaristas: diaristas.reduce((s,r)=>s+(Number(r.valor)||0),0)
-    },
+    /* Contagem de linhas, e só. Somar os lançamentos daria um total
+       monetário, que este app não escreve. */
+    totais: { labor: labor.length, diaristas: diaristas.length },
     resumo, achados
   };
 }

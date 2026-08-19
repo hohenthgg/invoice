@@ -20,6 +20,12 @@ servidor, banco nem envio de arquivos.
 A aba é escolhida pelo topo da página e também pela URL: `index.html#fusao` abre
 direto na segunda.
 
+**O app não escreve valor monetário em lugar nenhum** — nem na tela, nem em arquivo
+exportado. Tudo é medido em pessoas, dias, FTE e headcount. Onde a conclusão depende
+de um lançamento, o que entra na conta é o **sinal** dele: positivo é cobrança,
+negativo é estorno, e é essa diferença que separa dupla cobrança de ajuste
+retroativo. A grandeza não muda nenhuma conclusão do app, então não é escrita.
+
 ### Conciliação Faturas
 
 Tem dois modos, escolhidos no topo da aba.
@@ -216,8 +222,8 @@ Dois modos, escolhidos no topo da aba: **auditar a fatura** e **simular o retorn
 #### Auditar inconsistências
 
 Recebe uma fatura no template padrão e a audita **como um auditor faria**: cruza GROOT ID, nome,
-cargo, vínculo, datas e valores entre as abas `LABOR` e `DIARISTAS` e separa o que é erro do que é
-movimentação legítima de contrato ou ajuste financeiro. `RESUMO` e `HORA EXTRA` entram como apoio.
+cargo, vínculo, datas e o sinal dos lançamentos entre as abas `LABOR` e `DIARISTAS` e separa o que
+é erro do que é movimentação legítima de contrato ou ajuste retroativo. `RESUMO` e `HORA EXTRA` entram como apoio.
 
 O ponto da aba não são as regras isoladas — é a **combinação de evidências**. Duas linhas com o
 mesmo GROOT ID têm exatamente os mesmos campos preenchidos e podem ser coisas opostas:
@@ -235,10 +241,10 @@ sobrepor e o vínculo evolui de Temporário para Efetivo: o app classifica como 
 sugere consolidar numa linha só, apagando a DATA FIM. No segundo os nomes não têm relação, os
 cargos diferem e os períodos **se sobrepõem** com as duas linhas positivas: **Crítico**.
 
-O sinal do valor muda a conclusão. A mesma sobreposição LABOR × DIARISTA é dupla cobrança quando o
+O sinal do lançamento muda a conclusão. A mesma sobreposição LABOR × DIARISTA é dupla cobrança quando o
 LABOR é positivo e cai para **Revisar** quando é negativo — negativo costuma ser estorno,
 desligamento retroativo ou a própria devolução do fixo para pagar os dias como diária. O app não
-decide que um valor negativo está errado.
+decide que um lançamento negativo está errado.
 
 O que a aba procura: GROOT compartilhado por pessoas diferentes · transição Temporário → Efetivo ·
 variação cadastral de nome · períodos sobrepostos · LABOR × DIARISTA · GROOT ausente (com destaque

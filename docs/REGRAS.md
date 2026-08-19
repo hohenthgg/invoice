@@ -275,12 +275,12 @@ Uma terceira fonte (base de movimentações de RH) pode, no futuro, corroborar u
 retroativo sem origem. O motor já aceita essa fonte como parâmetro opcional; ela
 não é necessária para o resto funcionar.
 
-### Impacto financeiro
+### A unidade de medida é FTE, nunca moeda
 
-Quando a planilha traz uma tarifa inequívoca, o app converte FTE em valor e
-mostra original, esperado, encontrado e diferença. Quando não traz, diz
-exatamente isso — *"impacto financeiro não calculado: tarifa insuficiente ou
-ambígua"* — e nunca inventa um número.
+O app mede tudo em **FTE e em dias** e **não escreve valor monetário em lugar
+nenhum** — nem na tela, nem no arquivo exportado. A conversão de FTE em moeda
+existiu e foi retirada: quem precisa do impacto em dinheiro aplica a tarifa
+fora do app, onde a tarifa é conhecida.
 
 ### Quem decide
 
@@ -292,8 +292,7 @@ preserva o restante do documento — abas, fórmulas, estilos e formatos. O que
 mudou, e o que o usuário decidiu não tratar, fica registrado numa aba
 `CONCILIAÇÃO` dentro da cópia, com competências, classificação da linha, status,
 alertas, confiança e sua base, cobrança original, ajuste esperado e encontrado,
-decisão do usuário, período e FTE finais, alteração aplicada, impacto financeiro
-e observação.
+decisão do usuário, período e FTE finais, alteração aplicada e observação.
 
 ### Pessoa-dia: a unidade de identidade do aplicativo
 
