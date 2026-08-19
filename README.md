@@ -316,6 +316,24 @@ Cada dia sai com S&OP por operação, S&OP total, PREF, Q Pós previsto, gap, co
 status e diagnóstico em texto. O painel separa **provável redução**, **alinhado** e **possível
 subfaturamento**, do maior desvio para o menor.
 
+#### Diaristas disponíveis no dia (opcional)
+
+Soltando também a base SIGO de diaristas, aparece ao lado do gap a coluna **Diaristas disp.**:
+quantos havia naquele dia para cobrir a falta, quebrados entre **internos** e **do cliente**. A aba
+do SIGO é escolhida pela **unidade da própria fatura**, lida do `RESUMO` — não pelo nome do arquivo.
+
+Disponível quer dizer **ainda não cobrado**. Cada Groot ID solicitado é cruzado com o `LABOR` da
+mesma fatura **naquele dia**, e quem já está lá sai da conta — a coluna mostra `N já no LABOR`, para
+o desconto ficar visível em vez de implícito. O cruzamento usa o **saldo líquido** do dia, não a
+existência da linha: quem tem o fixo **estornado** (rateio negativo) cobrindo justamente aquelas
+datas continua disponível, porque a devolução é exatamente o que permite pagá-lo como diária. A
+mesma pessoa pedida pelos dois lados no mesmo dia é **uma pessoa, contada como interna** — a mesma
+prioridade do abate "ambos" da aba Calcular ABS.
+
+A cobertura possível de cada dia é `MIN(disponíveis, falta)`, então um dia nunca fica positivo por
+sobra de diarista, e o diagnóstico do dia passa a dizer quantos havia e quanto dariam para cobrir.
+É **leitura, não abate**: nada entra no PREF nem no Q Pós previsto.
+
 A exportação gera quatro abas: `COMPARATIVO` (leitura humana), `RETORNO SIMULADO` (com os mesmos
 cabeçalhos que a Fusão de Linhas procura, para servir de retorno de teste lá), `METADADOS` (o
 aviso de que o arquivo é simulado e as fórmulas usadas) e `FORA DO PREF` (toda linha excluída e
@@ -470,8 +488,11 @@ planilha, e que uma fatura limpa não gera achado nenhum.
 dois sentidos com os números reais de Varginha — 16/07 = 120 + 16, 19/07 = 80 + 12, 10/08 = 120 +
 17 — e prova que retroativo negativo não reduz o headcount do dia, que liderança e indiretos não
 entram sozinhos, que cargo desconhecido vira aviso em vez de palpite, e que célula de S&OP vazia
-vira revisão em vez de zero. Carrega `dates.js`, `config.js` e `billing.js` no mesmo contexto, de
-modo que a classificação de retroativo exercitada é a mesma que a Conciliação usa.
+vira revisão em vez de zero. Um bloco garante a **paridade com a Fusão de Linhas** — o PREF de cada
+dia é confrontado com a conta da Fusão, dia a dia, e o teste morde: o dia do estorno muda de valor
+se o sinal do rateio for ignorado. Outro cobre os **diaristas disponíveis**: quem já está cobrado no
+LABOR do dia não conta, quem está lá com o fixo estornado conta, o mesmo Groot pedido pelos dois
+lados é uma pessoa contada como interna, e sem a planilha o resultado não inventa disponibilidade.
 
 `tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
 classificações de status, a reconstrução da cobrança original (o corte projeta

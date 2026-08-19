@@ -122,6 +122,75 @@ const simRateio = l =>
 const simAtivo = (l,d) => l.inicio <= d && (!isValidYmd(l.fim) || l.fim >= d);
 
 /* ================================================================
+   DIARISTAS DISPONÍVEIS NO DIA
+
+   Quando o PREF fica abaixo do S&OP, a pergunta seguinte é quem
+   poderia cobrir a diferença. O SIGO diz quem foi solicitado em cada
+   dia, e por quem — ID Logistics ou o cliente.
+
+   Só que estar solicitado não é o mesmo que estar disponível: se a
+   pessoa já aparece no LABOR daquele dia, ela já está sendo cobrada
+   como quadro fixo, e contá-la de novo seria contar duas vezes.
+
+   A ocupação é medida pelo LÍQUIDO do dia, não pela existência da
+   linha. Uma linha de rateio -1 cobrindo 27/07→31/07 é justamente o
+   estorno do fixo para pagar aqueles dias como diária: a pessoa está
+   livre, e é assim que os três casos reais desta fatura se comportam.
+   ================================================================ */
+function simGrootNum(v){ return String(v ?? "").replace(/\D/g,""); }
+
+function simDisponibilidade(diaristas, labor, dias){
+  if(!diaristas || !diaristas.length) return null;
+
+  /* Líquido do LABOR por GROOT e por dia — todas as linhas, não só as
+     do PREF: a pergunta é se a pessoa já está cobrada, em qualquer
+     cargo. */
+  const porGroot = new Map();
+  for(const l of labor){
+    const g = simGrootNum(l.groot);
+    if(!g || !isValidYmd(l.inicio)) continue;
+    if(!porGroot.has(g)) porGroot.set(g, []);
+    porGroot.get(g).push(l);
+  }
+  const ocupado = (g, d) => {
+    const ls = porGroot.get(g);
+    if(!ls) return false;
+    let liq = 0;
+    for(const l of ls) if(simAtivo(l,d)) liq += simRateio(l);
+    return liq > 0;
+  };
+
+  /* Uma pessoa por dia, e a ID tem precedência: o mesmo GROOT pedido
+     pelos dois no mesmo dia é uma pessoa só, contada como ID. */
+  const porDia = new Map();
+  for(const r of diaristas){
+    const g = simGrootNum(r.groot);
+    if(!g || !isValidYmd(r.data)) continue;
+    if(!porDia.has(r.data)) porDia.set(r.data, new Map());
+    const m = porDia.get(r.data);
+    const atual = m.get(g);
+    if(atual === "id") continue;                       // já é ID, nada supera
+    m.set(g, r.solic === "id" ? "id" : (atual || r.solic || ""));
+  }
+
+  const mapa = {};
+  for(const d of dias){
+    const m = porDia.get(d) || new Map();
+    const cont = { total:m.size, id:0, meli:0, sem:0,
+                   ocupados:0, disp:0, dispId:0, dispMeli:0, dispSem:0 };
+    for(const [g, solic] of m){
+      const chave = solic === "id" ? "id" : solic === "meli" ? "meli" : "sem";
+      cont[chave]++;
+      if(ocupado(g,d)){ cont.ocupados++; continue; }
+      cont.disp++;
+      cont[chave === "id" ? "dispId" : chave === "meli" ? "dispMeli" : "dispSem"]++;
+    }
+    mapa[d] = cont;
+  }
+  return mapa;
+}
+
+/* ================================================================
    O CONFRONTO, DIA A DIA
    ================================================================ */
 function simDiagnostico(dia){
@@ -143,13 +212,21 @@ function simDiagnostico(dia){
   if(dia.status === SIM_STATUS.SUB){
     return "O Labor enviado está "+n(-dia.gap)+" HC abaixo do S&OP disponível ("+fontes
       + " = "+n(dia.qCliente)+"). Não presumir que o cliente aumentará automaticamente a "
-      + "cobrança: verifique se existem pessoas faturáveis faltando no Labor.";
+      + "cobrança: verifique se existem pessoas faturáveis faltando no Labor."
+      + (dia.diaristas
+          ? " Havia "+n(dia.diaristas.disp)+" diarista(s) disponível(is) neste dia ("
+            + n(dia.diaristas.dispId)+" ID, "+n(dia.diaristas.dispMeli)+" cliente)"
+            + (dia.diaristas.ocupados ? ", fora "+n(dia.diaristas.ocupados)
+                                        + " que já constam no LABOR do dia" : "")
+            + " — dariam para cobrir "+n(dia.abatePossivel)+" HC."
+          : "");
   }
   return "PREF e S&OP total batem em "+n(dia.qCliente)+" ("+fontes+"). Sem correção prevista.";
 }
 
 function simularRetorno(dados){
   const labor = dados.labor || [], blocos = dados.blocos || [];
+  const diaristas = dados.diaristas || [];
   const ini = dados.periodo.ini, fim = dados.periodo.fim;
   const comp = dados.comp;
   const avisos = [];
@@ -180,8 +257,13 @@ function simularRetorno(dados){
     nSemInicio+" linha(s) ficaram fora do PREF por não ter DATA DE INÍCIO legível. Sem a data "
     + "não há como saber em que dias elas estariam ativas." });
 
+  const listaDias = [];
+  for(let d = ini; d <= fim; d = addDays(d,1)) listaDias.push(d);
+  const disponibilidade = simDisponibilidade(diaristas, labor, listaDias);
+
   const dias = [];
   let totalPref = 0, totalBruto = 0, totalCliente = 0, totalPos = 0, hcAcima = 0, hcAbaixo = 0;
+  let totalDisp = 0, totalAbate = 0, totalOcupados = 0;
   const contagem = { reducao:0, alinhado:0, subfaturamento:0, revisao:0 };
 
   for(let d = ini; d <= fim; d = addDays(d,1)){
@@ -231,6 +313,18 @@ function simularRetorno(dados){
       totalPref += pref; totalBruto += bruto; totalCliente += qCliente; totalPos += qPos;
       if(dia.gap > 0) hcAcima += dia.gap; else hcAbaixo += -dia.gap;
     }
+    /* Quantos diaristas poderiam cobrir a falta do dia — limitado à
+       própria falta, como no abate de ABS: um dia nunca fica positivo
+       por sobra de diarista. */
+    if(disponibilidade){
+      const c = disponibilidade[d];
+      dia.diaristas = c;
+      const falta = (dia.gap !== null && dia.gap < 0) ? -dia.gap : 0;
+      dia.abatePossivel = Math.min(c.disp, falta);
+      totalDisp += c.disp;
+      totalOcupados += c.ocupados;
+      totalAbate += dia.abatePossivel;
+    }
     dia.diagnostico = simDiagnostico(dia);
     contagem[dia.status]++;
     dias.push(dia);
@@ -248,6 +342,8 @@ function simularRetorno(dados){
       /* O número que resume o risco: HC-dia que o cliente pode cortar. */
       hcEmRisco: Math.round(hcAcima*100)/100,
       hcAbaixo: Math.round(hcAbaixo*100)/100,
+      ...(disponibilidade ? { diaristasDisp: totalDisp, diaristasOcupados: totalOcupados,
+                              abatePossivel: totalAbate } : {}),
       dias: dias.length, ...contagem
     }
   };
