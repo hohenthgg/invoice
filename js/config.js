@@ -9,6 +9,15 @@ const RETORNO_SHEET = "Retorno MELI";
 const CUT_DAY = 15;
 const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 const MELI_HEADERS = ["GROOT ID","NOME","MATRICULA","REGIME DE CONTRATO","CARGO","DATA DE INÍCIO","DATA FIM","% RATEIO","DIAS TRABALHADOS X FOLGA","ESCALA"];
+
+/* Cargos que entram no PREF — o headcount operacional que o cliente
+   concilia. Vive aqui, e não dentro de uma aba, porque duas abas já
+   dependem dele: a Fusão de Linhas conta headcount por dia com esta
+   lista, e a simulação de retorno reconstrói o PREF com a mesma. Duas
+   cópias divergentes dariam dois PREFs diferentes para o mesmo Labor.
+   Comparar sempre em minúsculas e sem acento. */
+const CARGOS_PREF = ["auxiliar de apoio log i","operador transpaleteira",
+                     "part time - auxiliar log i (3 dias)"];
 const COLS = {
   groot:["GROOT ID"], nome:["NOME"], matricula:["MATRICULA","MATRÍCULA"],
   regime:["REGIME DE CONTRATO"], cargo:["CARGO"],

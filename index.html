@@ -459,6 +459,22 @@
 <!-- ==================== ABA 5 — VALIDAÇÃO TEMPLATE ==================== -->
 <div class="apppanel" id="panel-validacao">
 
+  <div class="vt-modos" id="vt-modos">
+    <button class="vt-modo ativo" data-modo="auditoria">
+      <b>Auditar inconsistências da fatura</b>
+      <i>Cruza LABOR × DIARISTAS e aponta GROOT ID repetido, dupla cobrança, cadastro
+         incompleto e valor incoerente — com o porquê de cada apontamento.</i>
+    </button>
+    <button class="vt-modo" data-modo="simulacao">
+      <b>Simular o retorno</b>
+      <i>Confronta o PREF que o Labor envia com o S&amp;OP diário e prevê, dia a dia,
+         quanto o cliente tende a reconhecer.</i>
+    </button>
+  </div>
+
+  <!-- ---------------- MODO 1 — auditoria ---------------- -->
+  <div class="vt-painel ativo" id="vt-painel-auditoria">
+
   <p class="vt-intro">Audita uma fatura no template padrão como um auditor faria: cruza <b>GROOT ID, nome,
     cargo, vínculo, datas e valores</b> entre as abas <b>LABOR</b> e <b>DIARISTAS</b>, separa o que é erro
     do que é movimentação legítima de contrato ou ajuste financeiro, e explica o porquê de cada
@@ -490,6 +506,73 @@
 
     <div class="vt-acoes-fim">
       <button class="vt-btn" id="vt-btnExport">Baixar relatório da auditoria (.xlsx)</button>
+    </div>
+  </div>
+  </div>
+
+  <!-- ---------------- MODO 2 — simulação de retorno ---------------- -->
+  <div class="vt-painel" id="vt-painel-simulacao">
+
+    <p class="vt-intro">Reconstrói o <b>PREF</b> a partir da aba LABOR da fatura, soma o <b>S&amp;OP diário</b>
+      de todas as operações da planilha operacional e prevê o que o cliente tende a reconhecer:
+      <b>Q Pós previsto = MIN(PREF, S&amp;OP)</b>. A previsão é assimétrica de propósito — o cliente pode
+      cortar o que foi enviado acima do planejamento, mas não paga o que não foi enviado.
+      <b>É previsão, não retorno oficial.</b></p>
+
+    <div class="sm-passos">
+      <div class="sm-passo">
+        <div class="sm-n">1</div>
+        <div class="sm-drop" id="sm-dropF">
+          <div class="ttl">Fatura no template padrão</div>
+          <div class="fname" id="sm-fnF">Clique ou arraste o .xlsx</div>
+          <div class="hint">a aba <code>LABOR</code> é a origem do PREF</div>
+          <div class="st" id="sm-stF"></div>
+        </div>
+      </div>
+      <div class="sm-passo">
+        <div class="sm-n">2</div>
+        <div class="sm-drop" id="sm-dropS">
+          <div class="ttl">Planilha operacional (S&amp;OP)</div>
+          <div class="fname" id="sm-fnS">Clique ou arraste o .xlsx</div>
+          <div class="hint">uma aba por operação, cada uma com a linha <code>Esperado</code></div>
+          <div class="st" id="sm-stS"></div>
+        </div>
+      </div>
+      <div class="sm-passo">
+        <div class="sm-n">3</div>
+        <div class="sm-acao">
+          <button class="vt-btn" id="sm-btnRun" disabled>Analisar</button>
+          <span class="sm-msg" id="sm-msgRun">Carregue os dois arquivos.</span>
+        </div>
+      </div>
+    </div>
+    <input type="file" id="sm-fileF" accept=".xlsx,.xls"><input type="file" id="sm-fileS" accept=".xlsx,.xls">
+    <div id="sm-err" class="err hidden"></div>
+
+    <div id="sm-result" class="hidden">
+      <div class="sm-selo">Retorno <b>previsto</b> — estimado por MIN(PREF, S&amp;OP). Não é o retorno oficial do cliente.</div>
+      <div id="sm-avisos"></div>
+      <div class="sm-cards" id="sm-cards"></div>
+
+      <div class="sm-bloco">
+        <h3>PREF enviado × S&amp;OP × Q Pós previsto</h3>
+        <div class="sm-legenda" id="sm-legenda"></div>
+        <div class="sm-chart" id="sm-chart"></div>
+      </div>
+
+      <div class="sm-bloco">
+        <h3>Desvios, do maior para o menor</h3>
+        <div class="sm-desvios" id="sm-desvios"></div>
+      </div>
+
+      <div class="sm-bloco">
+        <h3>Dia a dia</h3>
+        <div class="sm-tabela" id="sm-tabela"></div>
+      </div>
+
+      <div class="vt-acoes-fim">
+        <button class="vt-btn" id="sm-btnExport">Exportar Retorno Simulado (.xlsx)</button>
+      </div>
     </div>
   </div>
 </div>
@@ -598,6 +681,8 @@
 <!-- Aba 5: o motor de auditoria vem antes da tela que o consome. -->
 <script src="js/validacao.js"></script>
 <script src="js/validacao-ui.js"></script>
+<script src="js/simulacao.js"></script>
+<script src="js/simulacao-ui.js"></script>
 
 <script src="js/tabs.js"></script>
 </body>
