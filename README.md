@@ -281,8 +281,12 @@ operações da planilha operacional e prevê o que o cliente tende a reconhecer.
 O PREF é reconstruído com a **mesma regra da Fusão de Linhas** — cargo na lista, dia dentro de
 `[início, fim]` com fim vazio valendo até o fim do período, e o `% RATEIO` entrando **com o sinal
 que tem**. O sinal é o ponto: o PREF é uma quantidade **faturada**, líquida dos estornos, não um
-retrato do turno. Havendo estorno, o **headcount bruto** (só os positivos) aparece ao lado — ele
-responde "quanta gente estava no turno", mas quem vai ao confronto com o S&OP é o líquido.
+retrato do turno. O **headcount bruto** (só os positivos) responde "quanta gente estava no turno" e sai no arquivo
+exportado; na tela fica o líquido, que é quem vai ao confronto com o S&OP.
+
+O S&OP tem **duas fontes**, escolhidas na tela: a **planilha operacional**, dia a dia somando as
+operações, ou um **valor fixo do mês** digitado à mão, igual em todos os dias — nesse caso a
+planilha não é necessária e o período sai da competência da própria fatura.
 
 A regra da previsão é **assimétrica de propósito**:
 

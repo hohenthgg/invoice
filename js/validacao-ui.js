@@ -306,26 +306,19 @@ function desenharQuadro(q){
   const el = $("vt-quadro");
   if(!q){ el.innerHTML = ""; return; }
   const n = v => Number(Number(v).toFixed(2)).toLocaleString("pt-BR");
-  const barras = q.dias.map(d => {
-    const alt = q.max > 0 ? Math.max(3, Math.round(d.liquido/q.max*100)) : 3;
-    return '<span class="vq-b" style="height:'+alt+'%" title="'
-      + fmtD(d.data)+" · "+n(d.liquido)+" pessoa(s)"
-      + (d.bruto !== d.liquido ? " · bruto "+n(d.bruto) : "")+'"></span>';
-  }).join("");
+  const nums = [
+    ["pessoas distintas", q.pessoas],
+    ["menor dia", n(q.min)],
+    ["maior dia", n(q.max)],
+    ["média por dia", n(q.media)]
+  ];
+  if(q.estornos) nums.push(["estornos subtraídos", q.estornos]);
   el.innerHTML = '<div class="vt-quadro">'
     + '<div class="vq-tit"><b>Quadro apresentado na fatura</b>'
     +   '<small>auxiliar e operador · soma dos % RATEIO das linhas ativas em cada dia, '
     +   'com o sinal — a mesma conta da Fusão de Linhas</small></div>'
-    + '<div class="vq-nums">'
-    +   '<div><span>pessoas distintas</span><b>'+q.pessoas+'</b></div>'
-    +   '<div><span>menor dia</span><b>'+n(q.min)+'</b></div>'
-    +   '<div><span>maior dia</span><b>'+n(q.max)+'</b></div>'
-    +   '<div><span>média por dia</span><b>'+n(q.media)+'</b></div>'
-    +   (q.estornos ? '<div><span>estornos subtraídos</span><b>'+q.estornos+'</b></div>' : "")
-    + '</div>'
-    + '<div class="vq-graf">'+barras+'</div>'
-    + '<div class="vq-eixo"><span>'+fmtD(q.dias[0].data)+'</span>'
-    +   '<span>'+fmtD(q.dias[q.dias.length-1].data)+'</span></div>'
+    + '<div class="vq-nums">'+nums.map(([r,v]) =>
+        '<div><span>'+r+'</span><b>'+esc(String(v))+'</b></div>').join("")+'</div>'
     + '</div>';
 }
 
