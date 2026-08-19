@@ -86,7 +86,8 @@ function lerFatura(wb){
   const c = h.cels;
   const iG=col(c,"GROOT ID"), iN=col(c,"NOME"), iC=col(c,"CARGO"), iCt=col(c,"DESCRICAO CONTA"),
         iR=col(c,"REGIME DE CONTRATO"), iI=col(c,"DATA DE INICIO"), iF=col(c,"DATA FIM"),
-        iRa=col(c,"% RATEIO","RATEIO"), iP=col(c,"PERIODO"), iMt=col(c,"MATRICULA");
+        iRa=col(c,"% RATEIO","RATEIO"), iP=col(c,"PERIODO"), iMt=col(c,"MATRICULA"),
+        iDf=col(c,"DIAS TRABALHADOS X FOLGA"), iEs=col(c,"ESCALA");
   const faltando = [];
   if(iI < 0) faltando.push("DATA DE INÍCIO");
   if(iF < 0) faltando.push("DATA FIM");
@@ -111,6 +112,8 @@ function lerFatura(wb){
       matricula: iMt >= 0 ? String(r[iMt] ?? "").trim() : "",
       inicio: parseExcelDate(r[iI]), fim: parseExcelDate(r[iF]),
       rateio: parseRateio(r[iRa]),
+      diasFolga: iDf >= 0 ? String(r[iDf] ?? "").trim() : "",
+      escala: iEs >= 0 ? String(r[iEs] ?? "").trim() : "",
       /* A linha crua e a posição das colunas ficam guardadas porque a
          exportação devolve o LABOR no layout do próprio template — as
          colunas que o app não lê têm de sair como entraram. */
@@ -786,9 +789,10 @@ function desenharEqualizacao(){
           + (p.solic === "id" ? "ID" : p.solic === "meli" ? "do cliente" : "sem solicitante")+'</small></div>'
           + '<div class="mud">'+esc(p.faixas.map(faixaTxt).join(", "))
           + '<small>+'+p.total+' dia(s)</small></div></div>'
-          + '<div class="det"><p>Entra no LABOR exportado com '+p.faixas.length+' linha(s), '
-          + 'cargo do quadro e % rateio 1. Matrícula, escala e turno ficam <b>em branco</b> — '
-          + 'o SIGO não os informa, e preencher com o de outra pessoa seria inventar.</p></div></div>').join("")
+          + '<div class="det"><p>Sai na aba <b>Diaristas</b> do arquivo exportado, no layout da '
+          + 'fatura: '+p.total+' linha(s), uma por dia, cargo <i>Diarista</i> e quantidade 1. '
+          + 'Não entra no Labor — quem cobre a falta é diarista, não quadro fixo, e lançá-lo '
+          + 'como fixo seria cobrar outra coisa.</p></div></div>').join("")
       + '</div>' : "";
 
   const listaDias = (o, neg) => Object.keys(o).map(Number).sort((a,b)=>a-b)
@@ -812,7 +816,7 @@ function desenharEqualizacao(){
     + 'nada é alterado na fatura por aqui.</div>'
     + grupos + grupoInc + revisar + falta
     + '<div class="vt-acoes-fim"><button class="vt-btn" id="sm-btnExportEq">'
-    + 'Exportar Labor equalizado (.xlsx)</button></div>';
+    + 'Exportar fatura equalizada (.xlsx)</button></div>';
   const btn = $("sm-btnExportEq");
   if(btn) btn.onclick = exportarEqualizado;
 }
@@ -820,31 +824,102 @@ function desenharEqualizacao(){
 /* ================================================================
    EXPORTAÇÃO DO LABOR EQUALIZADO
 
-   O arquivo sai no layout do PRÓPRIO template: o cabeçalho original,
-   as colunas na ordem original, e cada linha que não mudou saindo
-   exatamente como entrou — inclusive as colunas que o app nem lê. É a
-   mesma ideia da exportação da Fusão de Linhas, com a diferença de que
-   aqui as pessoas que faltam já vêm PREENCHIDAS, e não numa aba de
-   "a incluir" para alguém resolver à mão.
+   O arquivo sai no LAYOUT DA FATURA — as duas abas que o cliente lê,
+   `Labor` e `Diaristas`, com as colunas, as larguras, o cabeçalho
+   amarelo e as bordas do modelo. Escrito com ExcelJS, porque o SheetJS
+   da leitura não carrega estilo.
 
-   O que uma linha nova NÃO tem, fica em branco. Matrícula, escala,
-   turno, dias trabalhados e tudo o que depende de contrato não são
-   deduzíveis do SIGO, e preencher com o valor de outra pessoa poria
-   dado errado com cara de certo. Das colunas de contexto só são
-   copiadas as que têm o MESMO valor em toda a fatura — fornecedor,
-   unidade, conta —, porque aí não há o que escolher.
+   `Labor`      o quadro fixo depois do plano: as retiradas saem, os
+                inícios e fins ajustados já vêm mudados, e uma pausa
+                vira duas linhas da mesma pessoa.
+   `Diaristas`  as pessoas escolhidas para cobrir a falta, uma linha
+                por pessoa-dia, como a aba de diaristas da fatura faz.
+
+   Por que a inclusão vai para `Diaristas` e não para o `Labor`: quem
+   entra para cobrir a falta é diarista — foi solicitado no SIGO para
+   aquele dia, não contratado para o quadro. Lançá-lo no Labor seria
+   cobrá-lo como fixo, que é outra coisa. A consequência aparece na
+   curva e está dita no METADADOS: o Labor exportado fica ABAIXO do QF
+   nos dias em que a falta foi coberta por diária, e é assim mesmo.
+
+   As quatro abas de documentação continuam, porque o arquivo tem de
+   explicar o que fez: EQUALIZACAO, INCLUSOES, REVISAR e METADADOS.
    ================================================================ */
-/* Data vira SERIAL do Excel, nunca objeto Date.
-   `aoa_to_sheet({cellDates:true})` converte Date pelo fuso LOCAL: escrito
-   de São Paulo, 17/07 saiu como 16/07 21:00 e voltou a ser lido como
-   16/07 — um dia inteiro de diferença em toda linha reescrita, e quatro
-   estornos passaram a valer um dia antes. O serial não tem fuso. */
-const SERIAL0 = Date.UTC(1899,11,30);
-const dataParaSerial = d => Math.round(
-  (Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - SERIAL0)/864e5);
-const ymdParaSerial = v => { const p = ymdParts(v);
-  return Math.round((Date.UTC(p.y, p.m-1, p.d) - SERIAL0)/864e5); };
+const bordaFina = cor => ({ top:{style:"thin",color:cor}, left:{style:"thin",color:cor},
+                            bottom:{style:"thin",color:cor}, right:{style:"thin",color:cor} });
+
+/* Copiado célula a célula do modelo de fatura, valores inclusive — as
+   larguras são as fracionárias do arquivo, não arredondadas, senão a
+   coluna sai com um fio de diferença da original. */
+const TPL = {
+  fonte:      { name:"Calibri", family:2, size:9, color:{ theme:1 } },
+  fonteCab:   { name:"Calibri", family:2, size:9, color:{ theme:1 }, bold:true },
+  fillCab:    { type:"pattern", pattern:"solid",
+                fgColor:{ argb:"FFFFFF00" }, bgColor:{ argb:"FFFFFF00" } },
+  fillBranco: { type:"pattern", pattern:"solid", fgColor:{ theme:0 }, bgColor:{ theme:0 } },
+  bordaClara: bordaFina({ argb:"FFF3F3F3" }),
+  /* O cabeçalho do Labor no modelo não tem borda inferior — quem fecha
+     a linha é a borda superior do corpo. Copiado como está. */
+  bordaCabSemFundo: (() => { const b = bordaFina({ argb:"FFF3F3F3" }); delete b.bottom; return b; })(),
+  bordaCinza: bordaFina({ theme:2, tint:-0.0499893185216834 }),
+  centro:     { horizontal:"center", vertical:"middle" },
+  centroWrap: { horizontal:"center", vertical:"middle", wrapText:true }
+};
+const TPL_LABOR = {
+  colunas:  ["GROOT ID","NOME","MATRICULA","REGIME DE CONTRATO ","CARGO","DATA DE INÍCIO",
+             "DATA FIM","% RATEIO","DIAS TRABALHADOS X FOLGA","ESCALA"],
+  larguras: [7.54296875,39.1796875,9.1796875,17.08984375,17.26953125,
+             11.6328125,8.6328125,7.453125,21.1796875,17],
+  formatos: { 6:"mm-dd-yy", 7:"mm-dd-yy", 8:"0%", 9:"0%" },
+  bordaCorpo: "cinza", cabSemFundo: true
+};
+const TPL_DIARISTAS = {
+  colunas:  ["GROOT ID","NOME","CARGO","ESCALA","DATA","QUANTIDADE"],
+  larguras: [7.54296875,35.26953125,17.26953125,17,8.6328125,10.1796875],
+  formatos: { 5:"mm-dd-yy" },
+  cabWrap:  true, fillCorpo: true, bordaCorpo: "clara"
+};
+/* As abas de documentação usam o mesmo cabeçalho amarelo — é o mesmo
+   arquivo —, mas texto à esquerda: são frases, não números. */
+const TPL_DOC = { esquerda:true };
+
+const ymdParaData = v => { const p = ymdParts(v); return new Date(Date.UTC(p.y, p.m-1, p.d)); };
 const semAcento = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+/* GROOT e matrícula são número na fatura; sair como texto muda a cara
+   da coluna e quebra ordenação. */
+const numSePuder = v => /^\d+$/.test(String(v ?? "").trim()) ? Number(v) : (v ?? "");
+
+function abaEstilizada(wb, nome, tpl, linhas){
+  const ws = wb.addWorksheet(nome);
+  (tpl.larguras || []).forEach((w,i) => { ws.getColumn(i+1).width = w; });
+  const borda = tpl.bordaCorpo === "cinza" ? TPL.bordaCinza : TPL.bordaClara;
+  const cab = ws.addRow(tpl.colunas);
+  cab.eachCell({ includeEmpty:true }, c => {
+    c.font = TPL.fonteCab; c.fill = TPL.fillCab;
+    c.border = tpl.cabSemFundo ? TPL.bordaCabSemFundo : TPL.bordaClara;
+    c.alignment = tpl.cabWrap ? TPL.centroWrap
+      : tpl.esquerda ? { horizontal:"left", vertical:"middle" } : TPL.centro;
+  });
+  for(const vals of linhas){
+    const r = ws.addRow(vals);
+    /* `eachCell` pula célula vazia mesmo com includeEmpty quando a linha
+       é mais curta que o cabeçalho: percorrer pelo tamanho do cabeçalho
+       garante que a última coluna também recebe borda. */
+    for(let i=1;i<=tpl.colunas.length;i++){
+      const c = r.getCell(i);
+      c.font = TPL.fonte;
+      c.border = borda;
+      c.alignment = tpl.esquerda
+        ? { horizontal: typeof vals[i-1] === "number" ? "center" : "left",
+            vertical:"top", wrapText:true }
+        : TPL.centro;
+      if(tpl.fillCorpo) c.fill = TPL.fillBranco;
+      if(tpl.formatos && tpl.formatos[i]) c.numFmt = tpl.formatos[i];
+      else if(c.value instanceof Date) c.numFmt = "mm-dd-yy";
+    }
+  }
+  return ws;
+}
 
 /* Os segmentos [início, fim] de uma linha depois do plano. Uma pausa
    parte a vigência em dois períodos — mesma pessoa, duas linhas. */
@@ -861,106 +936,76 @@ function segmentosApos(l, a){
   return segs;
 }
 
-function exportarEqualizado(){
+/* A escala do diarista é a da OPERAÇÃO, e a fatura diz a unidade. Nome
+   que casa com mais de uma operação — Pouso Alegre tem SVC e XD, com
+   horários diferentes — fica em branco: escolher um turno seria chutar
+   qual. */
+function escalaDoDiarista(unidade){
+  const u = norm(unidade);
+  if(!u) return "";
+  const ops = Object.keys(ESCALA_HORARIO_PADRAO).filter(op => norm(op) === u);
+  return ops.length === 1 ? escalaHorarioDe(ops[0]) : "";
+}
+
+async function exportarEqualizado(){
   const sim = S.sim, plano = S.plano, fat = S.fatura;
-  if(!sim || !plano || plano.erro || !fat || !fat.layout) return;
-  const lay = fat.layout, C = lay.cols;
+  if(!sim || !plano || plano.erro || !fat) return;
   const dentro = simClassificarLinhas(fat.linhas).dentro;
   const acaoDe = new Map();
   plano.acoes.forEach(a => acaoDe.set(dentro[a.id], a));
+  const dt = v => isValidYmd(v) ? ymdParaData(v) : null;
 
-  const aoa = lay.topo.map(r => r.slice());
+  /* ---- aba Labor: o quadro fixo depois do plano ---- */
+  const linhasLabor = [];
   let mantidas = 0, removidas = 0, ajustadas = 0;
   for(const l of fat.linhas){
     const a = acaoDe.get(l);
-    /* Linha que o plano não tocou sai EXATAMENTE como entrou — nem as
-       datas são reescritas. Passar todas por uma releitura só para
-       gravá-las de volta é chance de estragar o que estava certo. */
-    if(!a){ mantidas++; aoa.push(l.bruta.slice()); continue; }
     const segs = segmentosApos(l, a);
     if(!segs.length){ removidas++; continue; }
-    ajustadas++;
-    for(const seg of segs){
-      const row = l.bruta.slice();
-      if(C.inicio >= 0) row[C.inicio] = isValidYmd(seg.ini) ? ymdParaSerial(seg.ini) : "";
-      if(C.fim >= 0)    row[C.fim]    = isValidYmd(seg.fim) ? ymdParaSerial(seg.fim) : "";
-      aoa.push(row);
-    }
+    if(a) ajustadas++; else mantidas++;
+    for(const seg of segs) linhasLabor.push([
+      numSePuder(l.groot), l.nome, numSePuder(l.matricula), l.regime, l.cargo,
+      dt(seg.ini), dt(seg.fim),
+      (typeof l.rateio === "number" && isFinite(l.rateio)) ? l.rateio : 1,
+      l.diasFolga, l.escala ]);
   }
 
-  /* ---- as pessoas que faltam, já preenchidas ---- */
+  /* ---- aba Diaristas: quem entra para cobrir a falta ---- */
   const incluir = $("sm-eqIncluir");
   const inc = (incluir && incluir.checked) ? plano.inclusoes : null;
-  const linhasNovas = [];
-  if(inc && inc.pessoas.length){
-    /* Só entra a coluna cujo valor é o MESMO em toda a fatura: aí não
-       há escolha a fazer. Divergiu, fica em branco. */
-    const constante = idx => {
-      if(idx < 0) return "";
-      let achou;
-      for(const l of dentro){
-        const x = l.bruta[idx];
-        if(x === "" || x === null || x === undefined) continue;
-        const k = x instanceof Date ? +x : x;
-        if(achou === undefined) achou = { k, x };
-        else if(achou.k !== k) return "";
-      }
-      return achou ? achou.x : "";
-    };
-    const fixas = lay.cols.fixas.map(i => [i, constante(i)]);
-    const cont = new Map();
-    dentro.forEach(l => cont.set(l.cargo, (cont.get(l.cargo) || 0) + 1));
-    const cargoPadrao = [...cont.entries()].sort((a,b) => b[1] - a[1])[0]?.[0] || "";
-
-    for(const p of inc.pessoas) for(const f of p.faixas){
-      const row = new Array(lay.largura).fill("");
-      fixas.forEach(([i,v]) => { if(i >= 0) row[i] = v; });
-      if(C.groot >= 0)  row[C.groot]  = p.groot;
-      if(C.nome >= 0)   row[C.nome]   = p.nome;
-      if(C.cargo >= 0)  row[C.cargo]  = cargoPadrao;
-      if(C.inicio >= 0) row[C.inicio] = ymdParaSerial(f.de);
-      if(C.fim >= 0)    row[C.fim]    = ymdParaSerial(f.ate);
-      if(C.rateio >= 0) row[C.rateio] = 1;
-      if(C.obs >= 0)    row[C.obs]    = "INCLUIDO PELA EQUALIZACAO - diarista "
-        + (p.solic === "id" ? "ID" : p.solic === "meli" ? "do cliente" : "sem solicitante")
-        + " no SIGO";
-      aoa.push(row);
-      linhasNovas.push(row);
-    }
-  }
+  const escala = escalaDoDiarista(fat.unidade);
+  const linhasDiar = [];
+  if(inc) for(const p of inc.pessoas) for(const d of p.dias)
+    linhasDiar.push([numSePuder(p.groot), p.nome, "Diarista", escala, ymdParaData(d), 1]);
 
   /* ---- o dossiê do que foi feito ---- */
-  const dt = v => isValidYmd(v) ? ymdParaSerial(v) : "";
-  const eqAoa = [["Ação","GROOT ID","Nome","Cargo","Início atual","Fim atual",
-                  "Início novo","Fim novo","Pausas","HC","Dias","Motivo"]];
-  for(const a of plano.acoes) eqAoa.push([
-    EQ_ROTULO[a.tipo], a.linha.groot, a.linha.nome, a.linha.cargo,
+  const eqLinhas = plano.acoes.map(a => [
+    EQ_ROTULO[a.tipo], numSePuder(a.linha.groot), a.linha.nome, a.linha.cargo,
     dt(a.linha.inicio), dt(a.linha.fim), dt(a.novoInicio), dt(a.novoFim),
     a.pausas.map(p => fmtYmd(p.fim)+" a "+fmtYmd(p.ini)).join(" · "),
     -a.impacto.hc, a.impacto.dias, a.motivo]);
-  if(eqAoa.length === 1) eqAoa.push(["(nada a ajustar)","","","","","","","","","","",""]);
+  if(!eqLinhas.length) eqLinhas.push(["(nada a ajustar)"]);
 
-  const incAoa = [["GROOT ID","Nome","Solicitante","De","Até","Dias","Observação"]];
+  const incLinhas = [];
   if(inc) for(const p of inc.pessoas) for(const f of p.faixas)
-    incAoa.push([p.groot, p.nome,
+    incLinhas.push([numSePuder(p.groot), p.nome,
       p.solic === "id" ? "ID" : p.solic === "meli" ? "Cliente" : "(sem solicitante)",
-      dt(f.de), dt(f.ate),
-      p.dias.filter(d => d >= f.de && d <= f.ate).length,
+      dt(f.de), dt(f.ate), p.dias.filter(d => d >= f.de && d <= f.ate).length,
       "Solicitado no SIGO e sem cobrança no LABOR nestes dias"]);
-  if(incAoa.length === 1) incAoa.push(["(ninguém a incluir)","","","","","",""]);
+  if(!incLinhas.length) incLinhas.push(["(ninguém a incluir)"]);
 
-  const revAoa = [["Tipo","Data","Quantidade","Observação"]];
+  const revLinhas = [];
   for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
-    revAoa.push(["Excesso sem solução", dt(+d), q,
+    revLinhas.push(["Excesso sem solução", dt(+d), q,
       "Zerar exigiria partir um contrato — avaliar caso a caso."]);
   if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
-    { if(c.descoberto > 0) revAoa.push(["Falta descoberta", dt(+d), c.descoberto,
+    { if(c.descoberto > 0) revLinhas.push(["Falta descoberta", dt(+d), c.descoberto,
       "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
   if(!inc) for(const [d,q] of Object.entries(plano.falta).sort((a,b) => a[0]-b[0]))
-    revAoa.push(["Falta", dt(+d), q, "Quadro abaixo do QF; nenhuma inclusão foi gerada."]);
-  if(revAoa.length === 1) revAoa.push(["(nada a revisar)","","",""]);
+    revLinhas.push(["Falta", dt(+d), q, "Quadro abaixo do QF; nenhuma inclusão foi gerada."]);
+  if(!revLinhas.length) revLinhas.push(["(nada a revisar)"]);
 
-  const metaAoa = [["Campo","Valor"],
+  const metaLinhas = [
     ["Arquivo", "Labor equalizado gerado pela Validação Template"],
     ["Fatura de origem", S.nomeF],
     ["Unidade", fat.unidade || "—"],
@@ -971,7 +1016,7 @@ function exportarEqualizado(){
     ["Linhas mantidas sem alteração", mantidas],
     ["Linhas ajustadas", ajustadas],
     ["Linhas removidas", removidas],
-    ["Linhas incluídas", linhasNovas.length],
+    ["Linhas na aba Diaristas", linhasDiar.length],
     ["Pessoas incluídas", inc ? inc.totais.pessoas : 0],
     ["  · da ID", inc ? inc.totais.id : 0],
     ["  · do cliente", inc ? inc.totais.meli : 0],
@@ -983,55 +1028,49 @@ function exportarEqualizado(){
     ["", ""],
     ["AVISO", "As alterações equalizam MATEMATICAMENTE o Labor ao QF. Confirme se "
       + "correspondem à movimentação operacional real antes de enviar."],
-    ["Linhas incluídas", "Vêm da base SIGO: pessoa solicitada no dia e sem cobrança no LABOR "
-      + "daquele dia. Prioridade para os diaristas da ID; o do cliente só entra depois de "
-      + "esgotados os internos."],
-    ["Campos em branco", "Matrícula, regime, escala, turno e dias trabalhados das linhas "
-      + "incluídas ficam VAZIOS de propósito: não são deduzíveis do SIGO. Cargo usa o mais "
-      + "frequente do quadro da fatura, e as colunas de contexto só foram copiadas onde o "
-      + "valor é o mesmo em toda a fatura."]];
+    ["Onde está a inclusão", "Quem entra para cobrir a falta é DIARISTA e está na aba "
+      + "Diaristas, uma linha por pessoa-dia — não no Labor. Por isso o Labor desta "
+      + "exportação fica ABAIXO do QF nos dias cobertos por diária: o quadro fixo é "
+      + "esse mesmo, e a diferença é diária."],
+    ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada no dia e sem cobrança "
+      + "no LABOR daquele dia. Prioridade para os diaristas da ID; o do cliente só entra "
+      + "depois de esgotados os internos."],
+    ["Campos em branco", "Matrícula, regime, dias trabalhados e turno das pessoas incluídas "
+      + "não são deduzíveis do SIGO e por isso não são escritos. A ESCALA é a da operação "
+      + "da unidade; unidade que casa com mais de uma operação sai em branco."]];
 
-  const wb = XLSX.utils.book_new();
-  const wsL = XLSX.utils.aoa_to_sheet(serializarDatas(aoa));
-  formatarColunasData(wsL, aoa, [C.inicio, C.fim]);
-  XLSX.utils.book_append_sheet(wb, wsL, "LABOR");
-  const add = (nome, dados, cols, colsData) => {
-    const ws = XLSX.utils.aoa_to_sheet(serializarDatas(dados));
-    formatarColunasData(ws, dados, colsData || []);
-    ws["!cols"] = cols.map(w => ({ wch:w }));
-    XLSX.utils.book_append_sheet(wb, ws, nome);
-  };
-  add("EQUALIZACAO", eqAoa, [16,12,34,26,12,12,12,12,26,7,7,90], [4,5,6,7]);
-  add("INCLUSOES", incAoa, [12,34,16,12,12,7,52], [3,4]);
-  add("REVISAR", revAoa, [22,12,12,72], [1]);
-  add("METADADOS", metaAoa, [34,110]);
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Validação Template";
+  abaEstilizada(wb, "Labor", TPL_LABOR, linhasLabor);
+  abaEstilizada(wb, "Diaristas", TPL_DIARISTAS, linhasDiar);
+  abaEstilizada(wb, "EQUALIZACAO", { ...TPL_DOC,
+    colunas:["Ação","GROOT ID","Nome","Cargo","Início atual","Fim atual","Início novo",
+             "Fim novo","Pausas","HC","Dias","Motivo"],
+    larguras:[16,12,34,26,12,12,12,12,26,7,7,90] }, eqLinhas);
+  abaEstilizada(wb, "INCLUSOES", { ...TPL_DOC,
+    colunas:["GROOT ID","Nome","Solicitante","De","Até","Dias","Observação"],
+    larguras:[12,34,16,12,12,7,52] }, incLinhas);
+  abaEstilizada(wb, "REVISAR", { ...TPL_DOC,
+    colunas:["Tipo","Data","Quantidade","Observação"],
+    larguras:[22,12,12,72] }, revLinhas);
+  abaEstilizada(wb, "METADADOS", { ...TPL_DOC,
+    colunas:["Campo","Valor"], larguras:[34,110] }, metaLinhas);
 
   const per = String(fat.comp ? fat.comp.y*100 + fat.comp.m : "");
+  /* Acento no `download` de um blob: faz o Chromium descartar o nome. */
   const nome = semAcento("Labor_equalizado_"+(fat.unidade || "fatura")+"_"+per+".xlsx")
     .replace(/[^\w.\-]+/g,"_");
-  XLSX.writeFile(wb, nome);
+  const buf = await wb.xlsx.writeBuffer();
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([buf],
+    { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  link.download = nome;
+  link.click();
+  URL.revokeObjectURL(link.href);
 
   const btn = $("sm-btnExportEq");
   if(btn) btn.textContent = "Baixado ✓ — " + nome;
-}
-
-/* Qualquer Date que tenha vindo do arquivo original vira serial, para
-   valer a mesma regra que as datas escritas por aqui. */
-function serializarDatas(aoa){
-  return aoa.map(row => row.map(v => v instanceof Date ? dataParaSerial(v) : v));
-}
-
-/* E o serial vira data de verdade na tela do Excel, não número solto. */
-function formatarColunasData(ws, aoa, colunas){
-  const ref = XLSX.utils.decode_range(ws["!ref"]);
-  for(let r=0;r<=ref.e.r;r++) for(let c=0;c<=ref.e.c;c++){
-    const orig = aoa[r] && aoa[r][c];
-    const ehData = orig instanceof Date
-      || (colunas.includes(c) && typeof orig === "number" && r > 0);
-    if(!ehData) continue;
-    const cel = ws[XLSX.utils.encode_cell({ r, c })];
-    if(cel && typeof cel.v === "number"){ cel.t = "n"; cel.z = "dd/mm/yyyy"; }
-  }
+  return nome;
 }
 
 /* ================================================================
