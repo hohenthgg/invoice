@@ -187,6 +187,68 @@ secao("Antecipar data fim");
 }
 
 /* ================================================================
+   RATEIO NEGATIVO ENTRA NA CURVA, MAS NUNCA VIRA CANDIDATO
+
+   A linha de rateio -1 é estorno: ela REDUZ o que a fatura cobra
+   naqueles dias, então tem de contar na curva. O que ela não pode ser
+   é escolhida por nenhuma das quatro fases — retirar um -1 SOBE a
+   curva, ou seja, resolveria o excesso ao contrário. É o tipo de
+   defeito que o total esconde: o plano "fecha" no papel e o arquivo
+   gerado sai pior do que entrou.
+   ================================================================ */
+secao("Rateio ≤ 0 conta na curva, mas não é candidato");
+{
+  /* Quatro positivos e um estorno: a curva do dia é 3, e o alvo é 2. */
+  const ds = dias(4, 2);
+  const ps = [P(0,0,null), P(1,0,null), P(2,0,null), P(3,0,null), P(4,0,null,{rateio:-1})];
+  const plano = eqEqualizar(ps, ds);
+  const byId = new Map(ps.map(p => [p.id, p]));
+  const escolhidos = [...plano.acoes.keys()];
+  check(escolhidos.every(i => byId.get(i).rateio > 0),
+        "nenhuma ação recai sobre linha de rateio ≤ 0",
+        "escolhidos " + JSON.stringify(escolhidos.map(i => byId.get(i).rateio)));
+  check(plano.acoes.size === 1, "e uma ação bastou — a sobra era de 1");
+  check(!plano.acoes.has(4), "o estorno especificamente não foi tocado");
+  check(curva(ps,ds,plano).every(v => v === 2),
+        "e a curva ainda fecha no alvo — o estorno seguiu contando nela");
+}
+{
+  /* A prova de que ele CONTA na curva: as mesmas três pessoas, com e
+     sem o estorno, dão planos diferentes. Ignorá-lo faria o motor ver
+     um excesso que a fatura não tem e cortar alguém à toa. */
+  const ds = dias(4, 2);
+  const comEstorno = eqEqualizar([P(0,0,null),P(1,0,null),P(2,0,null),P(3,0,null,{rateio:-1})], ds);
+  const semEstorno = eqEqualizar([P(0,0,null),P(1,0,null),P(2,0,null)], ds);
+  check(comEstorno.acoes.size === 0, "com o estorno na curva não há excesso — ninguém é cortado");
+  check(semEstorno.acoes.size === 1, "sem ele, o mesmo quadro teria uma pessoa a mais e sairia uma");
+}
+{
+  /* Cada fase, uma a uma, com o estorno como único candidato "óbvio"
+     para aquele formato de excesso. Nenhuma pode mordê-lo. */
+  const casos = [
+    ["retirar", dias(3,1), [P(0,0,null), P(1,0,null,{rateio:-1})], {}],
+    ["adiar início", [{dia:100,alvo:1,grupo:"G"},{dia:101,alvo:1,grupo:"G"},{dia:102,alvo:2,grupo:"G"}],
+      [P(0,0,null), P(1,0,null,{rateio:-1}), P(2,0,null)], {}],
+    ["pausar", [{dia:100,alvo:2,grupo:"G"},{dia:101,alvo:1,grupo:"G"},{dia:102,alvo:2,grupo:"G"}],
+      [P(0,0,null), P(1,0,null), P(2,0,null,{rateio:-1})], { pausaDesde:100 }],
+    ["antecipar fim", [{dia:100,alvo:2,grupo:"G"},{dia:101,alvo:1,grupo:"G"},{dia:102,alvo:1,grupo:"G"}],
+      [P(0,0,null), P(1,0,null), P(2,0,2,{rateio:-1})], { permitirAdiarInicio:false }]
+  ];
+  for(const [nome, ds, ps, opc] of casos){
+    const plano = eqEqualizar(ps, ds, opc);
+    const byId = new Map(ps.map(p => [p.id, p]));
+    check([...plano.acoes.keys()].every(i => byId.get(i).rateio > 0),
+          "fase '" + nome + "' não escolhe linha de rateio ≤ 0",
+          JSON.stringify([...plano.acoes.keys()].map(i => byId.get(i).rateio)));
+  }
+}
+{
+  /* Rateio 0 sairia como ação que não muda nada — enfeite no plano. */
+  const ds = dias(3, 1);
+  const plano = eqEqualizar([P(0,0,null), P(1,0,null,{rateio:0}), P(2,0,null)], ds);
+  check(!plano.acoes.has(1), "rateio 0 também fica fora: a ação seria um no-op");
+}
+/* ================================================================
    O QUE ELE NÃO RESOLVE — E DIZ QUE NÃO RESOLVEU
    ================================================================ */
 secao("Falta, excesso residual e dias sem alvo");
@@ -334,6 +396,16 @@ check(res.acoes.every(a => a.linha.nome && a.linha.groot),
       "e nomeia a pessoa: nenhuma sugestão sai sem nome e GROOT");
 check(res.acoes.every(a => gente.some(p => p.groot === a.linha.groot)),
       "as sugestões saem do Labor — o motor não inventa pessoa");
+{
+  /* Pelo caminho completo da Validação, onde o rateio vem do % RATEIO
+     da fatura — e onde o estorno é o caso real que motivou a regra. */
+  const comPausa = simPlanoEqualizacao({ labor:gente, periodo:PER, alvo:QF,
+    opcoes:{ permitirAdiarInicio:true, pausaDesde:PER.ini } });
+  check(gente.some(p => p.rateio <= 0), "o Labor do teste tem mesmo linha de estorno");
+  check(res.acoes.every(a => a.linha.rateio > 0) && comPausa.acoes.every(a => a.linha.rateio > 0),
+        "nenhuma sugestão da Validação recai sobre linha de rateio ≤ 0",
+        JSON.stringify(res.acoes.filter(a => a.linha.rateio <= 0).map(a => a.linha.nome)));
+}
 {
   const somaDif = res.acoes.reduce((s,a) => s + a.impacto.hc, 0);
   check(Math.abs(somaDif - res.totais.hc) < 1e-6, "o total de HC bate com a soma das ações");
