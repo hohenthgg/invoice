@@ -51,6 +51,17 @@
    Dia com alvo 0 ou nulo é IGNORADO, não zerado: escala não publicada
    não é demanda zero, e tratá-la como zero mandaria o dia inteiro para
    o corte.
+
+   E entrar na curva NÃO é o mesmo que poder ser mexido:
+
+       entra na curva          toda linha, com o sinal do rateio
+       pode virar candidato    só rateio > 0
+
+   A linha de rateio negativo é estorno: ela reduz de verdade o que a
+   fatura cobra, e por isso conta na curva. Mas retirá-la SOBE a curva
+   — resolveria o excesso ao contrário —, e adiar ou encurtar uma
+   devolução mexe num acerto já feito. Nenhuma das quatro fases pode
+   escolhê-la.
    ================================================================ */
 "use strict";
 
@@ -125,9 +136,25 @@ function eqEqualizar(pessoas, dias, opcoes){
     const exc = dlist.map((d,k) => ignorado[k] ? 0
       : (pool.reduce((s,p) => s + (act(p.id,d) ? p.rateio : 0), 0) - alvo[k]));
     const byI = new Map(pool.map(p => [p.id, p]));
+
+    /* QUEM ENTRA NA CURVA × QUEM PODE SER MEXIDO — não é a mesma coisa.
+       Toda linha entra na curva acima, inclusive a de rateio negativo:
+       ela é estorno, e reduz de verdade o que a fatura cobra naqueles
+       dias. Mas ela não pode ser CANDIDATA a nada. Retirar uma linha -1
+       SOBE a curva em vez de baixá-la — resolveria o excesso ao
+       contrário —, e adiar ou encurtar uma devolução mexe num acerto
+       que já foi feito. Rateio 0 fica fora pelo mesmo caminho: a ação
+       seria um no-op enfeitando o plano.
+
+       A proteção vive AQUI, na origem da lista de candidatos, e não em
+       cada fase nem em quem chama: as quatro fases (retirar, adiar
+       início, pausar/retomar, antecipar fim) escolhem exclusivamente de
+       `ordem`, então filtrar `ordem` cobre as quatro de uma vez e
+       cobre também as duas abas. */
+    const podeSerCandidato = p => p.rateio > 0;
     /* Ordem de escolha: início mais recente primeiro, depois desempate
        decrescente. Quem entrou por último sai primeiro. */
-    const ordem = [...pool].sort((a,b) =>
+    const ordem = pool.filter(podeSerCandidato).sort((a,b) =>
       (b.ini - a.ini) || String(b.desempate ?? "").localeCompare(String(a.desempate ?? ""))
     ).map(p => p.id);
 
