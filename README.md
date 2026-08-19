@@ -14,7 +14,7 @@ servidor, banco nem envio de arquivos.
 | **Fusão de Linhas** | O arquivo bate com o alvo do cliente? | Labor equalizado dia a dia contra o retorno |
 | **Extração · Diarista** | Quem foram os diaristas do período? | Uma planilha por operação, no layout de origem |
 | **Calcular ABS** | O absenteísmo ficou dentro do range? | Absenteísmo antes e pós diaristas, com o Excel gerencial |
-| **Validação Template** | A fatura tem inconsistência? | Apontamentos explicados, com sugestão de correção |
+| **Validação Template** | A fatura tem inconsistência? E quanto o cliente deve reconhecer? | Apontamentos explicados; e o retorno previsto dia a dia |
 | **Guia** | — | Resumo conceitual do que cada aba faz |
 
 A aba é escolhida pelo topo da página e também pela URL: `index.html#fusao` abre
@@ -211,6 +211,10 @@ o número veio.
 
 ### Validação Template
 
+Dois modos, escolhidos no topo da aba: **auditar a fatura** e **simular o retorno**.
+
+#### Auditar inconsistências
+
 Recebe uma fatura no template padrão e a audita **como um auditor faria**: cruza GROOT ID, nome,
 cargo, vínculo, datas e valores entre as abas `LABOR` e `DIARISTAS` e separa o que é erro do que é
 movimentação legítima de contrato ou ajuste financeiro. `RESUMO` e `HORA EXTRA` entram como apoio.
@@ -254,6 +258,53 @@ você na planilha.
 
 ```
 Soltar a fatura  →  apontamentos por severidade  →  decidir caso a caso  →  Baixar relatório (.xlsx)
+```
+
+#### Simular o retorno
+
+Antecipa o confronto que a **Fusão de Linhas** só consegue fazer depois que o retorno oficial
+chega. Reconstrói o **PREF** a partir da aba `LABOR` da fatura, soma o **S&OP diário** de todas as
+operações da planilha operacional e prevê o que o cliente tende a reconhecer.
+
+A regra da previsão é **assimétrica de propósito**:
+
+```
+Q Pós previsto = MIN(PREF, S&OP)
+```
+
+O cliente pode **cortar** o que foi apresentado acima do planejamento, mas **não paga** o que nem
+sequer foi enviado. PREF 130 contra S&OP 138 não vira 138 — vira 130, e os 8 de folga são um
+alerta de subfaturamento para conferir o Labor, não receita a receber. Prever `Q Pós = S&OP` nos
+dois sentidos seria otimista no lado errado, e é o erro que o módulo existe para não cometer.
+
+Duas coisas que a reconstrução do PREF **não** faz:
+
+- **Não soma o S&OP por posição de coluna.** Cada coluna de cada aba operacional é resolvida para
+  uma data completa antes de qualquer soma, e a soma é por data. Uma aba com uma coluna a mais no
+  começo somaria o dia 16 de uma com o dia 17 da outra, em silêncio. Se as datas das abas não
+  coincidirem, o app **recusa** em vez de somar.
+- **Não trata retroativo como headcount.** Uma linha de rateio negativo é ajuste financeiro:
+  somá-la ao PREF diria que havia uma pessoa a menos trabalhando naqueles dias, o que é falso.
+  Liderança e indiretos também ficam fora, e cargo que não está na lista de `CARGOS_PREF`
+  (`js/config.js`) não é chutado para dentro — vira o aviso *"cargo requer validação"*, nomeando o
+  cargo, porque um PREF subestimado em silêncio é pior que um alerta.
+
+Célula de S&OP vazia é **ausência, não zero**: o dia sai como `REVISÃO NECESSÁRIA`, sem número
+previsto. Zero silencioso inventaria um risco de corte que não existe.
+
+Cada dia sai com S&OP por operação, S&OP total, PREF, Q Pós previsto, gap, correção prevista,
+status e diagnóstico em texto. O painel separa **provável redução**, **alinhado** e **possível
+subfaturamento**, do maior desvio para o menor.
+
+A exportação gera quatro abas: `COMPARATIVO` (leitura humana), `RETORNO SIMULADO` (com os mesmos
+cabeçalhos que a Fusão de Linhas procura, para servir de retorno de teste lá), `METADADOS` (o
+aviso de que o arquivo é simulado e as fórmulas usadas) e `FORA DO PREF` (toda linha excluída e
+por quê).
+
+**É previsão, nunca retorno confirmado** — o rótulo aparece na tela e no arquivo.
+
+```
+Fatura + planilha S&OP  →  PREF reconstruído × S&OP  →  desvios  →  Exportar Retorno Simulado
 ```
 
 ## A regra em uma frase
@@ -321,6 +372,8 @@ js/extraction-dedup.js  deduplicação pessoa-dia, global e testável
 js/abs.js             aba Calcular ABS, inteira (IIFE)
 js/validacao.js       motor de auditoria da fatura — puro, sem DOM
 js/validacao-ui.js    leitura do .xlsx e tela da Validação Template (IIFE)
+js/simulacao.js       previsão do retorno a partir de PREF × S&OP — puro, sem DOM
+js/simulacao-ui.js    leitura dos dois arquivos e tela do Retorno Simulado (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
@@ -392,6 +445,13 @@ prova os dois sentidos do erro: que uma efetivação normal não vira Crítico, 
 diferentes com períodos sobrepostos e ambas as linhas positivas viram. Cobre também a queda de
 severidade quando há estorno em jogo, o aprendizado do padrão de GROOT a partir da própria
 planilha, e que uma fatura limpa não gera achado nenhum.
+
+`tests/simulacao.test.js` cobre a previsão do retorno. Prova a assimetria (`MIN(PREF, S&OP)`) nos
+dois sentidos com os números reais de Varginha — 16/07 = 120 + 16, 19/07 = 80 + 12, 10/08 = 120 +
+17 — e prova que retroativo negativo não reduz o headcount do dia, que liderança e indiretos não
+entram sozinhos, que cargo desconhecido vira aviso em vez de palpite, e que célula de S&OP vazia
+vira revisão em vez de zero. Carrega `dates.js`, `config.js` e `billing.js` no mesmo contexto, de
+modo que a classificação de retroativo exercitada é a mesma que a Conciliação usa.
 
 `tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
 classificações de status, a reconstrução da cobrança original (o corte projeta

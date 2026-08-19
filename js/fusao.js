@@ -13,8 +13,10 @@ fi.onchange=()=>{if(fi.files[0])handle(fi.files[0])};
 
 function showErr(m){const b=document.getElementById('fz-errbox');b.textContent=m;b.classList.remove('hidden')}
 function norm(s){return String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim()}
-// Cargos que o MELI considera no PREF (em forma normalizada). Editável.
-const CARGOS_MELI=["auxiliar de apoio log i","operador transpaleteira","part time - auxiliar log i (3 dias)"];
+// Cargos que o cliente considera no PREF. A lista vive em js/config.js
+// (CARGOS_PREF) porque a simulação de retorno reconstrói o mesmo PREF —
+// duas cópias dariam dois headcounts diferentes para o mesmo Labor.
+const CARGOS_MELI=CARGOS_PREF;
 function exDate(v){ // serial Excel ou Date → Date UTC-neutra
   if(v==null||v==='')return null;
   if(v instanceof Date)return new Date(Date.UTC(v.getFullYear(),v.getMonth(),v.getDate()));

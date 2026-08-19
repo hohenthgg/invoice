@@ -4,7 +4,7 @@
   "description": "Detecta movimentações posteriores ao corte do dia 15 e gera os ajustes da fatura seguinte.",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/reconciliation.test.js && node tests/extraction.test.js && node tests/export.test.js && node tests/abs-datas.test.js && node tests/abs-prioridade.test.js && node tests/validacao.test.js",
+    "test": "node tests/engine.test.js && node tests/reconciliation.test.js && node tests/extraction.test.js && node tests/export.test.js && node tests/abs-datas.test.js && node tests/abs-prioridade.test.js && node tests/validacao.test.js && node tests/simulacao.test.js",
     "start": "python3 -m http.server 8080"
   },
   "keywords": [
