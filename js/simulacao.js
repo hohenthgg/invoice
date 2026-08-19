@@ -177,6 +177,32 @@ function simDiaristasPorDia(diaristas){
   return porDia;
 }
 
+/* As diárias que a FATURA já lança, por pessoa e por dia. Elas não
+   estão no LABOR — vivem na aba DIARISTAS — e ignorá-las foi o defeito
+   que fez o app pedir 23 diaristas num dia em que a fatura já pagava
+   15, com 29 pessoa-dia repetidas entre as duas listas. */
+function simDiariasPorDia(diarias){
+  const m = new Map();
+  for(const d of (diarias || [])){
+    const g = simGrootNum(d.groot);
+    if(!g || !isValidYmd(d.data)) continue;
+    if(!m.has(d.data)) m.set(d.data, new Map());
+    const dia = m.get(d.data);
+    const q = (typeof d.quantidade === "number" && isFinite(d.quantidade)) ? d.quantidade : 1;
+    dia.set(g, (dia.get(g) || 0) + q);
+  }
+  return m;
+}
+
+/* Já está cobrado no dia — pelo quadro fixo OU por diária já lançada.
+   As duas contam: a pergunta é se a pessoa já está sendo paga naquele
+   dia, e cobrar de novo é cobrar duas vezes de qualquer um dos lados. */
+function simJaCobrado(labor, diarias){
+  const noLabor = simOcupadoNoLabor(labor);
+  const porDia = simDiariasPorDia(diarias);
+  return (g, d) => noLabor(g,d) || ((porDia.get(d) || new Map()).get(g) || 0) > 0;
+}
+
 function simDisponibilidade(diaristas, labor, dias){
   if(!diaristas || !diaristas.length) return null;
   const ocupado = simOcupadoNoLabor(labor);
@@ -434,7 +460,7 @@ const SIM_PRIO_SOLIC = { id:0, meli:1, "":2 };
 function simInclusoes(dados){
   const falta = dados.falta || {};
   const diaristas = dados.diaristas || [];
-  const ocupado = simOcupadoNoLabor(dados.labor || []);
+  const ocupado = simJaCobrado(dados.labor || [], dados.diarias || []);
   const porDia = simDiaristasPorDia(diaristas);
 
   const nomes = new Map();
@@ -504,15 +530,36 @@ function simPlanoEqualizacao(dados){
   const pessoas = dentro.map((l,i) => ({
     id:i, ini:eqDeYmd(l.inicio), fim:isValidYmd(l.fim) ? eqDeYmd(l.fim) : null,
     rateio:simRateio(l), desempate:l.matricula || "", grupo:SIM_GRUPO }));
+
+  /* A DIÁRIA JÁ LANÇADA NA FATURA OCUPA VAGA DO DIA.
+     Ela entra no motor como pessoa `imutavel`: conta na curva contra o
+     QF, mas nenhuma das quatro fases pode escolhê-la — quem equaliza
+     mexe no quadro fixo, não em diária que já aconteceu. Sem isso a
+     falta saía inflada e o app pedia diarista onde a fatura já pagava
+     um. */
+  const porDiaDiarias = simDiariasPorDia(dados.diarias);
+  const diariasDoDia = {};
+  const pessoasDiaria = [];
+  for(const d of listaDias){
+    let soma = 0;
+    for(const [, q] of (porDiaDiarias.get(d) || new Map())) soma += q;
+    diariasDoDia[d] = Math.round(soma*1e6)/1e6;
+    if(soma) pessoasDiaria.push({ id:"diaria:"+d, ini:eqDeYmd(d), fim:eqDeYmd(d),
+      rateio:soma, desempate:"", grupo:SIM_GRUPO, imutavel:true });
+  }
+  const todas = pessoas.concat(pessoasDiaria);
   const dias = listaDias.map(d => ({ dia:eqDeYmd(d), alvo, grupo:SIM_GRUPO }));
 
-  const plano = eqEqualizar(pessoas, dias, {
+  const plano = eqEqualizar(todas, dias, {
     pausaDesde: isValidYmd(opc.pausaDesde) ? eqDeYmd(opc.pausaDesde) : null,
     permitirAdiarInicio: opc.permitirAdiarInicio !== false });
 
   /* A curva antes e depois do plano. A de depois é a prova: se o plano
      está certo, ela encosta no alvo sem furar para baixo. */
   const ativoAntes = (p,n) => p.ini <= n && n <= (p.fim == null ? EQ_INF : p.fim);
+  /* `pref` é só o quadro fixo; `quadro` é o que o dia apresenta ao
+     cliente — fixo mais as diárias já lançadas. É `quadro` que vai ao
+     confronto com o QF. */
   const linhasDias = listaDias.map((d,k) => {
     let antes = 0, depois = 0;
     for(const p of pessoas){
@@ -520,8 +567,12 @@ function simPlanoEqualizacao(dados){
       if(eqAtivoApos(p, plano.acoes.get(p.id), eixo[k])) depois += p.rateio;
     }
     antes = Math.round(antes*1e6)/1e6; depois = Math.round(depois*1e6)/1e6;
-    return { data:d, pref:antes, alvo, dif:Math.round((antes-alvo)*1e6)/1e6,
-             prefPos:depois, difPos:Math.round((depois-alvo)*1e6)/1e6 };
+    const dia = diariasDoDia[d] || 0;
+    const quadro = Math.round((antes+dia)*1e6)/1e6;
+    const quadroPos = Math.round((depois+dia)*1e6)/1e6;
+    return { data:d, pref:antes, diarias:dia, quadro, alvo,
+             dif:Math.round((quadro-alvo)*1e6)/1e6,
+             prefPos:depois, quadroPos, difPos:Math.round((quadroPos-alvo)*1e6)/1e6 };
   });
 
   /* Quem também aparece no SIGO, e em que dias. Mesma regra de
@@ -540,6 +591,7 @@ function simPlanoEqualizacao(dados){
   const acoes = [];
   plano.acoes.forEach((a,id) => {
     const p = pessoas[id], l = dentro[id];
+    if(!p || !l) return;             // diária imutável nunca vira ação
     const tipo = eqTipoAcao(a);
     if(!tipo) return;
     /* Impacto: os dias em que a pessoa contava e deixa de contar. */
@@ -583,7 +635,7 @@ function simPlanoEqualizacao(dados){
   /* A falta é o outro lado do mesmo plano: com a base do SIGO carregada,
      ela deixa de ser "faltam 18" e vira 18 pessoas com nome. */
   const inclusoes = (dados.diaristas && dados.diaristas.length)
-    ? simInclusoes({ falta, diaristas:dados.diaristas, labor }) : null;
+    ? simInclusoes({ falta, diaristas:dados.diaristas, labor, diarias:dados.diarias }) : null;
 
   const conta = t => acoes.filter(a => a.tipo === t).length;
   return {
@@ -592,6 +644,7 @@ function simPlanoEqualizacao(dados){
              pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null },
     totais:{
       pessoas: pessoas.length,
+      diarias: Math.round(listaDias.reduce((s,d) => s + (diariasDoDia[d]||0), 0)*100)/100,
       retirar: conta(EQ_ACAO.RETIRAR), adiar: conta(EQ_ACAO.ADIAR),
       encurtar: conta(EQ_ACAO.ENCURTAR), pausar: conta(EQ_ACAO.PAUSAR),
       hc: Math.round(acoes.reduce((s,a) => s + a.impacto.hc, 0)*100)/100,
@@ -637,6 +690,6 @@ function simLinhasRetorno(sim){
 
 if(typeof module !== "undefined" && module.exports){
   module.exports = { simularRetorno, simClassificarLinhas, simLinhasRetorno,
-                     simPlanoEqualizacao, simInclusoes, SIM_GRUPO,
+                     simPlanoEqualizacao, simInclusoes, simJaCobrado, SIM_GRUPO,
                      SIM_STATUS, SIM_STATUS_LABEL, SIM_AVISO_METADADOS };
 }

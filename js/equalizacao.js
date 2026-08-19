@@ -55,13 +55,14 @@
    E entrar na curva NÃO é o mesmo que poder ser mexido:
 
        entra na curva          toda linha, com o sinal do rateio
-       pode virar candidato    só rateio > 0
+       pode virar candidato    só rateio > 0 e não `imutavel`
 
    A linha de rateio negativo é estorno: ela reduz de verdade o que a
    fatura cobra, e por isso conta na curva. Mas retirá-la SOBE a curva
    — resolveria o excesso ao contrário —, e adiar ou encurtar uma
    devolução mexe num acerto já feito. Nenhuma das quatro fases pode
-   escolhê-la.
+   escolhê-la. `imutavel` marca o mesmo pelo outro motivo: ocupa vaga no
+   dia mas não é linha do Labor — a diária já lançada na fatura.
    ================================================================ */
 "use strict";
 
@@ -103,7 +104,8 @@ function eqAtivoApos(p, a, dia){
 
 /**
  * O motor.
- * @param {Array<{id:*,ini:number,fim:number|null,rateio:number,desempate:*,grupo:*}>} pessoas
+ * @param {Array<{id:*,ini:number,fim:number|null,rateio:number,desempate:*,grupo:*,
+ *                imutavel?:boolean}>} pessoas
  *        quem já está no Labor e conta no quadro. `fim` nulo = em aberto.
  *        A ORDEM importa: o desempate final da escolha é estável nela.
  * @param {Array<{dia:number,alvo:number|null,grupo:*}>} dias a curva alvo.
@@ -146,12 +148,18 @@ function eqEqualizar(pessoas, dias, opcoes){
        que já foi feito. Rateio 0 fica fora pelo mesmo caminho: a ação
        seria um no-op enfeitando o plano.
 
+       `imutavel` é a mesma ideia por outro motivo: a pessoa conta na
+       curva mas não é linha do Labor que se possa mexer. É o caso da
+       DIÁRIA já lançada na fatura — ela ocupa uma vaga do dia, e por
+       isso entra na conta, mas quem equaliza mexe no quadro fixo, não
+       em diária que já aconteceu.
+
        A proteção vive AQUI, na origem da lista de candidatos, e não em
        cada fase nem em quem chama: as quatro fases (retirar, adiar
        início, pausar/retomar, antecipar fim) escolhem exclusivamente de
        `ordem`, então filtrar `ordem` cobre as quatro de uma vez e
        cobre também as duas abas. */
-    const podeSerCandidato = p => p.rateio > 0;
+    const podeSerCandidato = p => p.rateio > 0 && !p.imutavel;
     /* Ordem de escolha: início mais recente primeiro, depois desempate
        decrescente. Quem entrou por último sai primeiro. */
     const ordem = pool.filter(podeSerCandidato).sort((a,b) =>
