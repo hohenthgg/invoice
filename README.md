@@ -389,6 +389,17 @@ Escrever por cima ainda tem a vantagem de cada célula guardar o próprio format
 nunca objeto `Date`, porque o ExcelJS grava `Date` pelo fuso local. O que muda além das duas abas são
 só **resultados de fórmula em cache**, que o Excel recalcula ao abrir.
 
+Duas coisas são **descartadas de propósito** antes de gravar, porque o ExcelJS as reemite inválidas e
+o Excel abre o arquivo pedindo para "recuperar":
+
+- **validações de dados** — ele transforma três regras em cinco, com faixas sobrepostas
+  (`K2:K3000` e `K10:K3000` na mesma coluna). Sobreposição é violação de esquema;
+- **formatação condicional** — as regras do original vivem num `extLst` que ele não carrega, e ele
+  grava `<conditionalFormatting sqref="A6"/>` **vazio**, sem uma regra dentro.
+
+Acontece no round-trip puro, sem edição nenhuma, então não há o que ajustar na escrita. Perde-se a
+lista suspensa de duas colunas e o realce condicional de duas células; ganha-se um arquivo que abre.
+
 **Quinta ação: retirar diária acima do QF.** As quatro fases do motor mexem no quadro fixo. Quando
 elas terminam e ainda sobra excesso, esse excesso não é fixo: é diária lançada por cima de um quadro
 já no teto, e cortar mais gente fixa criaria falta em outro dia. Então sai a diária excedente — nunca
