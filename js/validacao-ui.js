@@ -73,7 +73,8 @@ function lerLabor(wb){
   const c = h.cels;
   const iG=col(c,"GROOT ID"), iN=col(c,"NOME"), iM=col(c,"MATRICULA"), iR=col(c,"REGIME DE CONTRATO"),
         iC=col(c,"CARGO"), iI=col(c,"DATA DE INICIO"), iF=col(c,"DATA FIM"),
-        iQ=col(c,"QUANTIDADE"), iV=col(c,"VALOR FINAL"), iU=col(c,"VALOR UNITARIO");
+        iQ=col(c,"QUANTIDADE"), iV=col(c,"VALOR FINAL"), iU=col(c,"VALOR UNITARIO"),
+        iRa=col(c,"% RATEIO","RATEIO");
   const out = [];
   for(let i=h.idx+1;i<rows.length;i++){
     const r = rows[i]; if(!r) continue;
@@ -85,6 +86,9 @@ function lerLabor(wb){
     out.push({ aba:"LABOR", linha:i+1, groot, nome:nomeP, matricula:String(cel(r,iM) ?? "").trim(),
       regime:String(cel(r,iR) ?? "").trim(), cargo:String(cel(r,iC) ?? "").trim(),
       ini:lerData(cel(r,iI)), fim:lerData(cel(r,iF)),
+      /* o rateio é o que o quadro do período soma — sem ele toda linha
+         valeria 1, inclusive os estornos, e o headcount sairia alto */
+      rateio:num(cel(r,iRa)),
       qtd:num(cel(r,iQ)), unit:num(cel(r,iU)), valor });
   }
   return { aba:nome, linhas:out };
@@ -232,6 +236,8 @@ function render(){
     + '<div><span>DIARISTAS</span><b>'+a.totais.diaristas+' linhas</b></div>'
     + '</div>';
 
+  desenharQuadro(a.quadro);
+
   const total = a.achados.length;
   const cards = [
     ["todos","Todos",total,"vt-c-todos"],
@@ -293,6 +299,36 @@ function render(){
 /* Um bloco por categoria. O cabeçalho carrega a severidade do PIOR caso
    que ele guarda, o total, e quantos de cada severidade — para o leitor
    decidir se abre sem precisar abrir. */
+/* O quadro que a fatura apresenta, dia a dia — mesma conta da Fusão de
+   Linhas e da simulação de retorno. A auditoria recebe só a fatura, e
+   este é o headcount que dá para extrair dela sozinha. */
+function desenharQuadro(q){
+  const el = $("vt-quadro");
+  if(!q){ el.innerHTML = ""; return; }
+  const n = v => Number(Number(v).toFixed(2)).toLocaleString("pt-BR");
+  const barras = q.dias.map(d => {
+    const alt = q.max > 0 ? Math.max(3, Math.round(d.liquido/q.max*100)) : 3;
+    return '<span class="vq-b" style="height:'+alt+'%" title="'
+      + fmtD(d.data)+" · "+n(d.liquido)+" pessoa(s)"
+      + (d.bruto !== d.liquido ? " · bruto "+n(d.bruto) : "")+'"></span>';
+  }).join("");
+  el.innerHTML = '<div class="vt-quadro">'
+    + '<div class="vq-tit"><b>Quadro apresentado na fatura</b>'
+    +   '<small>auxiliar e operador · soma dos % RATEIO das linhas ativas em cada dia, '
+    +   'com o sinal — a mesma conta da Fusão de Linhas</small></div>'
+    + '<div class="vq-nums">'
+    +   '<div><span>pessoas distintas</span><b>'+q.pessoas+'</b></div>'
+    +   '<div><span>menor dia</span><b>'+n(q.min)+'</b></div>'
+    +   '<div><span>maior dia</span><b>'+n(q.max)+'</b></div>'
+    +   '<div><span>média por dia</span><b>'+n(q.media)+'</b></div>'
+    +   (q.estornos ? '<div><span>estornos subtraídos</span><b>'+q.estornos+'</b></div>' : "")
+    + '</div>'
+    + '<div class="vq-graf">'+barras+'</div>'
+    + '<div class="vq-eixo"><span>'+fmtD(q.dias[0].data)+'</span>'
+    +   '<span>'+fmtD(q.dias[q.dias.length-1].data)+'</span></div>'
+    + '</div>';
+}
+
 function cardGrupo(g, itens){
   const aberto = V.abertos.has(g.chave);
   const decididos = itens.filter(x => V.marcas[x.id]).length;

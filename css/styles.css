@@ -1294,3 +1294,26 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
   #panel-validacao .vt-grupo > header{flex-wrap:wrap}
   #panel-validacao .vt-selos{max-width:100%;justify-content:flex-start}
 }
+/* o bruto acompanha o PREF, mas em segundo plano: quem compara com o
+   S&OP é o líquido */
+#panel-validacao .sm-tabela td.fraco{color:var(--mut2)}
+
+/* Quadro do período, na auditoria: quanta gente a fatura apresenta em
+   cada dia. Barras, não números soltos — o que importa aqui é a forma
+   da curva e onde ela cai. */
+#panel-validacao .vt-quadro{background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:13px 15px;margin-bottom:14px}
+#panel-validacao .vq-tit b{font-size:.84rem}
+#panel-validacao .vq-tit small{display:block;font-size:.71rem;color:var(--mut);
+  margin-top:3px;line-height:1.5}
+#panel-validacao .vq-nums{display:flex;flex-wrap:wrap;gap:22px;margin:11px 0 10px}
+#panel-validacao .vq-nums span{display:block;font-size:.62rem;letter-spacing:.5px;
+  text-transform:uppercase;color:var(--mut2)}
+#panel-validacao .vq-nums b{font-family:var(--mono);font-size:1.05rem;color:var(--ink)}
+#panel-validacao .vq-graf{display:flex;align-items:flex-end;gap:2px;height:52px;
+  border-bottom:1px solid var(--line)}
+#panel-validacao .vq-b{flex:1;background:var(--s-labor);border-radius:2px 2px 0 0;
+  min-height:3px;cursor:help;transition:background .12s}
+#panel-validacao .vq-b:hover{background:var(--amber)}
+#panel-validacao .vq-eixo{display:flex;justify-content:space-between;font-family:var(--mono);
+  font-size:.66rem;color:var(--mut2);margin-top:5px}

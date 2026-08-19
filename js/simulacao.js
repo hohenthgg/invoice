@@ -1,8 +1,8 @@
 /* Retorno Simulado — o que o cliente provavelmente reconhecerá
    ================================================================
 
-   Módulo PURO, sem DOM. Depende de js/dates.js, js/config.js e
-   js/billing.js (classifyLine), carregados antes no index.html.
+   Módulo PURO, sem DOM. Depende de js/dates.js e js/config.js,
+   carregados antes no index.html.
 
    O QUE ESTE MÓDULO RESPONDE
 
@@ -31,16 +31,24 @@
 
    O QUE ENTRA NO PREF
 
-   Só headcount operacional corrente:
-     · conta LABOR DIRETO — liderança e indiretos não entram;
-     · cargo na lista de CARGOS_PREF (js/config.js);
-     · linha classificada como competência corrente por classifyLine.
+   A regra é a MESMA da Fusão de Linhas (js/fusao.js), e tem de ser:
+   as duas reconstroem o mesmo número a partir do mesmo Labor.
 
-   O último item é o que impede o erro mais caro do confronto: uma
-   linha retroativa de rateio -1 referente a 20/07→31/07 é ajuste
-   FINANCEIRO. Somá-la ao headcount diria que havia uma pessoa a menos
-   trabalhando naqueles dias, o que é falso — ninguém desaparece do
-   turno porque a fatura passada cobrou a mais.
+     · cargo na lista de CARGOS_PREF (js/config.js) — auxiliar e
+       operador; liderança e indiretos ficam fora por não estarem lá;
+     · DATA DE INÍCIO legível, e o dia dentro de [início, fim], com fim
+       vazio valendo até o fim do período;
+     · o % RATEIO entra COM O SINAL QUE TEM.
+
+   O sinal é onde este módulo já esteve errado. O PREF é uma quantidade
+   FATURADA — o que a fatura apresenta, líquido dos estornos — e não um
+   retrato do turno. Excluir os rateios negativos por serem "ajuste
+   financeiro" inflava o PREF: nesta fatura eram 30 linhas de estorno,
+   que somavam até 30 HC a mais num único dia de julho.
+
+   As duas leituras continuam disponíveis: `pref` é o líquido, que vai
+   ao confronto com o S&OP, e `bruto` conta só os positivos — quanta
+   gente estava no turno. Só o primeiro é o PREF.
    ================================================================ */
 "use strict";
 
@@ -56,15 +64,17 @@ const SIM_STATUS_LABEL = {
 };
 
 /* Motivos de uma linha do Labor ficar fora do PREF. `avisa` marca os
-   que o usuário precisa ver: sair por ser liderança é esperado, sair
-   por cargo desconhecido não é. */
+   que o usuário precisa ver: sair por cargo fora da lista é esperado
+   para liderança, mas não para um cargo novo que ninguém declarou. */
 const SIM_FORA = {
-  INDIRETO:    { chave:"indireto",    avisa:false, texto:"conta de liderança/indiretos — não é HC operacional do PREF" },
-  ABS:         { chave:"abs",         avisa:false, texto:"linha de absenteísmo do template, não é pessoa" },
-  RETRO:       { chave:"retro",       avisa:true,  texto:"lançamento retroativo — é ajuste financeiro, não HC do período" },
-  INDEFINIDA:  { chave:"indefinida",  avisa:true,  texto:"não foi possível classificar a linha com segurança" },
-  CARGO:       { chave:"cargo",       avisa:true,  texto:"cargo requer validação — não está na lista de cargos do PREF" },
-  SEM_INICIO:  { chave:"sem_inicio",  avisa:true,  texto:"sem DATA DE INÍCIO legível" }
+  ABS:         { chave:"abs",       texto:"linha de absenteísmo do template, não é pessoa" },
+  /* Liderança e indiretos também saem por cargo, mas sair é o esperado
+     deles — o aviso é para o cargo que ninguém declarou. A conta serve
+     só para separar os dois casos, nunca para excluir: quem exclui é a
+     lista de cargos, como na Fusão de Linhas. */
+  INDIRETO:    { chave:"indireto",  texto:"cargo de liderança/indiretos — não entra no PREF" },
+  CARGO:       { chave:"cargo",     texto:"cargo fora da lista do PREF" },
+  SEM_INICIO:  { chave:"sem_inicio",texto:"sem DATA DE INÍCIO legível" }
 };
 
 const simNorm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
@@ -73,60 +83,43 @@ const simEhIndireto = conta => /lideranca|indireto/.test(simNorm(conta));
 const simEhAbs = l => simNorm(l.groot) === "abs" || /absenteismo/.test(simNorm(l.nome));
 
 /* ================================================================
-   CLASSIFICAÇÃO DAS LINHAS DO LABOR
-   ================================================================ */
-/* A janela usada para separar corrente de retroativo é o PERÍODO
-   FATURADO (16/07→15/08), não o mês-calendário da competência. Com o
-   mês-calendário, toda linha que termina em julho cairia como
-   retroativa — e julho é a primeira metade do próprio período cobrado.
-   classifyLine só lê `first`, `last` e `label` do objeto, então basta
-   entregar a janela certa. */
-function simJanela(periodo, comp){
-  return { y: comp ? comp.y : ymdParts(periodo.fim).y,
-           m: comp ? comp.m : ymdParts(periodo.fim).m,
-           first: periodo.ini, last: periodo.fim,
-           label: fmtYmd(periodo.ini)+" a "+fmtYmd(periodo.fim) };
-}
+   QUEM ENTRA NO PREF
 
-function simClassificarLinhas(labor, janela){
+   Exatamente a regra da Fusão de Linhas (js/fusao.js): cargo na lista
+   do PREF, DATA DE INÍCIO legível, fora a linha de ABS — e o rateio
+   entra COM O SINAL QUE TEM.
+
+   O sinal é o ponto, e é onde esta função já esteve errada. O PREF é
+   uma quantidade FATURADA, não um retrato do turno: é o que a fatura
+   apresenta ao cliente, líquido dos estornos. Uma linha de rateio -1
+   referente a 27/07→31/07 reduz o que está sendo cobrado naqueles
+   dias, e ignorá-la fazia o PREF sair alto — 30 linhas de estorno
+   inflavam julho inteiro, até 30 HC num único dia.
+
+   O headcount operacional bruto (só os positivos) continua sendo
+   calculado e sai como `prefBruto`, porque as duas leituras são úteis:
+   uma responde "quanto estou cobrando", a outra "quanta gente estava
+   no turno". Só a primeira é o PREF.
+   ================================================================ */
+function simClassificarLinhas(labor){
   const dentro = [], fora = [];
   for(const l of labor){
     const marca = motivo => fora.push({ linha:l, motivo });
-
     if(simEhAbs(l)){ marca(SIM_FORA.ABS); continue; }
-    if(simEhIndireto(l.conta)){ marca(SIM_FORA.INDIRETO); continue; }
     if(!isValidYmd(l.inicio)){ marca(SIM_FORA.SEM_INICIO); continue; }
-
-    /* Rateio negativo nunca é headcount, qualquer que seja o período.
-       Vem antes de classifyLine de propósito: na conciliação de
-       cobrança, um negativo dentro da própria janela é ambíguo e vai
-       para revisão manual — mas para o HEADCOUNT não há ambiguidade
-       nenhuma. Ninguém sai do turno porque a fatura passada cobrou a
-       mais. */
-    if(typeof l.rateio === "number" && l.rateio < 0){
-      marca(SIM_FORA.RETRO); continue;
-    }
-
-    /* Daqui para baixo, a classificação é a MESMA de js/billing.js — a
-       que a Conciliação usa para separar competência corrente de
-       retroativo. Reimplementar aqui daria duas respostas para a mesma
-       pergunta. */
-    const cls = classifyLine(
-      { inicio:l.inicio, fim:isValidYmd(l.fim)?l.fim:null, rateio:l.rateio }, janela);
-
-    if(cls.classe === LINE_CLASS.RETRO_ADD || cls.classe === LINE_CLASS.RETRO_DISC){
-      marca({ ...SIM_FORA.RETRO, detalhe:cls.motivo }); continue;
-    }
-    if(cls.classe === LINE_CLASS.UNDETERMINED){
-      marca({ ...SIM_FORA.INDEFINIDA, detalhe:cls.motivo }); continue;
-    }
     if(!CARGOS_PREF.includes(simNorm(l.cargo))){
-      marca(SIM_FORA.CARGO); continue;
+      marca(simEhIndireto(l.conta) ? SIM_FORA.INDIRETO : SIM_FORA.CARGO); continue;
     }
     dentro.push(l);
   }
   return { dentro, fora };
 }
+
+/* Rateio ausente ou ilegível vale 1, como na Fusão de Linhas: a linha
+   existe e cobra uma pessoa. */
+const simRateio = l =>
+  (typeof l.rateio === "number" && isFinite(l.rateio)) ? l.rateio : 1;
+const simAtivo = (l,d) => l.inicio <= d && (!isValidYmd(l.fim) || l.fim >= d);
 
 /* ================================================================
    O CONFRONTO, DIA A DIA
@@ -163,8 +156,7 @@ function simularRetorno(dados){
 
   if(!blocos.length) return { erro:"Nenhum bloco de S&OP foi identificado na planilha operacional." };
 
-  const janela = simJanela({ ini, fim }, comp);
-  const { dentro, fora } = simClassificarLinhas(labor, janela);
+  const { dentro, fora } = simClassificarLinhas(labor);
 
   /* Cargos fora da lista viram aviso nominal: o usuário precisa saber
      QUAL cargo ficou de fora para decidir se ele deveria entrar. */
@@ -177,31 +169,19 @@ function simularRetorno(dados){
       + "então NÃO foram somadas — o PREF pode estar subestimado nos dias em que elas estão ativas. "
       + "Confirme se o cargo entra no PREF antes de usar a previsão." });
   }
-  const nRetro = fora.filter(f => f.motivo.chave === "retro").length;
-  if(nRetro) avisos.push({ tipo:"retro", texto:
-    nRetro+" linha(s) retroativa(s) foram excluídas do PREF. Retroativo é ajuste financeiro de "
-    + "outra competência: somá-lo ao headcount diria que havia gente a mais ou a menos "
-    + "trabalhando nestes dias, o que não é verdade." });
-  const nIndef = fora.filter(f => f.motivo.chave === "indefinida").length;
-  if(nIndef) avisos.push({ tipo:"indefinida", texto:
-    nIndef+" linha(s) não puderam ser classificadas entre competência corrente e retroativo. "
-    + "Ficaram fora do PREF e os dias em que estão ativas foram marcados para revisão." });
-
-  /* Dias em que há linha indefinida ativa: o PREF daquele dia não é
-     confiável, então ele sai como REVISÃO em vez de sair com número. */
-  const diasDuvidosos = new Set();
-  for(const f of fora){
-    if(f.motivo.chave !== "indefinida") continue;
-    const l = f.linha;
-    if(!isValidYmd(l.inicio)) continue;
-    for(let d = Math.max(l.inicio, ini); d <= fim; d = addDays(d,1)){
-      if(isValidYmd(l.fim) && d > l.fim) break;
-      diasDuvidosos.add(d);
-    }
-  }
+  const nNeg = dentro.filter(l => simRateio(l) < 0).length;
+  if(nNeg) avisos.push({ tipo:"estorno", texto:
+    nNeg+" linha(s) do PREF têm rateio negativo e entram SUBTRAINDO, como na Fusão de Linhas. "
+    + "São estornos e ajustes retroativos, e o PREF é a quantidade faturada — o que a fatura "
+    + "apresenta, líquido deles. O headcount bruto do turno, só com os lançamentos positivos, "
+    + "aparece separado em cada dia." });
+  const nSemInicio = fora.filter(f => f.motivo.chave === "sem_inicio").length;
+  if(nSemInicio) avisos.push({ tipo:"indefinida", texto:
+    nSemInicio+" linha(s) ficaram fora do PREF por não ter DATA DE INÍCIO legível. Sem a data "
+    + "não há como saber em que dias elas estariam ativas." });
 
   const dias = [];
-  let totalPref = 0, totalCliente = 0, totalPos = 0, hcAcima = 0, hcAbaixo = 0;
+  let totalPref = 0, totalBruto = 0, totalCliente = 0, totalPos = 0, hcAcima = 0, hcAbaixo = 0;
   const contagem = { reducao:0, alinhado:0, subfaturamento:0, revisao:0 };
 
   for(let d = ini; d <= fim; d = addDays(d,1)){
@@ -217,19 +197,24 @@ function simularRetorno(dados){
     });
     const faltando = porBloco.filter(b => b.valor === null || !isFinite(b.valor));
 
-    let pref = 0;
+    /* PREF é o líquido — a mesma soma da Fusão de Linhas, com o sinal
+       do rateio. `bruto` conta só os positivos: é quanta gente estava
+       no turno, e serve para explicar a diferença, nunca para comparar
+       com o S&OP. */
+    let pref = 0, bruto = 0;
     for(const l of dentro){
-      if(l.inicio > d) continue;
-      if(isValidYmd(l.fim) && l.fim < d) continue;
-      pref += (typeof l.rateio === "number" && isFinite(l.rateio)) ? l.rateio : 1;
+      if(!simAtivo(l,d)) continue;
+      const r = simRateio(l);
+      pref += r;
+      if(r > 0) bruto += r;
     }
     pref = Math.round(pref*1e6)/1e6;
+    bruto = Math.round(bruto*1e6)/1e6;
 
     const revisao = [];
     if(faltando.length) revisao.push("o S&OP de "+faltando.map(b=>b.rotulo).join(" e ")+" não tem valor para este dia.");
-    if(diasDuvidosos.has(d)) revisao.push("há linha do Labor que não pôde ser classificada entre corrente e retroativo.");
 
-    const dia = { data:d, blocos:porBloco, revisao, pref };
+    const dia = { data:d, blocos:porBloco, revisao, pref, bruto };
     if(revisao.length){
       dia.qCliente = null; dia.qPos = null; dia.gap = null; dia.correcao = null;
       dia.status = SIM_STATUS.REVISAO;
@@ -243,7 +228,7 @@ function simularRetorno(dados){
       dia.status = dia.gap > 0 ? SIM_STATUS.REDUCAO
                  : dia.gap < 0 ? SIM_STATUS.SUB
                  : SIM_STATUS.ALINHADO;
-      totalPref += pref; totalCliente += qCliente; totalPos += qPos;
+      totalPref += pref; totalBruto += bruto; totalCliente += qCliente; totalPos += qPos;
       if(dia.gap > 0) hcAcima += dia.gap; else hcAbaixo += -dia.gap;
     }
     dia.diagnostico = simDiagnostico(dia);
@@ -256,6 +241,8 @@ function simularRetorno(dados){
     linhas:{ dentro:dentro.length, fora },
     totais:{
       pref: Math.round(totalPref*100)/100,
+      bruto: Math.round(totalBruto*100)/100,
+      estornos: nNeg,
       cliente: Math.round(totalCliente*100)/100,
       pos: Math.round(totalPos*100)/100,
       /* O número que resume o risco: HC-dia que o cliente pode cortar. */

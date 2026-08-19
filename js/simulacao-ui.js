@@ -423,12 +423,14 @@ function desenharTabela(sim){
   const cabBlocos = sim.blocos.map(b => th("S&amp;OP "+esc(b),
     "Linha <b>Esperado</b> da aba de <b>"+esc(b)+"</b>, na coluna deste dia. "
     + "A coluna é resolvida para a data completa antes de entrar na soma.")).join("");
+  const temEstorno = !!sim.totais.estornos;
   const linhas = sim.dias.map(d =>
     '<tr class="st-'+d.status+'">'
     + '<td>'+fmtYmd(d.data)+'</td>'
     + d.blocos.map(b => '<td>'+n2(b.valor)+'</td>').join("")
     + '<td class="forte">'+n2(d.qCliente)+'</td>'
     + '<td class="forte">'+n2(d.pref)+'</td>'
+    + (temEstorno ? '<td class="fraco">'+n2(d.bruto)+'</td>' : "")
     + '<td class="forte">'+n2(d.qPos)+'</td>'
     + '<td class="'+(d.gap > 0 ? "pos" : d.gap < 0 ? "neg" : "")+'">'+sinal(d.gap)+'</td>'
     + '<td class="'+(d.correcao < 0 ? "neg" : "")+'">'+sinal(d.correcao)+'</td>'
@@ -437,6 +439,7 @@ function desenharTabela(sim){
   $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
     + th("Q cliente / S&amp;OP", tipSop(sim.blocos))
     + th("PREF enviado", tipPref())
+    + (temEstorno ? th("Headcount bruto", TIP.bruto) : "")
     + th("Q Pós previsto", TIP.qPos)
     + th("Gap PREF × S&amp;OP", TIP.gap)
     + th("Correção prevista", TIP.corr)
@@ -456,16 +459,17 @@ function exportar(){
 
   /* --- aba 1: o comparativo, para leitura humana --- */
   const cab = ["Data", ...sim.blocos.map(b => "S&OP "+b), "Q cliente / S&OP", "PREF enviado",
-               "Q Pós previsto", "Gap PREF x S&OP", "Correção prevista", "Status", "Diagnóstico"];
+               "Headcount bruto", "Q Pós previsto", "Gap PREF x S&OP", "Correção prevista",
+               "Status", "Diagnóstico"];
   const aoa = [cab];
   for(const d of sim.dias){
-    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.pref, d.qPos,
+    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.pref, d.bruto, d.qPos,
       d.gap, d.correcao, SIM_STATUS_LABEL[d.status], d.diagnostico ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   formatarDatas(ws, aoa.length, 0);
   ws["!cols"] = [{wch:12}, ...sim.blocos.map(()=>({wch:11})), {wch:17},{wch:14},{wch:16},
-                 {wch:16},{wch:17},{wch:24},{wch:110}];
+                 {wch:16},{wch:16},{wch:17},{wch:24},{wch:110}];
   XLSX.utils.book_append_sheet(wb, ws, "COMPARATIVO");
 
   /* --- aba 2: o retorno simulado, no formato que a Fusão de Linhas lê ---
@@ -491,6 +495,7 @@ function exportar(){
     ["Competência", sim.comp ? sim.comp.label : ""],
     ["Blocos de S&OP somados", sim.blocos.join(" + ")],
     [],
+    ["Fórmula — PREF", "soma dos % RATEIO das linhas ativas no dia, com o sinal — mesma regra da Fusão de Linhas"],
     ["Fórmula — Q cliente", "soma do Esperado de cada bloco no dia"],
     ["Fórmula — Q Pós previsto", "MIN(PREF, Q cliente)"],
     ["Fórmula — Gap", "PREF - Q cliente"],
@@ -499,7 +504,9 @@ function exportar(){
     ["Linhas do LABOR no PREF", sim.linhas.dentro],
     ["Linhas fora do PREF", sim.linhas.fora.length],
     [],
-    ["PREF total (HC-dia)", sim.totais.pref],
+    ["PREF total (HC-dia, líquido)", sim.totais.pref],
+    ["Headcount bruto (HC-dia, só positivos)", sim.totais.bruto],
+    ["Linhas de estorno no PREF", sim.totais.estornos],
     ["S&OP total (HC-dia)", sim.totais.cliente],
     ["Q Pós total previsto (HC-dia)", sim.totais.pos],
     ["HC-dia em risco de correção", sim.totais.hcEmRisco],
