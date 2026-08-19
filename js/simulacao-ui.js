@@ -86,7 +86,7 @@ function lerFatura(wb){
   const c = h.cels;
   const iG=col(c,"GROOT ID"), iN=col(c,"NOME"), iC=col(c,"CARGO"), iCt=col(c,"DESCRICAO CONTA"),
         iR=col(c,"REGIME DE CONTRATO"), iI=col(c,"DATA DE INICIO"), iF=col(c,"DATA FIM"),
-        iRa=col(c,"% RATEIO","RATEIO"), iP=col(c,"PERIODO");
+        iRa=col(c,"% RATEIO","RATEIO"), iP=col(c,"PERIODO"), iMt=col(c,"MATRICULA");
   const faltando = [];
   if(iI < 0) faltando.push("DATA DE INÍCIO");
   if(iF < 0) faltando.push("DATA FIM");
@@ -108,6 +108,7 @@ function lerFatura(wb){
     linhas.push({ linha:i+1, groot, nome:nomeP, cargo:String(r[iC] ?? "").trim(),
       conta: iCt >= 0 ? String(r[iCt] ?? "").trim() : "",
       regime: iR >= 0 ? String(r[iR] ?? "").trim() : "",
+      matricula: iMt >= 0 ? String(r[iMt] ?? "").trim() : "",
       inicio: parseExcelDate(r[iI]), fim: parseExcelDate(r[iF]),
       rateio: parseRateio(r[iRa]) });
   }
@@ -567,6 +568,7 @@ function render(){
 
   desenharDesvios(sim.dias);
   desenharTabela(sim);
+  desenharEqualizacao();
   ligarAjuda();
 }
 
@@ -624,8 +626,10 @@ function desenharTabela(sim){
     + '<td class="'+(d.correcao < 0 ? "neg" : "")+'">'+sinal(d.correcao)+'</td>'
     + '<td><span class="sm-st st-'+d.status+'">'+esc(SIM_STATUS_LABEL[d.status])+'</span></td>'
     + '<td class="diag">'+esc(d.diagnostico)+'</td></tr>').join("");
+  /* Com o valor fixo, a coluna é o QF do cliente — chamá-la de S&OP
+     seria dizer que veio da planilha operacional, e não veio. */
   $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
-    + th("S&amp;OP", tipSop(sim.blocos))
+    + th(sim.fonte === "fixo" ? "QF" : "S&amp;OP", tipSop(sim.blocos))
     + th("PREF", tipPref())
     + th("Q Pós", TIP.qPos)
     + th("Gap", TIP.gap)
@@ -634,6 +638,142 @@ function desenharTabela(sim){
     + th("Status", TIP.status)
     + th("Diagnóstico", TIP.diag)
     + '</tr></thead><tbody>'+linhas+'</tbody></table>';
+}
+
+/* ================================================================
+   EQUALIZAÇÃO — PREF × QF DO CLIENTE
+
+   Esta seção não calcula nada. Ela chama simPlanoEqualizacao(), que
+   chama o motor de js/equalizacao.js — o MESMO que a Fusão de Linhas
+   usa para montar o Labor ajustado. Aqui o plano é SUGESTÃO: nada é
+   aplicado à fatura, e é por isso que a seção existe separada do
+   resto da tela.
+
+   Ela só aparece quando o alvo é o QF do cliente (fonte "valor fixo"),
+   porque é contra ele que a equalização faz sentido — o S&OP diário
+   responde outra pergunta.
+   ================================================================ */
+const EQ_ROTULO = {
+  retirar:  "Retirar linha",
+  adiar:    "Adiar início",
+  encurtar: "Antecipar fim",
+  pausar:   "Pausar e retomar"
+};
+const EQ_ORDEM = ["retirar","adiar","encurtar","pausar"];
+
+function opcoesEq(){
+  const c = $("sm-eqAdiar"), p = $("sm-eqPausa");
+  let pausaDesde = null;
+  if(p && p.value){ const [y,m,d] = p.value.split("-").map(Number); pausaDesde = ymd(y,m,d); }
+  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde };
+}
+
+const faixaTxt = f => f.de === f.ate ? fmtShort(f.de) : fmtShort(f.de)+"–"+fmtShort(f.ate);
+
+/* O que muda na linha, em uma frase. É o que o card mostra fechado. */
+function eqMudanca(a){
+  if(a.tipo === "retirar")  return "linha sai do Labor";
+  if(a.tipo === "adiar")    return "início "+fmtShort(a.linha.inicio)+" → "+fmtShort(a.novoInicio);
+  if(a.tipo === "encurtar") return "fim "+(a.linha.fim ? fmtShort(a.linha.fim) : "em aberto")
+    + " → "+fmtShort(a.novoFim);
+  return a.pausas.map(p => "pausa "+fmtShort(p.fim)+" a "+fmtShort(p.ini)).join(" · ");
+}
+
+function eqDetalhe(a){
+  const partes = ["<p>"+esc(a.motivo)+"</p>"];
+  partes.push('<p><b>Impacto na curva:</b> '+sinal(-a.impacto.hc)+' HC em '
+    + a.impacto.dias + ' dia(s) — ' + esc(a.impacto.faixas.map(faixaTxt).join(", ")) + '.</p>');
+  partes.push('<p><b>Vigência atual:</b> '+fmtYmd(a.linha.inicio)+' → '
+    + (a.linha.fim ? fmtYmd(a.linha.fim) : "em aberto")
+    + ' · <b>% rateio</b> '+n2(a.linha.rateio)
+    + (a.linha.matricula ? ' · <b>Matrícula</b> '+esc(a.linha.matricula) : "")
+    + ' · <b>linha</b> '+a.linha.linha+' do LABOR.</p>');
+  if(a.diarista && a.diarista.dias.length){
+    partes.push('<p class="sm-eqdiar"><b>Também aparece como diarista</b> em '
+      + a.diarista.dias.length + ' dos dias que o plano tira do fixo ('
+      + esc(a.diarista.dias.map(fmtShort).join(", ")) + '). No período inteiro são '
+      + a.diarista.total + ' diária(s) — ' + a.diarista.id + ' ID, ' + a.diarista.meli + ' cliente. '
+      + 'Isso costuma ser transição de fixo para diária, e explica a correção: confirme se não há '
+      + 'dupla cobrança nesses dias.</p>');
+  } else if(a.diarista){
+    partes.push('<p class="sm-eqdiar">Aparece na base de diaristas em '+a.diarista.total
+      + ' dia(s) do período, mas nenhum deles coincide com os dias que o plano tira do fixo.</p>');
+  }
+  return partes.join("");
+}
+
+function desenharEqualizacao(){
+  const bloco = $("sm-eq-bloco");
+  if(!bloco) return;
+  const sim = S.sim;
+  const alvo = (sim && sim.fonte === "fixo") ? sim.valorFixo : null;
+  if(!sim || !alvo){ bloco.hidden = true; return; }
+  bloco.hidden = false;
+
+  const diaristas = S.diar
+    ? S.diar.regs.filter(x => x.data >= sim.periodo.ini && x.data <= sim.periodo.fim) : [];
+  const plano = simPlanoEqualizacao({ labor:S.fatura.linhas, periodo:sim.periodo,
+    alvo, diaristas, opcoes:opcoesEq() });
+  S.plano = plano;
+  if(plano.erro){ $("sm-eq").innerHTML = '<div class="sm-aviso">'+esc(plano.erro)+'</div>'; return; }
+
+  const t = plano.totais;
+  const prefs = plano.dias.map(d => d.pref);
+  const item = (l,v) => '<div><span>'+l+'</span><b>'+v+'</b></div>';
+  const resumo = '<div class="sm-eqresumo">'
+    + item("Período", fmtShort(plano.periodo.ini)+" → "+fmtShort(plano.periodo.fim))
+    + item("QF do cliente", n2(alvo))
+    + item("PREF mínimo", n2(Math.min(...prefs)))
+    + item("PREF máximo", n2(Math.max(...prefs)))
+    + item("Excesso no período", n2(t.excessoAntes)+" HC-dia")
+    + item("Excesso após o plano", n2(t.excessoDepois)+" HC-dia")
+    + '</div>';
+
+  if(!plano.acoes.length && !Object.keys(plano.revisar).length){
+    $("sm-eq").innerHTML = resumo + '<div class="sm-eqok"><b>Nada a equalizar.</b> '
+      + 'O Labor não passa do QF em nenhum dia do período.</div>';
+    return;
+  }
+
+  const grupos = EQ_ORDEM.map(tipo => {
+    const itens = plano.acoes.filter(a => a.tipo === tipo);
+    if(!itens.length) return "";
+    return '<div class="sm-eqgrupo">'
+      + '<header><span class="sm-eqchip '+tipo+'">'+EQ_ROTULO[tipo]+'</span>'
+      + '<span class="n">'+itens.length+' pessoa(s)</span></header>'
+      + itens.map(a =>
+          '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
+          + '<div class="cab"><div class="nm">'+esc(a.linha.nome)
+          + '<small>Groot '+esc(a.linha.groot || "—")+' · '+esc(a.linha.cargo)+'</small></div>'
+          + '<div class="mud">'+esc(eqMudanca(a))
+          + '<small>'+sinal(-a.impacto.hc)+' HC · '+a.impacto.dias+' dia(s)'
+          + (a.diarista && a.diarista.dias.length ? ' · também diarista' : "")+'</small></div></div>'
+          + '<div class="det">'+eqDetalhe(a)+'</div></div>').join("")
+      + '</div>';
+  }).join("");
+
+  /* `falta` guarda o tamanho da falta como número positivo; na tela ela
+     é uma queda em relação ao QF e sai com sinal negativo. */
+  const listaDias = (o, neg) => Object.keys(o).map(Number).sort((a,b)=>a-b)
+    .map(d => fmtShort(d)+" ("+sinal(neg ? -o[d] : o[d])+")").join(" · ");
+  const revisar = Object.keys(plano.revisar).length
+    ? '<div class="sm-eqgrupo revisar"><header><span class="sm-eqchip revisar">Revisar</span>'
+      + '<span class="n">'+Object.keys(plano.revisar).length+' dia(s)</span></header>'
+      + '<div class="det aberto"><p>Nestes dias sobra quadro que nenhuma das quatro ações resolve '
+      + 'sem partir um contrato de um jeito que o motor não faz sozinho. Avalie caso a caso.</p>'
+      + '<p class="dias">'+listaDias(plano.revisar,false)+'</p></div></div>' : "";
+  const falta = Object.keys(plano.falta).length
+    ? '<div class="sm-eqgrupo falta"><header><span class="sm-eqchip falta">Falta</span>'
+      + '<span class="n">'+Object.keys(plano.falta).length+' dia(s)</span></header>'
+      + '<div class="det aberto"><p>Nestes dias o Labor está <b>abaixo</b> do QF. A equalização não '
+      + 'mexe neles — inventar pessoa não é trabalho dela. Verifique se falta gente no arquivo.</p>'
+      + '<p class="dias">'+listaDias(plano.falta,true)+'</p></div></div>' : "";
+
+  $("sm-eq").innerHTML = resumo
+    + '<div class="sm-eqselo">Este plano equaliza <b>matematicamente</b> o Labor ao QF. '
+    + 'Confirme se corresponde à movimentação operacional real antes de aplicar — '
+    + 'nada é alterado na fatura por aqui.</div>'
+    + grupos + revisar + falta;
 }
 
 /* ================================================================
@@ -766,6 +906,7 @@ document.querySelectorAll('input[name="sm-fonte"]').forEach(r => r.onchange = pr
 const campoFixo = $("sm-sopFixo");
 if(campoFixo) campoFixo.oninput = pronto;
 pronto();   // deixa o passo 3 e o destaque da fonte coerentes já na abertura
+[$("sm-eqAdiar"), $("sm-eqPausa")].forEach(el => { if(el) el.onchange = () => { if(S.sim) desenharEqualizacao(); }; });
 const btnRun = $("sm-btnRun"); if(btnRun) btnRun.onclick = analisar;
 const btnExp = $("sm-btnExport"); if(btnExp) btnExp.onclick = exportar;
 
