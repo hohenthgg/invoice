@@ -463,7 +463,8 @@ function rodar(blocos, per, fonte, valorFixo){
   const diaristas = S.diar
     ? S.diar.regs.filter(x => x.data >= per.ini && x.data <= per.fim)
     : [];
-  const sim = simularRetorno({ labor:S.fatura.linhas, blocos, periodo:per, comp, diaristas });
+  const sim = simularRetorno({ labor:S.fatura.linhas, blocos, periodo:per, comp, diaristas,
+    diarias: S.fatura.diarias });
   if(sim.erro) return falhar($("sm-err"), sim.erro);
   sim.fonte = fonte;
   sim.valorFixo = valorFixo;
@@ -486,7 +487,9 @@ function rodar(blocos, per, fonte, valorFixo){
    recortado na borda do scroll.
    ================================================================ */
 function tipPref(){
-  return "Soma dos <b>% RATEIO</b> das linhas do LABOR ativas no dia — ativa é "
+  return "<b>Quadro do dia</b> = as linhas do LABOR ativas mais as <b>diárias já lançadas</b> na aba "
+    + "DIARISTAS da fatura. É esse total que vai ao confronto com o S&OP: vaga ocupada por diária é "
+    + "vaga ocupada. A parte fixa é a "
     + "<b>início ≤ dia</b> e <b>fim ≥ dia</b>, com DATA FIM vazia valendo até o fim do período. "
     + "Entram só as linhas de <b>LABOR DIRETO</b>, com cargo da lista do PREF e classificadas como "
     + "competência corrente. Ficam de fora liderança e indiretos, a linha de ABS e todo retroativo.";
@@ -592,7 +595,9 @@ function render(){
     '<div class="sm-aviso '+a.tipo+'">'+esc(a.texto)+'</div>').join("");
 
   const cards = [
-    ["PREF total enviado", n2(t.pref), "HC-dia", "", TIP.totalPref+" "+tipPref()],
+    ["Quadro total enviado", n2(t.quadro), "HC-dia"
+      + (t.diarias ? " · "+n2(t.pref)+" fixo + "+n2(t.diarias)+" diária" : ""),
+      "", TIP.totalPref+" "+tipPref()],
     ["S&OP total", n2(t.cliente), "HC-dia", "", TIP.totalSop+" "+tipSop(sim.blocos)],
     ["Q Pós total previsto", n2(t.pos), "HC-dia", "ok", TIP.totalPos+" "+TIP.qPos],
     ["HC-dia em risco de correção", n2(t.hcEmRisco), "acima do S&OP", t.hcEmRisco > 0 ? "bad" : "ok", TIP.risco],
@@ -652,6 +657,15 @@ function celulaDiaristas(d){
     + '</td>';
 }
 
+/* O quadro do dia, com a composição embaixo quando há diária. Mostrar
+   só o fixo faria a fatura já equalizada voltar como "12 HC abaixo",
+   quando 170 fixos + 12 diárias fecham exatamente no alvo. */
+function celulaQuadro(d){
+  return '<td class="forte">'+n2(d.quadro)
+    + (d.diarias ? '<small class="sm-comp">'+n2(d.pref)+' fixo + '+n2(d.diarias)+' diária</small>' : "")
+    + '</td>';
+}
+
 function desenharTabela(sim){
   const th = (rotulo, tip) => '<th data-tip="'+esc(tip)+'">'+rotulo+'</th>';
   /* A coluna por operação só existe quando há mais de uma: com um bloco
@@ -666,7 +680,7 @@ function desenharTabela(sim){
     + '<td>'+fmtYmd(d.data)+'</td>'
     + (detalhar ? d.blocos.map(b => '<td>'+n2(b.valor)+'</td>').join("") : "")
     + '<td class="forte">'+n2(d.qCliente)+'</td>'
-    + '<td class="forte">'+n2(d.pref)+'</td>'
+    + celulaQuadro(d)
     + '<td class="forte">'+n2(d.qPos)+'</td>'
     + '<td class="'+(d.gap > 0 ? "pos" : d.gap < 0 ? "neg" : "")+'">'+sinal(d.gap)+'</td>'
     + (temDiar ? celulaDiaristas(d) : "")
@@ -677,7 +691,7 @@ function desenharTabela(sim){
      seria dizer que veio da planilha operacional, e não veio. */
   $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
     + th(sim.fonte === "fixo" ? "QF" : "S&amp;OP", tipSop(sim.blocos))
-    + th("PREF", tipPref())
+    + th(sim.totais.diarias ? "Quadro" : "PREF", tipPref())
     + th("Q Pós", TIP.qPos)
     + th("Gap", TIP.gap)
     + (temDiar ? th("Diaristas disp.", TIP.diaristas) : "")
@@ -1157,12 +1171,12 @@ function exportar(){
   const wb = XLSX.utils.book_new();
 
   /* --- aba 1: o comparativo, para leitura humana --- */
-  const cab = ["Data", ...sim.blocos.map(b => "S&OP "+b), "Q cliente / S&OP", "PREF enviado",
-               "Headcount bruto", "Q Pós previsto", "Gap PREF x S&OP", "Correção prevista",
+  const cab = ["Data", ...sim.blocos.map(b => "S&OP "+b), "Q cliente / S&OP", "Quadro do dia",
+               "Diárias já lançadas", "Q Pós previsto", "Gap Quadro x S&OP", "Correção prevista",
                "Status", "Diagnóstico"];
   const aoa = [cab];
   for(const d of sim.dias){
-    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.pref, d.bruto, d.qPos,
+    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.quadro, d.diarias, d.qPos,
       d.gap, d.correcao, SIM_STATUS_LABEL[d.status], d.diagnostico ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1206,8 +1220,10 @@ function exportar(){
     ["Linhas do LABOR no PREF", sim.linhas.dentro],
     ["Linhas fora do PREF", sim.linhas.fora.length],
     [],
-    ["PREF total (HC-dia, líquido)", sim.totais.pref],
-    ["Headcount bruto (HC-dia, só positivos)", sim.totais.bruto],
+    ["Quadro total (HC-dia)", sim.totais.quadro],
+    ["  · quadro fixo do LABOR", sim.totais.pref],
+    ["  · diárias já lançadas", sim.totais.diarias],
+
     ["Linhas de estorno no PREF", sim.totais.estornos],
     ["S&OP total (HC-dia)", sim.totais.cliente],
     ["Q Pós total previsto (HC-dia)", sim.totais.pos],

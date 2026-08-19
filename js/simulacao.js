@@ -237,13 +237,18 @@ function simDiagnostico(dia){
       + " Nenhum valor foi previsto para não inventar número.";
   }
   const fontes = dia.blocos.map(b => b.rotulo+" "+n(b.valor)).join(" + ");
+  /* O número que foi ao confronto é o quadro. Quando há diária, dizer
+     só "o Labor" esconderia metade da conta. */
+  const comp = dia.diarias
+    ? "o quadro do dia ("+n(dia.pref)+" fixo + "+n(dia.diarias)+" diária = "+n(dia.quadro)+")"
+    : "o Labor enviado";
   if(dia.status === SIM_STATUS.REDUCAO){
-    return "Foram enviados "+n(dia.gap)+" HC acima do S&OP total deste dia ("+fontes
-      + " = "+n(dia.qCliente)+"). Caso o cliente limite o reconhecimento ao planejamento, "
-      + "há risco de redução de "+n(dia.gap)+" HC.";
+    return "Com "+comp+", foram enviados "+n(dia.gap)+" HC acima do S&OP total deste dia ("
+      + fontes + " = "+n(dia.qCliente)+"). Caso o cliente limite o reconhecimento ao "
+      + "planejamento, há risco de redução de "+n(dia.gap)+" HC.";
   }
   if(dia.status === SIM_STATUS.SUB){
-    return "O Labor enviado está "+n(-dia.gap)+" HC abaixo do S&OP disponível ("+fontes
+    return "Contando "+comp+", está "+n(-dia.gap)+" HC abaixo do S&OP disponível ("+fontes
       + " = "+n(dia.qCliente)+"). Não presumir que o cliente aumentará automaticamente a "
       + "cobrança: verifique se existem pessoas faturáveis faltando no Labor."
       + (dia.diaristas
@@ -254,12 +259,20 @@ function simDiagnostico(dia){
             + " — dariam para cobrir "+n(dia.abatePossivel)+" HC."
           : "");
   }
-  return "PREF e S&OP total batem em "+n(dia.qCliente)+" ("+fontes+"). Sem correção prevista.";
+  return "Quadro e S&OP total batem em "+n(dia.qCliente)+" ("+fontes
+    + (dia.diarias ? "; quadro = "+n(dia.pref)+" fixo + "+n(dia.diarias)+" diária" : "")
+    + "). Sem correção prevista.";
 }
 
 function simularRetorno(dados){
   const labor = dados.labor || [], blocos = dados.blocos || [];
   const diaristas = dados.diaristas || [];
+  /* O quadro do dia é o fixo MAIS a diária já lançada na fatura. Contar
+     só o fixo aqui, enquanto a equalização conta os dois, dava duas
+     respostas para o mesmo dia na mesma tela: a fatura equalizada
+     voltava com 170 contra 182 e "possível subfaturamento" de -12, quando
+     170 + 12 diárias fecham exatamente em 182. */
+  const porDiaDiarias = simDiariasPorDia(dados.diarias);
   const ini = dados.periodo.ini, fim = dados.periodo.fim;
   const comp = dados.comp;
   const avisos = [];
@@ -295,7 +308,8 @@ function simularRetorno(dados){
   const disponibilidade = simDisponibilidade(diaristas, labor, listaDias);
 
   const dias = [];
-  let totalPref = 0, totalBruto = 0, totalCliente = 0, totalPos = 0, hcAcima = 0, hcAbaixo = 0;
+  let totalPref = 0, totalBruto = 0, totalDiarias = 0,
+      totalCliente = 0, totalPos = 0, hcAcima = 0, hcAbaixo = 0;
   let totalDisp = 0, totalAbate = 0, totalOcupados = 0;
   const contagem = { reducao:0, alinhado:0, subfaturamento:0, revisao:0 };
 
@@ -325,25 +339,31 @@ function simularRetorno(dados){
     }
     pref = Math.round(pref*1e6)/1e6;
     bruto = Math.round(bruto*1e6)/1e6;
+    let diarias = 0;
+    for(const [, q] of (porDiaDiarias.get(d) || new Map())) diarias += q;
+    diarias = Math.round(diarias*1e6)/1e6;
+    const quadro = Math.round((pref + diarias)*1e6)/1e6;
 
     const revisao = [];
     if(faltando.length) revisao.push("o S&OP de "+faltando.map(b=>b.rotulo).join(" e ")+" não tem valor para este dia.");
 
-    const dia = { data:d, blocos:porBloco, revisao, pref, bruto };
+    const dia = { data:d, blocos:porBloco, revisao, pref, bruto, diarias, quadro };
     if(revisao.length){
       dia.qCliente = null; dia.qPos = null; dia.gap = null; dia.correcao = null;
       dia.status = SIM_STATUS.REVISAO;
     } else {
       const qCliente = porBloco.reduce((s,b) => s + b.valor, 0);
-      const qPos = Math.min(pref, qCliente);
+      /* Quem vai ao confronto é o QUADRO, não o fixo sozinho. */
+      const qPos = Math.min(quadro, qCliente);
       dia.qCliente = qCliente;
       dia.qPos = qPos;
-      dia.gap = Math.round((pref - qCliente)*1e6)/1e6;
-      dia.correcao = Math.round((qPos - pref)*1e6)/1e6;
+      dia.gap = Math.round((quadro - qCliente)*1e6)/1e6;
+      dia.correcao = Math.round((qPos - quadro)*1e6)/1e6;
       dia.status = dia.gap > 0 ? SIM_STATUS.REDUCAO
                  : dia.gap < 0 ? SIM_STATUS.SUB
                  : SIM_STATUS.ALINHADO;
-      totalPref += pref; totalBruto += bruto; totalCliente += qCliente; totalPos += qPos;
+      totalPref += pref; totalBruto += bruto; totalDiarias += diarias;
+      totalCliente += qCliente; totalPos += qPos;
       if(dia.gap > 0) hcAcima += dia.gap; else hcAbaixo += -dia.gap;
     }
     /* Quantos diaristas poderiam cobrir a falta do dia — limitado à
@@ -369,6 +389,8 @@ function simularRetorno(dados){
     totais:{
       pref: Math.round(totalPref*100)/100,
       bruto: Math.round(totalBruto*100)/100,
+      diarias: Math.round(totalDiarias*100)/100,
+      quadro: Math.round((totalPref+totalDiarias)*100)/100,
       estornos: nNeg,
       cliente: Math.round(totalCliente*100)/100,
       pos: Math.round(totalPos*100)/100,
@@ -703,12 +725,12 @@ function simLinhasRetorno(sim){
   const linhas = [];
   for(const dia of sim.dias){
     if(dia.status === SIM_STATUS.REVISAO){
-      linhas.push({ data:dia.data, tipo:"FULL_TIME", pref:dia.pref, qPos:null, desvio:null,
+      linhas.push({ data:dia.data, tipo:"FULL_TIME", pref:dia.quadro, qPos:null, desvio:null,
         ocorrencia:"REVISÃO NECESSÁRIA — "+dia.diagnostico });
       continue;
     }
-    linhas.push({ data:dia.data, tipo:"FULL_TIME", pref:dia.pref, qPos:dia.qPos,
-      desvio: Math.round((dia.pref - dia.qPos)*1e6)/1e6,
+    linhas.push({ data:dia.data, tipo:"FULL_TIME", pref:dia.quadro, qPos:dia.qPos,
+      desvio: Math.round((dia.quadro - dia.qPos)*1e6)/1e6,
       ocorrencia:"PREVISÃO SIMULADA — "+dia.diagnostico });
   }
   return linhas;
