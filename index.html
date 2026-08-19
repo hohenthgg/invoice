@@ -703,11 +703,16 @@
         <code class="inline">Diaristas</code>, com as mesmas colunas, larguras, cabeçalho amarelo e bordas
         do modelo. No <code class="inline">Labor</code>, as retiradas somem, os inícios e fins ajustados já
         vêm mudados, e uma pausa vira duas linhas da mesma pessoa.</p>
+      <p><b>O quadro do dia é o fixo do LABOR mais as diárias que a fatura já lança</b> na aba
+        DIARISTAS, e é esse total que vai ao confronto com o QF. A diária conta na curva — vaga ocupada
+        é vaga ocupada — mas a equalização não mexe nela: quem ela ajusta é o quadro fixo.</p>
       <p><b>E as pessoas que faltam já vêm preenchidas</b>, se a base do SIGO estiver carregada: nos dias
-        abaixo do QF o app escolhe diaristas <b>solicitados naquele dia e sem cobrança no LABOR</b>,
+        abaixo do QF o app escolhe diaristas <b>solicitados naquele dia e sem cobrança naquele dia</b>
+        — nem no LABOR, nem como diária já lançada nesta fatura —,
         <b>primeiro os da ID até acabarem</b> e só então os do cliente — a mesma prioridade do abate da aba
         Calcular ABS. Elas saem na aba <b>Diaristas</b>, uma linha por pessoa-dia, com cargo
-        <i>Diarista</i> e quantidade 1, exatamente como a fatura lança diária.</p>
+        <i>Diarista</i> e quantidade 1, exatamente como a fatura lança diária — <b>junto com as
+        diárias que a fatura já tinha</b>, que saem como estão.</p>
       <p>Repare no efeito: quem cobre a falta é <b>diarista, não quadro fixo</b>, então o
         <code class="inline">Labor</code> exportado fica <b>abaixo do QF</b> nos dias cobertos por diária —
         e é assim mesmo. Lançar essa gente no Labor seria cobrá-la como fixo, que é outra coisa. O aviso

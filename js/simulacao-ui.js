@@ -121,12 +121,46 @@ function lerFatura(wb){
   }
   if(!linhas.length) return { erro:'A aba "'+nome+'" não tem linhas com dado.' };
   return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb),
+    diarias: lerDiariasDaFatura(wb),
     layout:{ topo: rows.slice(0, h.idx+1), largura: Math.max(h.cels.length,
       ...linhas.map(l => l.bruta.length)),
       cols:{ groot:iG, nome:iN, cargo:iC, conta:iCt, regime:iR, inicio:iI, fim:iF,
              rateio:iRa, matricula:iMt, obs:col(c,"OBSERVACOES","OBSERVAÇÕES"),
              fixas:["FORNECEDOR","PERIODO","PERIODO - MES/ANO","UNIDADE","DESCRICAO CONTA",
                     "CONTA CONTABIL","UNIDADE + UF","EMPRESA"].map(x => col(c,x)) } } };
+}
+
+/* ================================================================
+   AS DIÁRIAS QUE A FATURA JÁ LANÇA
+
+   Elas vivem na aba DIARISTAS, não no LABOR, e ignorá-las foi o defeito
+   que fez o app pedir 23 diaristas num dia em que a fatura já pagava 15
+   — com 29 pessoa-dia repetidas entre as duas listas, que é cobrança
+   dobrada. Uma vaga ocupada por diária é uma vaga ocupada.
+   ================================================================ */
+function lerDiariasDaFatura(wb){
+  const nome = acharAba(wb,"DIARISTAS","DIARISTA");
+  if(!nome) return [];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[nome],{header:1,defval:""});
+  const h = acharCabecalho(rows,["GROOT ID","DATA"]);
+  if(!h) return [];
+  const c = h.cels;
+  const iG=col(c,"GROOT ID"), iN=col(c,"NOME"), iC=col(c,"CARGO"), iE=col(c,"ESCALA"),
+        iD=col(c,"DATA"), iQ=col(c,"QUANTIDADE");
+  if(iG < 0 || iD < 0) return [];
+  const out = [];
+  for(let i=h.idx+1;i<rows.length;i++){
+    const r = rows[i]; if(!r) continue;
+    const groot = String(r[iG] ?? "").trim();
+    const data = parseExcelDate(r[iD]);
+    if(!groot || !isValidYmd(data)) continue;
+    const q = iQ >= 0 ? Number(r[iQ]) : 1;
+    out.push({ groot, nome:String(r[iN] ?? "").trim(),
+      cargo: iC >= 0 ? String(r[iC] ?? "").trim() : "",
+      escala: iE >= 0 ? String(r[iE] ?? "").trim() : "",
+      data, quantidade: isFinite(q) && q !== 0 ? q : 1 });
+  }
+  return out;
 }
 
 /* O nome da unidade, do RESUMO — é ele que escolhe a aba do SIGO. */
@@ -726,18 +760,22 @@ function desenharEqualizacao(){
   const diaristas = S.diar
     ? S.diar.regs.filter(x => x.data >= sim.periodo.ini && x.data <= sim.periodo.fim) : [];
   const plano = simPlanoEqualizacao({ labor:S.fatura.linhas, periodo:sim.periodo,
-    alvo, diaristas, opcoes:opcoesEq() });
+    alvo, diaristas, diarias:S.fatura.diarias, opcoes:opcoesEq() });
   S.plano = plano;
   if(plano.erro){ $("sm-eq").innerHTML = '<div class="sm-aviso">'+esc(plano.erro)+'</div>'; return; }
 
   const t = plano.totais;
-  const prefs = plano.dias.map(d => d.pref);
+  const quadros = plano.dias.map(d => d.quadro);
   const item = (l,v) => '<div><span>'+l+'</span><b>'+v+'</b></div>';
+  /* O quadro do dia é fixo + diária já lançada. Mostrar só o fixo
+     esconderia a vaga que a diária ocupa, e foi assim que a falta saiu
+     inflada. */
   const resumo = '<div class="sm-eqresumo">'
     + item("Período", fmtShort(plano.periodo.ini)+" → "+fmtShort(plano.periodo.fim))
     + item("QF do cliente", n2(alvo))
-    + item("PREF mínimo", n2(Math.min(...prefs)))
-    + item("PREF máximo", n2(Math.max(...prefs)))
+    + item("Quadro mínimo", n2(Math.min(...quadros)))
+    + item("Quadro máximo", n2(Math.max(...quadros)))
+    + (t.diarias ? item("Diárias já na fatura", n2(t.diarias)+" pessoa-dia") : "")
     + item("Excesso no período", n2(t.excessoAntes)+" HC-dia")
     + item("Excesso após o plano", n2(t.excessoDepois)+" HC-dia")
     + '</div>';
@@ -773,8 +811,9 @@ function desenharEqualizacao(){
   const grupoInc = (inc && inc.pessoas.length)
     ? '<div class="sm-eqgrupo"><header><span class="sm-eqchip incluir">Incluir</span>'
       + '<span class="n">'+inc.totais.pessoas+' pessoa(s) · '+inc.totais.incluido+' pessoa-dia</span></header>'
-      + '<div class="det aberto"><p>Diaristas solicitados no SIGO e <b>sem cobrança no LABOR</b> '
-      + 'naqueles dias. Primeiro os da <b>ID</b>, até acabar; o do cliente só entra depois '
+      + '<div class="det aberto"><p>Diaristas solicitados no SIGO e <b>sem cobrança naquele dia</b> '
+      + '— nem no LABOR, nem como diária já lançada nesta fatura. Primeiro os da <b>ID</b>, até '
+      + 'acabar; o do cliente só entra depois '
       + '('+inc.totais.id+' ID · '+inc.totais.meli+' cliente'
       + (inc.totais.sem ? ' · '+inc.totais.sem+' sem solicitante' : "")+'). '
       + (inc.totais.descoberto > 0
@@ -800,8 +839,10 @@ function desenharEqualizacao(){
   const revisar = Object.keys(plano.revisar).length
     ? '<div class="sm-eqgrupo revisar"><header><span class="sm-eqchip revisar">Revisar</span>'
       + '<span class="n">'+Object.keys(plano.revisar).length+' dia(s)</span></header>'
-      + '<div class="det aberto"><p>Nestes dias sobra quadro que nenhuma das quatro ações resolve '
-      + 'sem partir um contrato de um jeito que o motor não faz sozinho. Avalie caso a caso.</p>'
+      + '<div class="det aberto"><p>Nestes dias sobra quadro que nenhuma das quatro ações resolve. '
+      + 'Onde há diária já lançada na fatura, é dela que vem a sobra — o quadro fixo já está no '
+      + 'teto e a equalização não mexe em diária que já aconteceu. Nos demais, zerar exigiria '
+      + 'partir um contrato de um jeito que o motor não faz sozinho. Avalie caso a caso.</p>'
       + '<p class="dias">'+listaDias(plano.revisar,false)+'</p></div></div>' : "";
   const falta = (Object.keys(plano.falta).length && !grupoInc)
     ? '<div class="sm-eqgrupo falta"><header><span class="sm-eqchip falta">Falta</span>'
@@ -974,7 +1015,15 @@ async function exportarEqualizado(){
   const incluir = $("sm-eqIncluir");
   const inc = (incluir && incluir.checked) ? plano.inclusoes : null;
   const escala = escalaDoDiarista(fat.unidade);
-  const linhasDiar = [];
+  /* As diárias que a fatura JÁ lança saem primeiro, como estão: o
+     arquivo é a fatura equalizada inteira, não só o que o app acrescentou.
+     Substituí-las apagaria cobrança legítima. */
+  const jaNaFatura = (fat.diarias || []).filter(d =>
+    d.data >= sim.periodo.ini && d.data <= sim.periodo.fim);
+  const linhasDiar = jaNaFatura
+    .slice().sort((a,b) => a.data - b.data || String(a.nome).localeCompare(String(b.nome)))
+    .map(d => [numSePuder(d.groot), d.nome, d.cargo || "Diarista",
+               d.escala || escala, ymdParaData(d.data), d.quantidade]);
   if(inc) for(const p of inc.pessoas) for(const d of p.dias)
     linhasDiar.push([numSePuder(p.groot), p.nome, "Diarista", escala, ymdParaData(d), 1]);
 
@@ -995,9 +1044,18 @@ async function exportarEqualizado(){
   if(!incLinhas.length) incLinhas.push(["(ninguém a incluir)"]);
 
   const revLinhas = [];
+  const diariasDe = {};
+  for(const d of plano.dias) diariasDe[d.data] = d.diarias || 0;
   for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
+    /* Excesso que cabe dentro das diárias do dia tem outra explicação:
+       o quadro fixo já está no teto e o que passa é diária já lançada,
+       em que a equalização não mexe. Dizer "partir um contrato" aí
+       mandaria o usuário procurar no lugar errado. */
     revLinhas.push(["Excesso sem solução", dt(+d), q,
-      "Zerar exigiria partir um contrato — avaliar caso a caso."]);
+      diariasDe[+d] >= q
+        ? "O quadro fixo já está no teto; o que passa do QF são as "+diariasDe[+d]
+          + " diária(s) já lançadas neste dia, em que a equalização não mexe."
+        : "Zerar exigiria partir um contrato — avaliar caso a caso."]);
   if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
     { if(c.descoberto > 0) revLinhas.push(["Falta descoberta", dt(+d), c.descoberto,
       "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
@@ -1017,6 +1075,8 @@ async function exportarEqualizado(){
     ["Linhas ajustadas", ajustadas],
     ["Linhas removidas", removidas],
     ["Linhas na aba Diaristas", linhasDiar.length],
+    ["  · diárias que a fatura já tinha", jaNaFatura.length],
+    ["  · diárias acrescentadas pelo app", linhasDiar.length - jaNaFatura.length],
     ["Pessoas incluídas", inc ? inc.totais.pessoas : 0],
     ["  · da ID", inc ? inc.totais.id : 0],
     ["  · do cliente", inc ? inc.totais.meli : 0],
@@ -1025,6 +1085,7 @@ async function exportarEqualizado(){
     ["Falta descoberta (pessoa-dia)", inc ? inc.totais.descoberto : 0],
     ["Excesso antes do plano (HC-dia)", plano.totais.excessoAntes],
     ["Excesso depois do plano (HC-dia)", plano.totais.excessoDepois],
+    ["Diárias já lançadas (pessoa-dia)", plano.totais.diarias],
     ["", ""],
     ["AVISO", "As alterações equalizam MATEMATICAMENTE o Labor ao QF. Confirme se "
       + "correspondem à movimentação operacional real antes de enviar."],
@@ -1033,8 +1094,11 @@ async function exportarEqualizado(){
       + "exportação fica ABAIXO do QF nos dias cobertos por diária: o quadro fixo é "
       + "esse mesmo, e a diferença é diária."],
     ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada no dia e sem cobrança "
-      + "no LABOR daquele dia. Prioridade para os diaristas da ID; o do cliente só entra "
-      + "depois de esgotados os internos."],
+      + "naquele dia — nem no LABOR, nem como diária já lançada nesta fatura. Prioridade "
+      + "para os diaristas da ID; o do cliente só entra depois de esgotados os internos."],
+    ["O que é o quadro do dia", "Quadro fixo do LABOR MAIS as diárias já lançadas na fatura. "
+      + "É esse total que vai ao confronto com o QF: a vaga ocupada por diária é vaga "
+      + "ocupada, e a falta do dia já vem descontada dela."],
     ["Campos em branco", "Matrícula, regime, dias trabalhados e turno das pessoas incluídas "
       + "não são deduzíveis do SIGO e por isso não são escritos. A ESCALA é a da operação "
       + "da unidade; unidade que casa com mais de uma operação sai em branco."]];

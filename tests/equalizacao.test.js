@@ -525,5 +525,65 @@ const lab = (groot, ini, fim, rateio) => ({ groot, nome:"FIXO "+groot, cargo:"Au
         "e as inclusões não mudam nenhuma das retiradas — são lados independentes do plano");
 }
 
+/* ================================================================
+   A DIÁRIA QUE A FATURA JÁ LANÇA
+
+   O defeito que estes testes travam: a falta era calculada contra o
+   LABOR só, e a aba DIARISTAS da fatura nunca era lida. Num dia em que
+   a fatura já pagava 15 diárias o app pedia mais 23, e 29 pessoa-dia
+   apareciam nas duas listas — cobrança dobrada, com nome e data.
+   ================================================================ */
+secao("Diárias já lançadas na fatura");
+{
+  const gente2 = fixture();
+  const d1 = ymd(2026,7,20);
+  const diarias = Array.from({length:5}, (_,k) => ({ groot:"70000"+k, data:d1, quantidade:1 }));
+  const sem = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, opcoes:{} });
+  const com = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
+  const dSem = sem.dias.find(x => x.data === d1), dCom = com.dias.find(x => x.data === d1);
+  check(dCom.quadro === dCom.pref + 5,
+        "o quadro do dia é o fixo MAIS as diárias já lançadas",
+        dCom.pref + " + " + dCom.diarias + " = " + dCom.quadro);
+  check(dCom.dif === dSem.dif + 5,
+        "e é o quadro, não o fixo, que vai ao confronto com o QF");
+  check((com.falta[d1] || 0) === Math.max(0, (sem.falta[d1] || 0) - 5),
+        "a falta do dia sai descontada das diárias que a fatura já paga",
+        "sem " + (sem.falta[d1]||0) + " · com " + (com.falta[d1]||0));
+}
+{
+  /* A diária conta na curva mas não pode virar ação: quem equaliza mexe
+     no quadro fixo, não em diária que já aconteceu. */
+  const gente2 = fixture();
+  const diarias = [];
+  for(let d = PER.ini; d <= PER.fim; d = ctx.addDays(d,1))
+    for(let k=0;k<8;k++) diarias.push({ groot:"7100"+k, data:d, quantidade:1 });
+  const r = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
+  check(r.acoes.every(a => gente2.some(p => p.groot === a.linha.groot)),
+        "nenhuma ação do plano cai sobre uma diária — só sobre linha do Labor");
+  check(r.totais.diarias === 8 * r.dias.length,
+        "e o total de diárias do período é contado", r.totais.diarias);
+}
+{
+  /* O teste que morde de verdade: quem já está lançado como diária
+     naquele dia não pode ser escolhido de novo para o mesmo dia. */
+  const D2 = ymd(2026,7,20);
+  const r = simInclusoes({ falta:{ [D2]:2 }, labor:[],
+    diarias:[{ groot:"91", data:D2, quantidade:1 }],
+    diaristas:[diar("91",D2,"id"), diar("92",D2,"id")] });
+  check(r.totais.incluido === 1 && r.pessoas[0].groot === "92",
+        "quem já está lançado como diária no dia não é incluído de novo",
+        JSON.stringify(r.pessoas.map(p => p.groot)));
+  check(r.totais.descoberto === 1,
+        "e a falta que sobrou é declarada em vez de coberta com repetição");
+}
+{
+  const D2 = ymd(2026,7,20);
+  const r = simInclusoes({ falta:{ [D2]:1 }, labor:[],
+    diarias:[{ groot:"91", data:ymd(2026,7,21), quantidade:1 }],
+    diaristas:[diar("91",D2,"id")] });
+  check(r.totais.incluido === 1,
+        "diária em OUTRO dia não bloqueia a pessoa — a ocupação é por dia");
+}
+
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);

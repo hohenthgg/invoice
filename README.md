@@ -373,9 +373,18 @@ O botão no fim da seção gera o `.xlsx` **no layout da fatura**: as duas abas 
 escrito com ExcelJS, porque o SheetJS da leitura não carrega estilo. No `Labor`, as retiradas somem,
 os inícios e fins ajustados já vêm mudados, e uma pausa vira duas linhas da mesma pessoa.
 
+O quadro do dia é **o fixo do `LABOR` mais as diárias que a fatura já lança** na aba `DIARISTAS`, e é
+esse total que vai ao confronto com o QF. A diária entra no motor como pessoa *imutável*: conta na
+curva — vaga ocupada é vaga ocupada — mas nenhuma das quatro fases pode escolhê-la, porque quem
+equaliza mexe no quadro fixo, não em diária que já aconteceu.
+
+Ignorar essa aba foi um defeito real, e caro: num dia em que a fatura já pagava 15 diárias o app pedia
+mais 23, e **29 pessoa-dia apareciam nas duas listas** — a mesma pessoa, no mesmo dia, cobrada duas
+vezes. A exportação também substituía as diárias existentes em vez de somar a elas.
+
 E o lado da falta **já vem preenchido**, com a base SIGO carregada. Nos dias abaixo do QF o app escolhe
-diaristas **solicitados naquele dia e sem cobrança no LABOR**, **primeiro os internos até acabarem** e
-só então os do cliente — a mesma prioridade do abate "ambos" da aba Calcular ABS, pelo mesmo motivo:
+diaristas **solicitados naquele dia e sem cobrança naquele dia** — nem no `LABOR`, nem como diária já
+lançada nesta fatura —, **primeiro os internos até acabarem** e só então os do cliente — a mesma prioridade do abate "ambos" da aba Calcular ABS, pelo mesmo motivo:
 gastar diarista do cliente com interno sobrando escolhe a fonte errada, e o total não denuncia. Nunca
 entra mais gente do que a falta do dia.
 
@@ -390,8 +399,13 @@ escolher um turno seria chutar qual. Matrícula, regime, dias trabalhados e turn
 SIGO e não são escritos. Falta que não houver diarista livre para cobrir sai declarada em `REVISAR`,
 com o tamanho: um número que some seria pior que um número feio.
 
+A aba `Diaristas` do arquivo traz **as diárias que a fatura já tinha, como estão, mais as novas** —
+é a fatura equalizada inteira, não só o que o app acrescentou.
+
 Junto vão, sempre, as abas que explicam o que houve: `EQUALIZACAO` (cada ação com o motivo, o impacto
-e as datas de antes e depois), `INCLUSOES`, `REVISAR` e `METADADOS`.
+e as datas de antes e depois), `INCLUSOES`, `REVISAR` e `METADADOS`. Em `REVISAR`, o excesso que cabe
+dentro das diárias do dia sai com a explicação certa — o quadro fixo já está no teto e o que passa é
+diária já lançada — em vez de mandar o usuário procurar um contrato para partir.
 
 Com a base SIGO carregada, cada sugestão mostra ainda se a pessoa **também aparece como diarista**
 justamente nos dias que o plano tira do fixo. É a explicação operacional da correção — transição de
