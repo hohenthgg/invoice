@@ -316,6 +316,45 @@ Cada dia sai com S&OP por operação, S&OP total, PREF, Q Pós previsto, gap, co
 status e diagnóstico em texto. O painel separa **provável redução**, **alinhado** e **possível
 subfaturamento**, do maior desvio para o menor.
 
+#### Sugestões de equalização — o motor da Fusão, dentro da Validação
+
+Quando a fonte é o **valor fixo** — o QF que o cliente reconhece — a Validação para de só apontar o
+excesso e passa a resolvê-lo: quais linhas do `LABOR` **retirar**, de quem **adiar o início**, de
+quem **antecipar o fim**, quem **pausar e retomar**. Cada sugestão abre com o raciocínio, o impacto
+em HC e dias, e a vigência atual da linha.
+
+Isto não é uma segunda heurística parecida com a da Fusão de Linhas: é **a mesma função**. A
+inteligência saiu de dentro de `js/fusao.js` para `js/equalizacao.js`, e as duas abas chamam a
+mesma:
+
+```
+                    eqEqualizar()
+                         │
+              ┌──────────┴──────────┐
+        Fusão de Linhas       Validação Template
+     (alvo = retorno oficial,  (alvo = QF do cliente,
+      dia a dia, por tipo)      constante no período)
+```
+
+A única diferença é o vocabulário de entrada — a Fusão fala `Date` e retorno dia a dia; a Validação
+fala `AAAAMMDD` e um número só. O motor não conhece data nenhuma: trabalha num eixo de inteiros onde
+`d+1` é o dia seguinte, e as duas conversões moram no próprio `equalizacao.js`. Mesmo Labor e mesmo
+alvo dão o mesmo plano, e o teste confere isso ação por ação.
+
+O que o motor faz — e o que ele se recusa a fazer — está descrito em `js/equalizacao.js`. O resumo é
+que ele olha o **período inteiro**, nunca o dia isolado: só retira quem cabe no excesso em *todos* os
+dias em que está ativo, só antecipa o fim de quem já terminaria dentro do trecho em sobra, e trata
+queda-e-retomada de demanda como **pausa**, não como desligamento. Excesso sem solução vai para
+**Revisar**; dia abaixo do QF vai para **Falta**, porque equalizar não inventa pessoa.
+
+Na Validação o plano é **sugestão**: nada é aplicado à fatura. A matemática fecha a curva; quem sabe
+se a movimentação aconteceu de verdade é a operação — e o aviso está na tela.
+
+Com a base SIGO carregada, cada sugestão mostra ainda se a pessoa **também aparece como diarista**
+justamente nos dias que o plano tira do fixo. É a explicação operacional da correção — transição de
+fixo para diária — e é onde uma dupla cobrança apareceria. A base de diaristas **não muda a
+matemática**; só acrescenta contexto.
+
 #### Diaristas disponíveis no dia (opcional)
 
 Soltando também a base SIGO de diaristas, aparece ao lado do gap a coluna **Diaristas disp.**:
@@ -411,6 +450,7 @@ js/abs.js             aba Calcular ABS, inteira (IIFE)
 js/validacao.js       motor de auditoria da fatura — puro, sem DOM
 js/validacao-ui.js    leitura do .xlsx e tela da Validação Template (IIFE)
 js/simulacao.js       previsão do retorno a partir de PREF × S&OP — puro, sem DOM
+js/equalizacao.js     motor de equalização — compartilhado pela Fusão e pela Validação
 js/simulacao-ui.js    leitura dos dois arquivos e tela do Retorno Simulado (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
@@ -493,6 +533,14 @@ dia é confrontado com a conta da Fusão, dia a dia, e o teste morde: o dia do e
 se o sinal do rateio for ignorado. Outro cobre os **diaristas disponíveis**: quem já está cobrado no
 LABOR do dia não conta, quem está lá com o fixo estornado conta, o mesmo Groot pedido pelos dois
 lados é uma pessoa contada como interna, e sem a planilha o resultado não inventa disponibilidade.
+
+`tests/equalizacao.test.js` cobre o motor de equalização, que até então rodava só no navegador e
+nunca teve teste. Metade dos casos são as **recusas** — não retira quem cobre um dia sem excesso, não
+antecipa o fim de quem trabalha depois do trecho, não pausa quem não volta, não trata alvo 0 como
+demanda zero — porque é delas que sai um plano que fecha a curva sem furá-la para baixo. A outra
+metade é a **paridade**: o mesmo Labor montado nos dois vocabulários, os dois caminhos completos
+rodados de ponta a ponta, e plano idêntico exigido ação por ação, com um caso de controle provando
+que alvo diferente dá plano diferente — senão "iguais" poderia ser só duas listas vazias.
 
 `tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
 classificações de status, a reconstrução da cobrança original (o corte projeta

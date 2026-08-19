@@ -14,18 +14,34 @@ const JS_DIR = path.join(__dirname, "..", "js");
  *  nomes pedidos dentro do próprio contexto e copiamos o resultado.
  *  @param {string[]} files nomes dos arquivos em js/, na ordem de carga
  *  @param {string[]} [consts] nomes de constantes de nível superior a expor */
+/** Um elemento de mentira, permissivo o bastante para os módulos que
+ *  registram handlers na carga. */
+const elemento = () => ({
+  textContent: "", innerHTML: "", value: "", checked: false,
+  style: {}, dataset: {},
+  classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+  addEventListener() {}, removeEventListener() {}, click() {},
+  querySelector: () => null, querySelectorAll: () => []
+});
+
 function load(files, consts) {
   const ctx = {
     console,
     Date, Math, JSON, Object, Array, Number, String, Map, Set, Boolean, RegExp, Error, isFinite, parseFloat, parseInt,
     // stubs mínimos de navegador — só o que a importação toca
     document: {
-      getElementById: () => ({ textContent: "", classList: { add() {}, remove() {}, toggle() {} } }),
+      documentElement: {},
+      getElementById: () => elemento(),
       querySelector: () => null,
       querySelectorAll: () => [],
       createElement: () => ({ click() {}, style: {} }),
       addEventListener() {}
     },
+    /* Módulos que montam a tela na carga (js/fusao.js) só entram no
+       contexto se estes existirem. Nenhum teste depende do que eles
+       devolvem — depende de o arquivo carregar sem explodir. */
+    window: {},
+    getComputedStyle: () => ({ getPropertyValue: () => "" }),
     alert: msg => { ctx.lastAlert = msg; },
     lastAlert: null
   };

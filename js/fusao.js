@@ -193,124 +193,41 @@ function getPausaDesde(){
   return new Date(Date.UTC(y,m-1,d));
 }
 
+/* A inteligência de equalização não mora mais aqui: mora em
+   js/equalizacao.js, porque a Validação de Template precisa da MESMA.
+   O que sobrou nesta função é tradução — o vocabulário desta aba
+   (Date, tipo do retorno, índice da linha) para o eixo inteiro do
+   motor, e a volta. Nenhuma decisão é tomada neste trecho. */
 function equalizar(labor,ret,pausaDesde,permitirAdiarInicio){
   if(permitirAdiarInicio===undefined)permitirAdiarInicio=true;
-  const INF=new Date(Date.UTC(2099,0,1));
-  const acoes=new Map(); // idx -> {retirar, novo_ini, novo_fim, pausas}
+  const grupoDe=pt=>pt?'PART_TIME':'FULL_TIME';
+  const pessoas=[];
+  labor.forEach((p,i)=>{ if(!p.elig)return;
+    pessoas.push({id:i,ini:eqDeData(p.ini),fim:p.fim?eqDeData(p.fim):null,
+      rateio:p.rateio,desempate:p.mat,grupo:grupoDe(p.pt)}); });
+  // Alvo por dia: Q Pós Comp. quando disponível, senão PREF
+  const dias=ret.map(r=>({dia:eqDeData(r.d),alvo:r.qpos!=null?r.qpos:r.pref,
+    grupo:grupoDe(r.tipo.includes('part'))}));
+
+  const plano=eqEqualizar(pessoas,dias,
+    {pausaDesde:pausaDesde?eqDeData(pausaDesde):null,permitirAdiarInicio});
+
+  const acoes=new Map();
+  plano.acoes.forEach((a,i)=>{
+    const o={};
+    if(a.retirar)o.retirar=true;
+    if(a.novo_ini!=null)o.novo_ini=eqParaData(a.novo_ini);
+    if(a.novo_fim!==undefined)o.novo_fim=eqParaData(a.novo_fim);
+    if(a.pausas)o.pausas=a.pausas.map(p=>({fim:eqParaData(p.fim),ini:eqParaData(p.ini)}));
+    acoes.set(i,o);
+  });
+  // as chaves de dia voltam a ser timestamp em ms, que é o que o resto da aba lê
+  const emMs=o=>Object.fromEntries(Object.entries(o).map(([d,q])=>[+d*864e5,q]));
   const incluir={};
-  const tipos=[...new Set(ret.map(r=>r.tipo.includes('part')))];
-  for(const tipoPT of tipos){
-    const dias=ret.filter(r=>r.tipo.includes('part')===tipoPT).sort((a,b)=>a.d-b.d);
-    // Alvo por dia: Q Pós Comp. quando disponível, senão PREF
-    const dlist=dias.map(r=>r.d), alvo=dias.map(r=>r.qpos!=null?r.qpos:r.pref);
-    const pool=labor.map((p,i)=>({...p,i})).filter(p=>p.elig&&p.pt===tipoPT);
-    const effIni=new Map(pool.map(p=>[p.i,p.ini]));
-    const effFim=new Map(pool.map(p=>[p.i,p.fim??INF]));
-    const act=(i,d)=>effIni.get(i)<=d&&d<=effFim.get(i);
-    // exc>0: sobra gente (cortar); exc<0: falta (reportar); excesso residual = revisar
-    // Dias com alvo 0 (escala não publicada / Go-Live) são ignorados: exc=0, nenhum ajuste.
-    const ignorado=dlist.map((d,k)=>!(alvo[k]>0));
-    const exc=dlist.map((d,k)=>ignorado[k]?0:(pool.reduce((s,p)=>s+(act(p.i,d)?p.rateio:0),0)-alvo[k]));
-    const byI=new Map(pool.map(p=>[p.i,p]));
-    // ordem para escolher quem cortar: início mais recente primeiro, depois matrícula desc
-    const ordem=[...pool].sort((a,b)=>(b.ini-a.ini)||String(b.mat).localeCompare(String(a.mat))).map(p=>p.i);
-
-    // Fase 1 — RETIRAR: processa dia a dia (do mais antigo ao mais novo). Em cada dia com excesso,
-    // escolhe candidatos cujo intervalo de dias ativos está INTEIRAMENTE dentro do excesso disponível
-    // em cada um desses dias (verificado contra o exc atual, nunca deixando nenhum dia ir a negativo).
-    for(let k=0;k<dlist.length;k++){
-      while(exc[k]>0){
-        let best=null,bg=-1;
-        for(const i of ordem){
-          if(acoes.has(i)||!act(i,dlist[k]))continue;
-          const ad=dlist.map((d,kk)=>act(i,d)?kk:-1).filter(kk=>kk>=0);
-          if(ad.some(kk=>exc[kk]<byI.get(i).rateio))continue;  // não cabe em algum dia ativo
-          if(ad.length>bg){bg=ad.length;best=i}
-        }
-        if(best==null)break;
-        dlist.forEach((d,kk)=>{if(act(best,d))exc[kk]-=byI.get(best).rateio});
-        acoes.set(best,{retirar:true});
-      }
-    }
-
-    // Fase 2 — ADIAR INÍCIO: corta excesso no começo do contrato (desabilitável)
-    if(permitirAdiarInicio){
-      for(let k=0;k<dlist.length;k++){
-        while(exc[k]>0){
-          const i=ordem.find(i=>!acoes.has(i)&&+effIni.get(i)===+dlist[k]&&act(i,dlist[k]));
-          if(i==null)break;
-          let j=k;
-          while(j<dlist.length&&exc[j]>0&&act(i,dlist[j]))j++;
-          const novo=j<dlist.length?dlist[j]:new Date(+effFim.get(i)+864e5);
-          for(let m=k;m<j;m++)exc[m]-=byI.get(i).rateio;
-          if(j<dlist.length){acoes.set(i,{novo_ini:novo});effIni.set(i,novo);}
-          else{acoes.set(i,{retirar:true});effIni.set(i,INF);} // empurrado pra fora do período = retirar
-        }
-      }
-    }
-
-    // Fase 3 — PAUSAR/RETOMAR: vales (excesso cercado de dias sem excesso, com retomada de demanda
-    // depois) NÃO são tratados com corte definitivo — fecha o contrato no início do vale e reabre
-    // no fim do vale, preservando GROOT/matrícula (mesma pessoa, sem duplicar nem recriar).
-    const pausado=(i,d)=>{ const a=acoes.get(i); if(!a||!a.pausas)return false;
-      return a.pausas.some(p=>p.fim<d&&d<p.ini); };
-    const ativoP=(i,d)=>act(i,d)&&!pausado(i,d);
-    for(let k=0;k<dlist.length;k++){
-      while(exc[k]>0){
-        if(!pausaDesde||dlist[k]<pausaDesde)break;   // sem data definida, ou antes dela: não pausa
-        const candidatos=ordem.filter(i=>!acoes.get(i)?.retirar&&!acoes.get(i)?.novo_ini&&!acoes.get(i)?.novo_fim&&ativoP(i,dlist[k]));
-        let aplicado=false;
-        for(const i of candidatos){
-          let j=k;
-          while(j+1<dlist.length&&exc[j+1]>0&&ativoP(i,dlist[j+1]))j++;
-          // só é vale (pausa) se o contrato seguir ativo DEPOIS do excesso E a demanda nesse próximo
-          // dia ativo já não estiver em excesso (ou seja, há de fato uma retomada, não um fim disfarçado)
-          const temRetomada=effFim.get(i)>dlist[j] && j+1<dlist.length && !ignorado[j+1];
-          if(!temRetomada)continue;   // este candidato não serve para pausa — tenta o próximo
-          const fechaEm=new Date(+dlist[k]-864e5);
-          const reabreEm=new Date(+dlist[j]+864e5);
-          for(let m=k;m<=j;m++)exc[m]-=byI.get(i).rateio;
-          const a=acoes.get(i)||{};
-          a.pausas=a.pausas||[]; a.pausas.push({fim:fechaEm,ini:reabreEm});
-          acoes.set(i,a);
-          aplicado=true;
-          break;
-        }
-        if(!aplicado)break;   // nenhum candidato deste dia serve para pausa — passa para a Fase 4
-      }
-    }
-
-    // Fase 4 — ENCURTAR FIM: corta excesso residual que sobra no fim do contrato (sem retomada).
-    // Só aceita candidatos cujo FIM ORIGINAL já cai dentro do trecho de excesso sendo resolvido —
-    // nunca corta quem teria dias futuros SEM excesso depois do corte (isso criaria falta artificial).
-    for(let k=dlist.length-1;k>=0;k--){
-      while(exc[k]>0){
-        const candidatos=ordem.filter(i=>!acoes.has(i)&&act(i,dlist[k]));
-        let aplicado=false;
-        for(const i of candidatos){
-          let j=k;
-          while(j-1>=0&&exc[j-1]>=byI.get(i).rateio&&act(i,dlist[j-1]))j--;
-          const novoFim=new Date(+dlist[j]-864e5);
-          // o fim ORIGINAL do candidato precisa estar dentro de [dlist[j], dlist[k]] — ou seja,
-          // ele já terminaria por ali de qualquer forma; senão, cortar criaria falta em dias futuros.
-          const fimOriginal=effFim.get(i);
-          if(fimOriginal>dlist[k])continue; // termina depois do trecho — não é candidato seguro a corte
-          for(let m=j;m<=k;m++){ exc[m]-=byI.get(i).rateio; }
-          if(novoFim<effIni.get(i)){acoes.set(i,{retirar:true});}
-          else{acoes.set(i,{novo_fim:novoFim});effFim.set(i,novoFim);}
-          aplicado=true;
-          break;
-        }
-        if(!aplicado)break;
-      }
-    }
-
-    // Falta (exc<0): só reportar. Excesso residual (exc>0): dia-vale sem solução, revisar manualmente.
-    const res={}, revisar={};
-    dlist.forEach((d,k)=>{ if(exc[k]<0)res[+d]=-exc[k]; else if(exc[k]>0)revisar[+d]=exc[k]; });
-    const tipoNome=tipoPT?'PART_TIME':'FULL_TIME';
-    if(Object.keys(res).length)incluir[tipoNome]={dias:res};
-    if(Object.keys(revisar).length)(incluir.__revisar=incluir.__revisar||{})[tipoNome]=revisar;
+  for(const [k,v] of Object.entries(plano.incluir)){
+    if(k==='__revisar')incluir.__revisar=Object.fromEntries(
+      Object.entries(v).map(([t,o])=>[t,emMs(o)]));
+    else incluir[k]={dias:emMs(v.dias)};
   }
   return {acoes,incluir};
 }
@@ -964,6 +881,9 @@ function exportarHCM(){
 /* ================================================================
    SUPERFÍCIE PÚBLICA — só o que os handlers inline do HTML usam
    ================================================================ */
+/* `equalizar` é publicado não porque o HTML chame, mas porque o teste
+   de paridade chama: é ele que prova que esta aba e a Validação de
+   Template chegam ao mesmo plano com a mesma curva alvo. */
 window.Fusao={reequalizar,exportarLabor,carregarHCM,exportarHCM,
-  switchChkTab,carregarDiaristas,exportarDiaristas};
+  switchChkTab,carregarDiaristas,exportarDiaristas,equalizar};
 })();

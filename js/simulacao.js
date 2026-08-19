@@ -350,6 +350,169 @@ function simularRetorno(dados){
 }
 
 /* ================================================================
+   PREF × QF DO CLIENTE — E O QUE FAZER COM O EXCESSO
+
+   Aqui a Validação para de só apontar o excesso e passa a resolvê-lo.
+   Nada disso é decidido neste arquivo: quem decide é o motor de
+   js/equalizacao.js — o MESMO que a Fusão de Linhas usa. Esta função
+   é tradução e explicação.
+
+     · traduz o Labor da fatura (AAAAMMDD, % RATEIO com sinal) para o
+       eixo do motor;
+     · monta a curva alvo — aqui ela é CONSTANTE: o QF do cliente, o
+       mesmo número em todos os dias do período, e não o S&OP diário;
+     · chama eqEqualizar();
+     · e devolve cada ação já contada em dias e HC, com o motivo, e
+       cruzada com a base de diaristas.
+
+   A diferença de vocabulário com a Fusão é só essa: lá a curva alvo
+   vem do retorno oficial, dia a dia, e vem separada por FULL_TIME e
+   PART_TIME. Aqui o alvo é um número só, então há um grupo só. Mesmo
+   Labor + mesma curva ⇒ mesmo plano, porque é a mesma função.
+
+   E o plano é SUGESTÃO. A matemática fecha a curva; quem sabe se a
+   movimentação aconteceu de verdade é a operação.
+   ================================================================ */
+const SIM_GRUPO = "QUADRO";
+
+/* Dias soltos viram faixas: [16,17,18,20] → 16–18 e 20. */
+function simFaixas(dias){
+  const out = [];
+  for(const d of dias){
+    const u = out[out.length-1];
+    if(u && addDays(u.ate,1) === d) u.ate = d; else out.push({ de:d, ate:d });
+  }
+  return out;
+}
+
+const SIM_EQ_MOTIVO = {
+  retirar: "A vigência inteira desta linha cai em dias que continuam acima do QF depois "
+    + "de ela sair. Retirá-la zera excesso sem deixar nenhum dia do período descoberto.",
+  adiar: "O excesso está no começo da vigência, e a pessoa volta a ser necessária depois. "
+    + "Adiar o início preserva a pessoa e corta só os dias em sobra.",
+  encurtar: "O excesso está no fim da vigência, e a DATA FIM atual já cai dentro dele — "
+    + "antecipar não descobre nenhum dia posterior.",
+  pausar: "A demanda cai e volta a subir. Em vez de retirar a pessoa, o contrato fecha no "
+    + "início do vale e reabre no fim: mesma pessoa, mesmo GROOT, dois períodos."
+};
+
+function simPlanoEqualizacao(dados){
+  const labor = dados.labor || [];
+  const alvo = Number(dados.alvo);
+  const opc = dados.opcoes || {};
+  const ini = dados.periodo.ini, fim = dados.periodo.fim;
+
+  if(!isFinite(alvo) || alvo <= 0)
+    return { erro:"Informe o QF do cliente para calcular a equalização." };
+
+  const { dentro } = simClassificarLinhas(labor);
+  const listaDias = [];
+  for(let d = ini; d <= fim; d = addDays(d,1)) listaDias.push(d);
+  const eixo = listaDias.map(eqDeYmd);
+
+  const pessoas = dentro.map((l,i) => ({
+    id:i, ini:eqDeYmd(l.inicio), fim:isValidYmd(l.fim) ? eqDeYmd(l.fim) : null,
+    rateio:simRateio(l), desempate:l.matricula || "", grupo:SIM_GRUPO }));
+  const dias = listaDias.map(d => ({ dia:eqDeYmd(d), alvo, grupo:SIM_GRUPO }));
+
+  const plano = eqEqualizar(pessoas, dias, {
+    pausaDesde: isValidYmd(opc.pausaDesde) ? eqDeYmd(opc.pausaDesde) : null,
+    permitirAdiarInicio: opc.permitirAdiarInicio !== false });
+
+  /* A curva antes e depois do plano. A de depois é a prova: se o plano
+     está certo, ela encosta no alvo sem furar para baixo. */
+  const ativoAntes = (p,n) => p.ini <= n && n <= (p.fim == null ? EQ_INF : p.fim);
+  const linhasDias = listaDias.map((d,k) => {
+    let antes = 0, depois = 0;
+    for(const p of pessoas){
+      if(ativoAntes(p,eixo[k])) antes += p.rateio;
+      if(eqAtivoApos(p, plano.acoes.get(p.id), eixo[k])) depois += p.rateio;
+    }
+    antes = Math.round(antes*1e6)/1e6; depois = Math.round(depois*1e6)/1e6;
+    return { data:d, pref:antes, alvo, dif:Math.round((antes-alvo)*1e6)/1e6,
+             prefPos:depois, difPos:Math.round((depois-alvo)*1e6)/1e6 };
+  });
+
+  /* Quem também aparece no SIGO, e em que dias. Mesma regra de
+     precedência do resto do módulo: pedido pelos dois é um pedido só,
+     contado como ID. */
+  const diarPorGroot = new Map();
+  for(const r of (dados.diaristas || [])){
+    const g = simGrootNum(r.groot);
+    if(!g || !isValidYmd(r.data)) continue;
+    if(!diarPorGroot.has(g)) diarPorGroot.set(g, new Map());
+    const m = diarPorGroot.get(g);
+    if(m.get(r.data) === "id") continue;
+    m.set(r.data, r.solic === "id" ? "id" : (m.get(r.data) || r.solic || ""));
+  }
+
+  const acoes = [];
+  plano.acoes.forEach((a,id) => {
+    const p = pessoas[id], l = dentro[id];
+    const tipo = eqTipoAcao(a);
+    if(!tipo) return;
+    /* Impacto: os dias em que a pessoa contava e deixa de contar. */
+    const perdidos = listaDias.filter((d,k) =>
+      ativoAntes(p,eixo[k]) && !eqAtivoApos(p,a,eixo[k]));
+    const hc = Math.round(perdidos.length * p.rateio * 1e6)/1e6;
+
+    /* Cruzamento com o SIGO: a mesma pessoa aparecendo como diarista
+       justamente nos dias que o plano tira do fixo é a explicação
+       operacional da correção, não uma coincidência. */
+    const mapaDiar = diarPorGroot.get(simGrootNum(l.groot));
+    let diarista = null;
+    if(mapaDiar){
+      const nosDias = perdidos.filter(d => mapaDiar.has(d));
+      const todos = [...mapaDiar.keys()].filter(d => d >= ini && d <= fim).sort((x,y)=>x-y);
+      diarista = { dias:nosDias, total:todos.length,
+        id:todos.filter(d => mapaDiar.get(d) === "id").length,
+        meli:todos.filter(d => mapaDiar.get(d) === "meli").length };
+    }
+
+    acoes.push({ tipo, id,
+      linha:{ groot:l.groot, nome:l.nome, cargo:l.cargo, matricula:l.matricula || "",
+              inicio:l.inicio, fim:l.fim, rateio:simRateio(l), linha:l.linha },
+      novoInicio: a.novo_ini != null ? eqParaYmd(a.novo_ini) : null,
+      novoFim:    a.novo_fim !== undefined ? eqParaYmd(a.novo_fim) : null,
+      pausas: (a.pausas || []).map(x => ({ fim:eqParaYmd(x.fim), ini:eqParaYmd(x.ini) })),
+      impacto:{ dias:perdidos.length, hc, faixas:simFaixas(perdidos) },
+      motivo: SIM_EQ_MOTIVO[tipo], diarista });
+  });
+
+  /* Ordem de leitura: maior impacto primeiro — é a ordem em que uma
+     pessoa conferiria o plano. */
+  acoes.sort((a,b) => Math.abs(b.impacto.hc) - Math.abs(a.impacto.hc)
+    || a.linha.nome.localeCompare(b.linha.nome));
+
+  const chavesYmd = o => Object.fromEntries(Object.entries(o || {})
+    .map(([n,q]) => [eqParaYmd(+n), q]));
+  const revisar = chavesYmd(plano.incluir.__revisar?.[SIM_GRUPO]);
+  const falta   = chavesYmd(plano.incluir[SIM_GRUPO]?.dias);
+
+  const conta = t => acoes.filter(a => a.tipo === t).length;
+  return {
+    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta,
+    opcoes:{ permitirAdiarInicio: opc.permitirAdiarInicio !== false,
+             pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null },
+    totais:{
+      pessoas: pessoas.length,
+      retirar: conta(EQ_ACAO.RETIRAR), adiar: conta(EQ_ACAO.ADIAR),
+      encurtar: conta(EQ_ACAO.ENCURTAR), pausar: conta(EQ_ACAO.PAUSAR),
+      hc: Math.round(acoes.reduce((s,a) => s + a.impacto.hc, 0)*100)/100,
+      diasAcima:  linhasDias.filter(d => d.dif > 0).length,
+      diasAbaixo: linhasDias.filter(d => d.dif < 0).length,
+      excessoAntes: Math.round(linhasDias.reduce((s,d) => s + Math.max(d.dif,0), 0)*100)/100,
+      excessoDepois: Math.round(linhasDias.reduce((s,d) => s + Math.max(d.difPos,0), 0)*100)/100,
+      /* Se isto for maior que zero o plano criou falta — não deveria
+         acontecer nunca, e é o número que denuncia. */
+      faltaCriada: Math.round(linhasDias.reduce((s,d) =>
+        s + Math.max(0, Math.min(d.dif,0) - Math.min(d.difPos,0)), 0)*100)/100,
+      comDiarista: acoes.filter(a => a.diarista && a.diarista.dias.length).length
+    }
+  };
+}
+
+/* ================================================================
    O ARQUIVO SIMULADO
 
    A aba de retorno é escrita com os MESMOS cabeçalhos que a Fusão de
@@ -378,5 +541,6 @@ function simLinhasRetorno(sim){
 
 if(typeof module !== "undefined" && module.exports){
   module.exports = { simularRetorno, simClassificarLinhas, simLinhasRetorno,
+                     simPlanoEqualizacao, SIM_GRUPO,
                      SIM_STATUS, SIM_STATUS_LABEL, SIM_AVISO_METADADOS };
 }
