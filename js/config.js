@@ -78,7 +78,7 @@ function escalaHorarioDe(op){
 
      Divinópolis      o HORÁRIO completo, por linha ("01:00 04:00 05:00 09:20")
      Patos de Minas   horário em outro formato ("00:30 as 09:18") — ou vazio
-     Varginha         turno: AM / PM
+     Varginha         turno: AM (2065) / PM (1618)
      Poços de Caldas  turno: AM (761), PM (10), SD (17)
      Pouso Alegre SVC turno: svc / SVC / xd / XD / sd — e uma coluna
                       "Escala Horário" própria, hoje vazia
@@ -93,14 +93,59 @@ function escalaHorarioDe(op){
    vira tópico de revisão: escrever o horário de outro turno no lugar
    seria pôr um dado errado com cara de certo.
    ================================================================ */
-const ESCALA_TOKEN_HORARIO = {
-  "Pouso Alegre SVC": { "SVC":"03:00 07:00 08:00 12:48", "XD":"13:00 17:00 18:00 22:45" },
-  "Pouso Alegre XD":  { "XD":"13:00 17:00 18:00 22:45" },
-  "Poços de Caldas":  { "AM":"03:00 07:00 08:00 12:48" },
-  "Varginha":         { "AM":"03:00 07:00 08:00 11:20", "PM":"10:00 15:00 16:00 19:48" },
+/* CADA FILIAL TEM UMA MANHÃ E UMA TARDE — o que muda de uma para outra
+   é o NOME que a coluna ESCALA do SIGO dá a cada turno:
+
+     operação           manhã                tarde
+     Varginha           AM                   PM
+     Poços de Caldas    AM                   PM, SD
+     Pouso Alegre SVC   SVC                  XD
+     Pouso Alegre XD    —                    XD
+
+   Declarar o turno primeiro e os apelidos depois evita o que a tabela
+   antiga fazia: repetir o mesmo horário em duas chaves e deixar a
+   equivalência ("em Poços, SD é a tarde") implícita em lugar nenhum.
+
+   Os horários vêm das faturas 3PL, não de suposição. `pm` de Varginha
+   estava ERRADO: valia `10:00 15:00 16:00 19:48`, tirado de 30 linhas
+   da aba DIARISTAS de julho, quando o turno da tarde da unidade é
+   `11:00 14:00 15:00 20:00` — 28 pessoas do LABOR de agosto, todas em
+   "1º e 2º Turno". São 1.618 registros de PM no SIGO de Varginha, 44%
+   da filial, saindo com o horário de outro turno.
+
+   Turno com `horario` vazio é turno que existe no SIGO e ainda não foi
+   levantado em fatura nenhuma — o caso da TARDE DE POÇOS (PM ×10 e SD
+   ×17). Fica vazio de propósito: a saída preserva o token original e o
+   painel de revisão cobra o valor, porque escrever o horário da manhã
+   ali seria pôr um dado errado com cara de certo. */
+const ESCALA_TURNO_OPERACAO = {
+  "Pouso Alegre SVC": { am:{ horario:"03:00 07:00 08:00 12:48", tokens:["SVC"] },
+                        pm:{ horario:"13:00 17:00 18:00 22:45", tokens:["XD"] } },
+  "Pouso Alegre XD":  { pm:{ horario:"13:00 17:00 18:00 22:45", tokens:["XD"] } },
+  "Poços de Caldas":  { am:{ horario:"03:00 07:00 08:00 12:48", tokens:["AM","SVC"] },
+                        pm:{ horario:"",                        tokens:["PM","SD"] } },
+  "Varginha":         { am:{ horario:"03:00 07:00 08:00 11:20", tokens:["AM"] },
+                        pm:{ horario:"11:00 14:00 15:00 20:00", tokens:["PM"] } },
   "Divinópolis":      {},
   "Patos de Minas":   {}
 };
+
+/* A tabela token → horário que `resolverEscala` consulta, derivada da
+   declaração acima. Turno sem horário levantado não entra: quem não
+   está aqui cai em `sem_mapa` e sai como veio. */
+const ESCALA_TOKEN_HORARIO = (() => {
+  const out = {};
+  for(const op of Object.keys(ESCALA_TURNO_OPERACAO)){
+    out[op] = {};
+    const turnos = ESCALA_TURNO_OPERACAO[op];
+    for(const chave of Object.keys(turnos)){
+      const t = turnos[chave];
+      if(!t.horario) continue;
+      for(const token of t.tokens) out[op][token] = t.horario;
+    }
+  }
+  return out;
+})();
 
 /* Quais turnos PERTENCEM a cada operação — regra de negócio, não de horário.
    O SVC mistura-se com SD e FULL (e registra o turno XD quando acontece);
@@ -153,5 +198,6 @@ function resolverEscala(op, escalaBruta, horarioExplicito){
 
 if(typeof module!=="undefined"&&module.exports){
   module.exports={ESCALA_HORARIO_PADRAO, escalaHorarioDe, ESCALA_TOKEN_HORARIO,
-                  ESCALA_TURNOS_DA_OPERACAO, pareceHorario, resolverEscala};
+                  ESCALA_TURNO_OPERACAO, ESCALA_TURNOS_DA_OPERACAO,
+                  pareceHorario, resolverEscala};
 }

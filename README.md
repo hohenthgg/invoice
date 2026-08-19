@@ -114,13 +114,29 @@ uma língua por filial, então a resolução é **por linha** (`resolverEscala`,
 1. coluna explícita de horário ("Escala Horário" / "Escala Natural"), se preenchida;
 2. horário escrito na própria ESCALA passa **verbatim** — Divinópolis
    (`01:00 04:00 05:00 09:20`) e Patos de Minas (`00:30 as 09:18`);
-3. turno vira horário pela tabela da operação (`ESCALA_TOKEN_HORARIO`), levantada
-   nas faturas 3PL: Varginha `AM` → `03:00 07:00 08:00 11:20` e `PM` →
-   `10:00 15:00 16:00 19:48`; Pouso `svc` e `xd` → o horário levantado para cada uma; Poços `AM`;
+3. turno vira horário pelo turno declarado da operação (`ESCALA_TURNO_OPERACAO`),
+   levantado nas faturas 3PL. Cada filial tem uma **manhã** e uma **tarde**; o que muda
+   de uma para outra é o nome que a coluna ESCALA dá a cada turno:
+
+   | operação | manhã | tarde |
+   |---|---|---|
+   | Varginha | `AM` → `03:00 07:00 08:00 11:20` | `PM` → `11:00 14:00 15:00 20:00` |
+   | Poços de Caldas | `AM` → `03:00 07:00 08:00 12:48` | `PM`, `SD` → *não levantada* |
+   | Pouso Alegre SVC | `SVC` → `03:00 07:00 08:00 12:48` | `XD` → `13:00 17:00 18:00 22:45` |
+   | Pouso Alegre XD | — | `XD` → `13:00 17:00 18:00 22:45` |
+
+   O turno é declarado primeiro e os apelidos depois, para a equivalência ("em Poços,
+   `SD` é a tarde"; "em Pouso, `XD` é a tarde") ficar escrita num lugar só em vez de
+   virar dois horários iguais em duas chaves;
 4. célula vazia recebe o padrão da operação (`ESCALA_HORARIO_PADRAO`);
-5. turno **sem horário levantado** (`SD`, `FULL` no SVC, `PM` em Poços) sai como
-   está e vira tópico de revisão — escrever o horário de outro turno no lugar
+5. turno **sem horário levantado** (`SD` e `FULL` no SVC, e a **tarde de Poços**) sai
+   como está e vira tópico de revisão — escrever o horário de outro turno no lugar
    seria pôr um dado errado com cara de certo.
+
+O `PM` de Varginha já esteve errado: valia `10:00 15:00 16:00 19:48`, tirado de 30 linhas
+da aba DIARISTAS de julho, quando o turno da tarde da unidade é `11:00 14:00 15:00 20:00`
+— as 28 pessoas do LABOR de agosto em "1º e 2º Turno". `PM` é 1.618 dos 3.683 registros de
+Varginha no SIGO, 44% da filial, saindo com o horário de outro turno.
 
 Antes do passo 3 há uma regra de **pertencimento**, que é de negócio e não de
 horário (`ESCALA_TURNOS_DA_OPERACAO`): o **SVC mistura-se** com `SD`, `FULL` e

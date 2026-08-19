@@ -11,7 +11,8 @@
 const { load } = require("./load");
 const ctx = load(["identity.js", "config.js", "extraction-dedup.js", "extraction-audit.js"],
                  ["DEDUP_MODOS", "AUDIT_MOTIVO", "NOME_PROBLEMA", "GRAVIDADE",
-                  "ESCALA_HORARIO_PADRAO", "ESCALA_TURNOS_DA_OPERACAO"]);
+                  "ESCALA_HORARIO_PADRAO", "ESCALA_TURNOS_DA_OPERACAO",
+                  "ESCALA_TURNO_OPERACAO"]);
 const { normalizeGroot, limparGroot, grootParaSaida, hasGroot, normalizeNome,
         normalizeDateKey, personDayKey,
         deduplicarPessoaDia, DEDUP_MODOS, auditarIdentidade, AUDIT_MOTIVO,
@@ -495,12 +496,41 @@ check(pareceHorario("01:00 04:00 05:00 09:20") && pareceHorario("00:30 as 09:18"
 {
   const r = resolverEscala("Varginha", "AM", "");
   const s = resolverEscala("Varginha", "PM", "");
-  check(r.valor === "03:00 07:00 08:00 11:20" && s.valor === "10:00 15:00 16:00 19:48"
+  check(r.valor === "03:00 07:00 08:00 11:20" && s.valor === "11:00 14:00 15:00 20:00"
         && r.origem === "token" && s.origem === "token",
         "Varginha: AM e PM viram os dois horários da fatura SMG9",
         r.valor + " · " + s.valor);
-  check(resolverEscala("Varginha", "pm", "").valor === "10:00 15:00 16:00 19:48",
+  check(resolverEscala("Varginha", "pm", "").valor === "11:00 14:00 15:00 20:00",
         "…sem depender de caixa (pm = PM)");
+  /* O valor antigo do PM saiu de 30 linhas da aba DIARISTAS de julho e
+     era de outro turno. O da tarde da unidade são as 28 pessoas do
+     LABOR de agosto em "1º e 2º Turno" — e PM é 44% do SIGO de
+     Varginha, então errar aqui erra 1.618 registros. */
+  check(s.valor !== "10:00 15:00 16:00 19:48",
+        "…e o PM não volta ao horário antigo, que era de outro turno");
+}
+/* A tarde de Poços existe no SIGO (PM ×10, SD ×17) e não foi levantada
+   em fatura nenhuma. Fica declarada sem horário: sai como veio e o
+   painel cobra o valor, em vez de receber o horário da manhã. */
+check(resolverEscala("Poços de Caldas", "PM", "").origem === "sem_mapa"
+      && resolverEscala("Poços de Caldas", "PM", "").valor === "PM"
+      && resolverEscala("Poços de Caldas", "SD", "").origem === "sem_mapa",
+      "Poços: a tarde (PM e SD) não recebe o horário da manhã por falta de dado",
+      JSON.stringify(resolverEscala("Poços de Caldas", "PM", "")));
+check(resolverEscala("Poços de Caldas", "AM", "").valor === "03:00 07:00 08:00 12:48",
+      "…e a manhã de Poços segue resolvendo normalmente");
+{
+  /* Turno declarado, apelidos depois: a equivalência "em Poços, SD é a
+     tarde" e "em Pouso, XD é a tarde" fica escrita num lugar só. */
+  const turnos = ctx.ESCALA_TURNO_OPERACAO;
+  check(turnos["Poços de Caldas"].pm.tokens.join() === "PM,SD",
+        "Poços declara PM e SD como apelidos do MESMO turno da tarde");
+  check(turnos["Pouso Alegre SVC"].pm.tokens.join() === "XD"
+        && turnos["Pouso Alegre SVC"].pm.horario === turnos["Pouso Alegre XD"].pm.horario,
+        "e a tarde do Pouso é a mesma nas duas abas — um horário, não dois iguais");
+  check(Object.values(turnos).every(op => Object.values(op).every(t =>
+          !t.horario || pareceHorario(t.horario))),
+        "todo horário declarado é horário de verdade, não um token disfarçado");
 }
 check(resolverEscala("Pouso Alegre SVC", "svc", "").valor === "03:00 07:00 08:00 12:48"
       && resolverEscala("Pouso Alegre SVC", "XD", "").valor === "13:00 17:00 18:00 22:45",
@@ -526,7 +556,7 @@ check(resolverEscala("Pouso Alegre SVC", "SD", "").origem === "sem_mapa"
       && resolverEscala("Pouso Alegre SVC", "FULL", "").origem === "sem_mapa",
       "no SVC, SD e FULL pertencem à operação — faltam só os horários, não é intrusão",
       JSON.stringify(resolverEscala("Pouso Alegre SVC", "SD", "")));
-check(resolverEscala("Poços de Caldas", "SD", "").origem === "sem_mapa",
+check(resolverEscala("Poços de Caldas", "FULL", "").origem === "sem_mapa",
       "operação sem regra declarada não acusa intrusão — só a falta de horário");
 check(resolverEscala("Pouso Alegre XD", "01:00 04:00 05:00 09:20", "").origem === "arquivo",
       "…e um horário escrito na aba XD passa direto: a regra é sobre turno, não sobre horário");
