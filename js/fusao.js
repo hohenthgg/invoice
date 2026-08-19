@@ -69,9 +69,12 @@ function audit(wb){
     const g=String(row[iG]??'').trim();
     if(norm(g)==='abs'||norm(String(row[iN]??'')).includes('absenteismo'))continue;
     const ini=exDate(row[iI]); if(!ini)continue;
+    const rateio=(iR>=0&&row[iR]!==''&&!isNaN(+row[iR]))?+row[iR]:1;
+    // Rateio <= 0 é estorno — devolução do que já foi cobrado, não gente no quadro.
+    // Fica no arquivo, não entra na contagem nem no plano. Mesma regra da Validação.
     labor.push({groot:g,nome:String(row[iN]??''),mat:String(row[iM]??''),cargo:String(row[iC]??''),regime:iRg>=0?String(row[iRg]??''):'',
-      ini,fim:exDate(row[iF]),rateio:(iR>=0&&row[iR]!==''&&!isNaN(+row[iR]))?+row[iR]:1,
-      pt:norm(row[iC]).includes('part time'),elig:CARGOS_MELI.includes(norm(row[iC])),
+      ini,fim:exDate(row[iF]),rateio,elig:CARGOS_MELI.includes(norm(row[iC]))&&rateio>0,
+      pt:norm(row[iC]).includes('part time'),
       rawRow:row.slice()});
   }
   if(!labor.length)return showErr('A aba de Labor foi encontrada mas não tem linhas válidas (verifique a DATA DE INÍCIO).');

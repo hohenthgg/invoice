@@ -396,6 +396,13 @@ check(res.acoes.every(a => a.linha.nome && a.linha.groot),
       "e nomeia a pessoa: nenhuma sugestão sai sem nome e GROOT");
 check(res.acoes.every(a => gente.some(p => p.groot === a.linha.groot)),
       "as sugestões saem do Labor — o motor não inventa pessoa");
+/* A mesma garantia do motor, cobrada na saída que o usuário vê: nenhuma
+   ação do plano da Validação carrega rateio ≤ 0. */
+check(res.acoes.every(a => a.linha.rateio > 0),
+      "nenhuma ação do plano tem rateio original ≤ 0",
+      JSON.stringify(res.acoes.map(a => a.linha.rateio).filter(r => r <= 0)));
+check(gente.some(p => p.rateio <= 0),
+      "…e o Labor de teste tem estorno, senão a garantia acima seria vácua");
 {
   /* Pelo caminho completo da Validação, onde o rateio vem do % RATEIO
      da fatura — e onde o estorno é o caso real que motivou a regra. */
@@ -481,11 +488,21 @@ const lab = (groot, ini, fim, rateio) => ({ groot, nome:"FIXO "+groot, cargo:"Au
   check(r.totais.descoberto === 1, "e o que não deu para cobrir sai como descoberto, com o tamanho");
 }
 {
-  /* O mesmo GROOT com o fixo ESTORNADO naquelas datas está livre — é o
-     caso real que motivou a diária. */
+  /* Rateio ≤ 0 é estorno, e estorno não devolve a pessoa ao mercado: o
+     fixo daquele dia continua ativo, e incluí-la de novo como diarista
+     seria cobrá-la duas vezes. */
   const r = simInclusoes({ falta:{ [D]:1 }, labor:[lab("2",D,D,1), lab("2",D,D,-1)],
     diaristas:[diar("2",D,"id")] });
-  check(r.totais.incluido === 1, "com o fixo estornado no dia, a pessoa volta a estar livre");
+  check(r.totais.incluido === 0,
+        "o estorno ao lado do fixo não libera a pessoa — ela segue cobrada no dia");
+  check(r.totais.descoberto === 1, "e a falta fica declarada em vez de coberta com repetição");
+}
+{
+  /* Só o estorno, sem fixo ativo no dia: aí não há cobrança nenhuma e a
+     pessoa está mesmo livre. */
+  const r = simInclusoes({ falta:{ [D]:1 }, labor:[lab("2",D,D,-1)],
+    diaristas:[diar("2",D,"id")] });
+  check(r.totais.incluido === 1, "sem lançamento positivo no dia, a pessoa está livre");
 }
 {
   const d1 = ymd(2026,7,20), d2 = ymd(2026,7,21), d3 = ymd(2026,7,23);
