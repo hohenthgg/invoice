@@ -59,6 +59,77 @@ const VAL_SEV_META = {
   info:     { label:"Informativo", desc:"Situação encontrada, aparentemente justificável." }
 };
 
+/* ================================================================
+   CATEGORIAS
+
+   Uma fatura real gera dezenas de achados, e uma lista corrida deles é
+   ilegível: o leitor rola trinta cartões sem saber quantos assuntos
+   distintos existem ali. As regras são então reunidas em CATEGORIAS —
+   cada uma vira um bloco que se abre — e o que separa uma categoria da
+   outra é a PERGUNTA que ela responde, não a mecânica da regra:
+
+     · o mesmo identificador está com duas pessoas?
+     · o mesmo identificador está com a mesma pessoa duas vezes?
+     · falta identificador?
+     · o identificador está fora do padrão?
+     · a mesma pessoa está com dois identificadores?
+     · alguma coisa está sendo cobrada duas vezes?
+     · alguma data é impossível?
+     · as colunas de uma linha são coerentes entre si?
+     · o cadastro está padronizado?
+
+   A ordem abaixo é a ordem de exibição, e vai do que custa dinheiro
+   para o que custa conferência. */
+const VAL_CATEGORIAS = [
+  { chave:"pessoas-diferentes", titulo:"Mesmo GROOT ID, pessoas diferentes",
+    resumo:"O identificador aparece para nomes sem relação entre si — o caso mais grave, "
+         + "porque duas pessoas podem estar sendo cobradas ao mesmo tempo pelo mesmo GROOT.",
+    regras:["GROOT ID com pessoas diferentes"] },
+  { chave:"parcialmente-diferentes", titulo:"Mesmo GROOT ID, nomes parcialmente coincidentes",
+    resumo:"O primeiro nome coincide e os sobrenomes não. Pode ser troca de cadastro, pode ser "
+         + "duas pessoas — o app não decide sozinho.",
+    regras:["GROOT ID com nomes parcialmente coincidentes"] },
+  { chave:"mesma-pessoa", titulo:"Mesmo GROOT ID, mesma pessoa",
+    resumo:"O identificador se repete, mas as evidências apontam para a mesma pessoa: efetivação, "
+         + "grafia diferente do nome, ou dois vínculos convivendo.",
+    regras:["Mudança de vínculo","Variação cadastral de nome","Períodos sobrepostos"] },
+  { chave:"sem-groot", titulo:"Sem GROOT ID",
+    resumo:"Linhas que cobram sem identificador. Pesam mais nos cargos operacionais, que o "
+         + "cliente concilia pessoa a pessoa.",
+    regras:["GROOT ID ausente"] },
+  { chave:"homonimos", titulo:"Mesmo nome, GROOT IDs diferentes",
+    resumo:"Ou são duas pessoas de mesmo nome — o que acontece — ou a mesma pessoa foi "
+         + "cadastrada duas vezes e pode estar sendo cobrada em dobro.",
+    regras:["Homônimo ou cadastro duplicado"] },
+  { chave:"duplicidade", titulo:"Cobrança em duplicidade",
+    resumo:"A mesma pessoa, o mesmo dia ou a mesma linha aparecendo mais de uma vez.",
+    regras:["LABOR × DIARISTA","Diária duplicada","Linha duplicada"] },
+  { chave:"formato-groot", titulo:"Identificador fora do padrão",
+    resumo:"GROOT que destoa do formato predominante da própria planilha. Nem sempre é erro — "
+         + "identificador antigo costuma ser mais curto e continuar válido.",
+    regras:["GROOT ID fora do padrão"] },
+  { chave:"datas", titulo:"Datas impossíveis ou fora do período",
+    resumo:"Período que termina antes de começar, ou lançamento em data que não pertence a "
+         + "esta competência.",
+    regras:["Datas invertidas","Data fora do período"] },
+  { chave:"coerencia", titulo:"Colunas incoerentes entre si",
+    resumo:"O que a linha declara numa coluna não fecha com o que ela declara nas outras.",
+    regras:["Valor final incompatível","Tarifa destoante"] },
+  { chave:"cadastro", titulo:"Qualidade de cadastro",
+    resumo:"Não muda o que é cobrado, mas quebra conferência, filtro e agrupamento.",
+    regras:["Campo obrigatório vazio","Grafia inconsistente"] },
+  { chave:"vinculo", titulo:"Lançamento sem vínculo no LABOR",
+    resumo:"Cobrança de quem a própria fatura não declara ter no quadro.",
+    regras:["Hora extra sem vínculo"] }
+];
+/* regra → categoria, montado uma vez. Regra sem categoria declarada cai
+   num grupo "Outros" em vez de sumir da tela. */
+const VAL_CAT_DE_REGRA = (() => {
+  const m = {};
+  for(const c of VAL_CATEGORIAS) for(const r of c.regras) m[r] = c.chave;
+  return m;
+})();
+
 /* Cargos em que o GROOT ID é especialmente esperado: são o operacional
    que o cliente concilia pessoa a pessoa. Ausência aqui pesa mais. */
 const VAL_CARGOS_CRITICOS = ["auxiliar", "operador"];
@@ -172,9 +243,15 @@ function valCompararNomes(a,b){
     }
   }
 
-  /* Primeiro nome igual (ou quase) e o resto sem relação. */
+  /* Primeiro nome igual (ou quase) e o resto sem relação. O "quase" só
+     vale para nomes com corpo: uma letra de diferença entre "ADRIEL" e
+     "ADRIELE" é ruído de digitação, mas entre "A" e "B" é o nome
+     inteiro — sem o piso de tamanho, dois nomes sem nada em comum
+     virariam "parcialmente coincidentes". */
   const p0 = ta[0] || "", p1 = tb[0] || "";
-  if(p0 && p1 && (p0 === p1 || valLev(p0,p1) <= 1)){
+  const quaseIgual = p0 === p1
+    || (Math.min(p0.length, p1.length) >= 4 && valLev(p0,p1) <= 1);
+  if(p0 && p1 && quaseIgual){
     return { relacao:"parcial",
       motivo: comuns.length
         ? "coincidem "+comuns.length+" nome(s), os demais são diferentes"
@@ -225,6 +302,7 @@ function valCriarAchado(o){
   return {
     id: o.id,
     regra: o.regra,
+    categoria: VAL_CAT_DE_REGRA[o.regra] || "outros",
     severidade: o.severidade,
     titulo: o.titulo,
     groot: o.groot ?? "",
@@ -402,7 +480,14 @@ function valRegraGrootCompartilhado(labor, ctx, achados){
         : "Recomenda-se confirmar a titularidade do identificador antes de fechar a fatura.");
 
       achados.push(valCriarAchado({ ...base,
-        id:"G4-"+groot+"-"+i+"-"+j, regra:"GROOT ID com pessoas diferentes", severidade,
+        id:"G4-"+groot+"-"+i+"-"+j, severidade,
+        /* Duas regras, e não uma com dois títulos: a confiança é
+           diferente. "Sem relação nenhuma" é quase certamente erro de
+           identificador; "primeiro nome igual, sobrenomes diferentes"
+           pode ser troca de cadastro. Separá-las deixa cada uma no seu
+           grupo, com o seu volume, na tela. */
+        regra: distintos ? "GROOT ID com pessoas diferentes"
+                         : "GROOT ID com nomes parcialmente coincidentes",
         titulo: distintos ? "Mesmo GROOT ID para duas pessoas diferentes"
                           : "Mesmo GROOT ID com nomes parcialmente coincidentes",
         cargo: cargosIguais ? a.cargo : a.cargo+" / "+b.cargo,
@@ -903,17 +988,36 @@ function auditarFatura(dados){
   const resumo = { critico:0, revisar:0, cadastro:0, info:0 };
   for(const a of achados) resumo[a.severidade]++;
 
+  /* Grupos na ordem declarada, só os que têm achado. A severidade do
+     grupo é a PIOR que ele contém: um grupo com um crítico no meio de
+     dez informativos não pode se anunciar como informativo. */
+  const grupos = [];
+  const declaradas = VAL_CATEGORIAS.map(c => c.chave);
+  const soltas = [...new Set(achados.map(a => a.categoria))].filter(c => !declaradas.includes(c));
+  const defs = [...VAL_CATEGORIAS, ...soltas.map(c => ({ chave:c, titulo:"Outros apontamentos",
+    resumo:"Achados sem categoria declarada.", regras:[] }))];
+  for(const def of defs){
+    const itens = achados.filter(a => a.categoria === def.chave);
+    if(!itens.length) continue;
+    const porSev = { critico:0, revisar:0, cadastro:0, info:0 };
+    for(const a of itens) porSev[a.severidade]++;
+    grupos.push({ chave:def.chave, titulo:def.titulo, resumo:def.resumo,
+      total:itens.length, porSev,
+      severidade: VAL_SEV_ORDEM.find(sv => porSev[sv] > 0),
+      ids: itens.map(a => a.id) });
+  }
+
   return {
     periodo: ctx,
     /* Contagem de linhas, e só. Somar os lançamentos daria um total
        monetário, que este app não escreve. */
     totais: { labor: labor.length, diaristas: diaristas.length },
-    resumo, achados
+    resumo, grupos, achados
   };
 }
 
 /* Node (testes) e navegador carregam o mesmo arquivo. */
 if(typeof module !== "undefined" && module.exports){
   module.exports = { auditarFatura, valCompararNomes, valNorm, valGroot, valTemGroot,
-                     valSobrepoe, valEncostados, valLev, VAL_SEV };
+                     valSobrepoe, valEncostados, valLev, VAL_SEV, VAL_CATEGORIAS };
 }

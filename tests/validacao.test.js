@@ -22,7 +22,7 @@
    ================================================================ */
 "use strict";
 const { auditarFatura, valCompararNomes, valGroot, valTemGroot,
-        valSobrepoe, valEncostados } = require("../js/validacao.js");
+        valSobrepoe, valEncostados, VAL_CATEGORIAS } = require("../js/validacao.js");
 
 let pass = 0, fail = 0;
 function check(ok, label, extra){
@@ -52,6 +52,13 @@ check(valCompararNomes("PAULO CESAR BRASELINO DE SOUZA","PAULO CÉSAR DA COSTA S
       "primeiro nome igual e sobrenomes diferentes fica em 'parcial', sem concluir");
 check(valCompararNomes("MARIA SILVA","MARIA SOUZA").relacao === "parcial",
       "um primeiro nome comum sozinho não une duas pessoas");
+/* Uma letra de diferença é ruído num nome com corpo e é o nome inteiro
+   num nome de uma letra. Sem piso de tamanho, "A ALPHA" e "B BETA"
+   virariam "parcialmente coincidentes" — dois nomes sem nada em comum. */
+check(valCompararNomes("A ALPHA","B BETA").relacao === "distintos",
+      "iniciais soltas não contam como primeiro nome parecido");
+check(valCompararNomes("ADRIEL SOUZA","ADRIELE BATISTA").relacao === "parcial",
+      "…mas ADRIEL × ADRIELE continua sendo coincidência parcial");
 check(valCompararNomes("JOSE DA SILVA","JOSÉ DA SILVA").relacao === "iguais",
       "acento não cria uma segunda pessoa");
 /* Sem o piso de 2 tokens em comum, "ANA" e "ANA PAULA MOREIRA DOS REIS"
@@ -128,7 +135,10 @@ const comEstorno = rodar([
   L({ groot:"2110049", nome:"ADRIEL SOUZA MEIRELES DA SILVA", ini:d(2026,6,18), fim:null, valor:5961.41 }),
   L({ groot:"2110049", nome:"ADRIELE WALLACE DO NASCIMENTO BATISTA", ini:d(2026,7,21), fim:d(2026,7,31), valor:-2186.64 })
 ]);
-const est = acharRegra(comEstorno,"GROOT ID com pessoas diferentes");
+/* Os nomes têm o primeiro nome parecido e sobrenomes sem relação: isso
+   é "parcialmente coincidente", que é uma regra própria — a confiança
+   nela é menor que a de "sem relação nenhuma". */
+const est = acharRegra(comEstorno,"GROOT ID com nomes parcialmente coincidentes");
 check(est.length === 1 && est[0].severidade === "revisar",
       "com um dos lançamentos negativo, a sobreposição vira Revisar e não Crítico",
       est[0] && est[0].severidade);
@@ -354,6 +364,68 @@ const vazias = rodar([
 ]);
 check(vazias.achados.length === 0,
       "linhas em branco do template não geram achado");
+
+/* ================================================================
+   AGRUPAMENTO POR CATEGORIA
+
+   A tela não lista trinta cartões em coluna: reúne os achados em
+   blocos que se abrem. O agrupamento é responsabilidade do motor, para
+   a tela não precisar saber que regra pertence a que assunto.
+   ================================================================ */
+console.log("\nAgrupamento por categoria");
+
+const variado = rodar([
+  /* pessoas diferentes, sobrepostas e ambas positivas → crítico */
+  L({ groot:"5100001", nome:"RENATO FARIAS",  ini:d(2026,5,1), fim:null, valor:100 }),
+  L({ groot:"5100001", nome:"OLIVIA MENDONCA", ini:d(2026,6,1), fim:null, valor:100 }),
+  /* mesmo primeiro nome, sobrenomes distintos → parcialmente coincidentes */
+  L({ groot:"5100002", nome:"CARLOS PRIMEIRO SOUZA", ini:d(2026,5,1), fim:null, valor:100 }),
+  L({ groot:"5100002", nome:"CARLOS SEGUNDO LIMA",   ini:d(2026,6,1), fim:null, valor:100 }),
+  /* mesma pessoa, efetivação */
+  L({ groot:"5100003", nome:"DORA MELO", regime:"Temporário", ini:d(2026,5,1), fim:d(2026,7,31), valor:100 }),
+  L({ groot:"5100003", nome:"DORA MELO", regime:"Efetivo",    ini:d(2026,8,1), fim:null, valor:100 }),
+  /* sem identificador */
+  L({ groot:"", nome:"ELI SANTOS", cargo:"Auxiliar de Apoio LOG I", ini:d(2026,7,20), valor:100 })
+]);
+
+const chaves = variado.grupos.map(g => g.chave);
+check(chaves.includes("pessoas-diferentes") && chaves.includes("parcialmente-diferentes")
+   && chaves.includes("mesma-pessoa") && chaves.includes("sem-groot"),
+      "cada assunto vira o seu grupo", JSON.stringify(chaves));
+check(variado.grupos.every(g => g.total > 0),
+      "grupo sem achado não é criado — a tela não mostra bloco vazio");
+check(variado.grupos.reduce((n,g) => n + g.total, 0) === variado.achados.length,
+      "todo achado cai em exatamente um grupo, nenhum se perde",
+      variado.grupos.reduce((n,g) => n + g.total, 0) + " de " + variado.achados.length);
+check(variado.achados.every(a => a.categoria && a.categoria !== "outros"),
+      "nenhuma regra ficou sem categoria declarada",
+      JSON.stringify([...new Set(variado.achados.filter(a => a.categoria === "outros").map(a => a.regra))]));
+
+/* A ordem dos grupos é a declarada, não a ordem em que os achados
+   apareceram: o assunto mais caro primeiro. */
+const ordemDeclarada = VAL_CATEGORIAS.map(c => c.chave);
+check(chaves.every((c,i) => i === 0 || ordemDeclarada.indexOf(chaves[i-1]) < ordemDeclarada.indexOf(c)),
+      "os grupos saem na ordem declarada, do mais caro ao mais barato",
+      JSON.stringify(chaves));
+
+/* Um grupo com um crítico no meio de informativos não pode se anunciar
+   como informativo — a cor do bloco é a do pior caso que ele guarda. */
+const misto = rodar([
+  L({ groot:"5200001", nome:"FABIO NOGUEIRA", regime:"Temporário", ini:d(2026,5,1), fim:d(2026,7,31), valor:100 }),
+  L({ groot:"5200001", nome:"FABIO NOGUEIRA", regime:"Efetivo",    ini:d(2026,8,1), fim:null, valor:100 }),
+  L({ groot:"5200002", nome:"GILDA PACHECO", ini:d(2026,5,1), fim:null, valor:100 }),
+  L({ groot:"5200002", nome:"GILDA PACHECO", ini:d(2026,6,1), fim:null, valor:100 })
+]);
+const gMesma = misto.grupos.find(g => g.chave === "mesma-pessoa");
+check(!!gMesma && gMesma.total === 2 && gMesma.severidade === "critico",
+      "a severidade do grupo é a pior que ele contém, não a média nem a primeira",
+      gMesma && gMesma.severidade+" ("+JSON.stringify(gMesma.porSev)+")");
+check(!!gMesma && gMesma.porSev.critico === 1 && gMesma.porSev.info === 1,
+      "…e o grupo informa quantos de cada severidade guarda");
+
+const limpo2 = rodar([L({ groot:"5300001", nome:"SEM PROBLEMA", ini:d(2026,7,20), valor:100 })]);
+check(limpo2.grupos.length === 0,
+      "fatura sem achado não gera grupo nenhum");
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);

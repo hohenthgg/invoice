@@ -254,6 +254,12 @@ quantidade × unitário · datas invertidas · data fora do período · campos o
 grafia inconsistente do regime · tarifa destoante da mediana do mesmo tipo · linhas idênticas ·
 hora extra de quem não está no LABOR.
 
+Os apontamentos são reunidos em **blocos por categoria** — mesmo GROOT com pessoas diferentes, com
+nomes parcialmente coincidentes, com a mesma pessoa, sem GROOT, homônimos, cobrança em duplicidade,
+identificador fora do padrão, datas, coerência entre colunas e qualidade de cadastro. Cada bloco traz
+o total e a quebra por severidade no cabeçalho; clicar abre os casos um a um. Uma fatura que geraria
+trinta cartões em coluna cabe em sete blocos fechados.
+
 Cada achado sai com quatro coisas: a **severidade** (Crítico, Revisar, Cadastro, Informativo), o
 **raciocínio em texto** dizendo quais evidências levaram àquela conclusão, uma **sugestão de
 correção** e os **registros envolvidos lado a lado**. As opções de decisão (manter, consolidar,
