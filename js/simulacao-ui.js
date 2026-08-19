@@ -1263,6 +1263,22 @@ async function exportarEqualizado(){
   /* ---- monta o arquivo por cima do original ---- */
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(fat.buffer);
+  /* O ExcelJS reemite as validações de dados com FAIXAS SOBREPOSTAS —
+     `K2:K3000` e `K10:K3000` na mesma coluna, três regras virando cinco.
+     Faixa sobreposta é uma das violações que fazem o Excel abrir o
+     arquivo pedindo para "recuperar". Acontece no round-trip puro, sem
+     edição nenhuma, então não há o que ajustar na escrita: o jeito é
+     não levar as validações adiante. Perde-se a lista suspensa de duas
+     colunas; ganha-se um arquivo que abre. */
+  wb.eachSheet(ws => {
+    if(ws.dataValidations) ws.dataValidations.model = {};
+    /* E a formatação condicional sai pelo mesmo motivo: as regras do
+       original vivem num `extLst` que o ExcelJS não carrega, e ele grava
+       o `<conditionalFormatting sqref="A6"/>` VAZIO. Elemento sem uma
+       regra dentro é inválido pelo esquema, e o Excel repara o arquivo
+       por causa dele. */
+    if(ws.conditionalFormattings) ws.conditionalFormattings = [];
+  });
   const wsL = wb.getWorksheet(fat.aba);
   if(wsL) reescreverAba(wsL, lay.topo.length, linhasLabor, lay.largura);
   if(layD){
