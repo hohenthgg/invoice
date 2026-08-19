@@ -281,14 +281,99 @@ function analisar(){
 }
 
 /* ================================================================
+   AJUDA NO HOVER
+
+   Cada número da tela é composto de um jeito, e o jeito não é óbvio:
+   "Q Pós previsto" não é o S&OP, "HC-dia em risco" não desconta os
+   dias abaixo, e o PREF não é a contagem de linhas do LABOR. Em vez de
+   um parágrafo de legenda que ninguém lê, a composição fica atrás do
+   cursor, no próprio número.
+
+   O balão é posicionado por JS, e não por CSS, porque a tabela vive
+   dentro de um contêiner com `overflow-x: auto` — um ::after seria
+   recortado na borda do scroll.
+   ================================================================ */
+function tipPref(){
+  return "Soma dos <b>% RATEIO</b> das linhas do LABOR ativas no dia — ativa é "
+    + "<b>início ≤ dia</b> e <b>fim ≥ dia</b>, com DATA FIM vazia valendo até o fim do período. "
+    + "Entram só as linhas de <b>LABOR DIRETO</b>, com cargo da lista do PREF e classificadas como "
+    + "competência corrente. Ficam de fora liderança e indiretos, a linha de ABS e todo retroativo.";
+}
+function tipSop(blocos){
+  return "Linha <b>Esperado</b> de cada aba de operação da planilha operacional, somada "
+    + "<b>por data</b> — nunca por posição de coluna. Neste arquivo: "
+    + blocos.map(b => "<b>"+esc(b)+"</b>").join(" + ")+".";
+}
+const TIP = {
+  qPos: "<b>MIN(PREF, S&OP)</b> do dia. É previsão conservadora e assimétrica de propósito: "
+      + "o cliente pode <b>cortar</b> o que foi enviado acima do plano, mas não paga o que não foi "
+      + "enviado. Com PREF abaixo do S&OP, o previsto é o próprio PREF — não o S&OP.",
+  gap:  "<b>PREF − S&OP</b> do dia. Positivo: enviado acima do plano, é o que pode ser cortado. "
+      + "Negativo: enviado abaixo do plano, indício de pessoa faturável faltando no Labor.",
+  corr: "<b>Q Pós previsto − PREF</b>. Fica negativa quando há risco de corte e <b>zero</b> quando "
+      + "o PREF está abaixo do S&OP — o app não presume aumento automático.",
+  data: "Cada dia do período faturado, do dia 16 do mês anterior ao dia 15 do mês da competência.",
+  status: "Comparação entre PREF e S&OP do dia: acima → possível correção, igual → alinhado, "
+      + "abaixo → possível subfaturamento. <b>Revisão necessária</b> quando o dia não pôde ser "
+      + "reconstruído e nenhum número foi previsto.",
+  diag: "A leitura do dia em texto, já com os números que a produziram.",
+  totalPref: "Soma do PREF de <b>todos os dias</b> do período, em HC-dia.",
+  totalSop:  "Soma do S&OP de <b>todos os dias</b> do período, em HC-dia.",
+  totalPos:  "Soma de <b>MIN(PREF, S&OP)</b> dia a dia. Não é o menor dos dois totais: é a soma "
+           + "dos menores de cada dia, que pode ser diferente.",
+  risco: "Soma de <b>(PREF − S&OP)</b> apenas nos dias em que o PREF está <b>acima</b>. Os dias "
+       + "abaixo <b>não abatem</b> este total — o que sobra num dia não compensa o que faltou "
+       + "em outro.",
+  abaixo: "Soma de <b>(S&OP − PREF)</b> apenas nos dias em que o PREF está <b>abaixo</b>. "
+        + "Não vira receita: é indício de gente faturável faltando no Labor.",
+  diasAlinhados: "Dias em que PREF e S&OP são iguais — nenhuma correção prevista.",
+  diasReducao: "Dias com PREF acima do S&OP.",
+  diasSub: "Dias com PREF abaixo do S&OP.",
+  diasRevisao: "Dias que não puderam ser reconstruídos — S&OP sem valor para o dia, ou linha do "
+             + "Labor que não pôde ser classificada. Saem sem número previsto, de propósito."
+};
+
+/* Um único balão para o painel inteiro, movido conforme o cursor. */
+function ligarAjuda(){
+  const tip = $("sm-tip"), painel = $("vt-painel-simulacao");
+  if(!tip || !painel || painel.dataset.ajuda === "1") return;
+  painel.dataset.ajuda = "1";
+  painel.addEventListener("mouseover", ev => {
+    const alvo = ev.target.closest("[data-tip]");
+    if(!alvo) return;
+    tip.innerHTML = alvo.dataset.tip;
+    tip.hidden = false;
+    posicionar(alvo, tip, painel);
+  });
+  painel.addEventListener("mouseout", ev => {
+    const alvo = ev.target.closest("[data-tip]");
+    if(alvo && !alvo.contains(ev.relatedTarget)) tip.hidden = true;
+  });
+  painel.addEventListener("scroll", () => { tip.hidden = true; }, true);
+}
+function posicionar(alvo, tip, painel){
+  const a = alvo.getBoundingClientRect(), p = painel.getBoundingClientRect();
+  const largura = tip.offsetWidth, altura = tip.offsetHeight;
+  let x = a.left - p.left + a.width/2 - largura/2;
+  x = Math.max(6, Math.min(x, painel.clientWidth - largura - 6));
+  /* Acima do alvo quando cabe, abaixo quando não. O "cabe" é medido na
+     JANELA e não no painel: o painel é alto e rola, então um alvo no
+     topo da tela tem espaço de sobra em coordenadas do painel e mesmo
+     assim jogaria o balão para fora do campo de visão. Cabeçalho de
+     tabela é sticky e vive colado no topo — é justamente o caso. */
+  const cabeAcima = a.top - altura - 8 > 4;
+  const y = cabeAcima ? a.top - p.top - altura - 8 : a.bottom - p.top + 8;
+  tip.style.left = x + "px";
+  tip.style.top  = y + "px";
+}
+
+/* ================================================================
    TELA
    ================================================================ */
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const n2 = v => v === null || v === undefined || !isFinite(Number(v))
   ? "—" : Number(Number(v).toFixed(2)).toLocaleString("pt-BR");
 const sinal = v => v === null || v === undefined ? "—" : (Number(v) > 0 ? "+" : "") + n2(v);
-
-const COR = { pref:"var(--s-labor)", sop:"var(--s-alvo)", pos:"var(--ok)" };
 
 function render(){
   const sim = S.sim, t = sim.totais;
@@ -298,64 +383,23 @@ function render(){
     '<div class="sm-aviso '+a.tipo+'">'+esc(a.texto)+'</div>').join("");
 
   const cards = [
-    ["PREF total enviado", n2(t.pref), "HC-dia", ""],
-    ["S&OP total", n2(t.cliente), "HC-dia", ""],
-    ["Q Pós total previsto", n2(t.pos), "HC-dia", "ok"],
-    ["HC-dia em risco de correção", n2(t.hcEmRisco), "acima do S&OP", t.hcEmRisco > 0 ? "bad" : "ok"],
-    ["HC-dia abaixo do S&OP", n2(t.hcAbaixo), "possível subfaturamento", t.hcAbaixo > 0 ? "warn" : "ok"],
-    ["Dias alinhados", t.alinhado, "de "+t.dias, "ok"],
-    ["Dias com possível redução", t.reducao, "PREF acima do S&OP", t.reducao ? "bad" : "ok"],
-    ["Dias com possível subfaturamento", t.subfaturamento, "PREF abaixo do S&OP", t.subfaturamento ? "warn" : "ok"]
+    ["PREF total enviado", n2(t.pref), "HC-dia", "", TIP.totalPref+" "+tipPref()],
+    ["S&OP total", n2(t.cliente), "HC-dia", "", TIP.totalSop+" "+tipSop(sim.blocos)],
+    ["Q Pós total previsto", n2(t.pos), "HC-dia", "ok", TIP.totalPos+" "+TIP.qPos],
+    ["HC-dia em risco de correção", n2(t.hcEmRisco), "acima do S&OP", t.hcEmRisco > 0 ? "bad" : "ok", TIP.risco],
+    ["HC-dia abaixo do S&OP", n2(t.hcAbaixo), "possível subfaturamento", t.hcAbaixo > 0 ? "warn" : "ok", TIP.abaixo],
+    ["Dias alinhados", t.alinhado, "de "+t.dias, "ok", TIP.diasAlinhados],
+    ["Dias com possível redução", t.reducao, "PREF acima do S&OP", t.reducao ? "bad" : "ok", TIP.diasReducao],
+    ["Dias com possível subfaturamento", t.subfaturamento, "PREF abaixo do S&OP", t.subfaturamento ? "warn" : "ok", TIP.diasSub]
   ];
-  if(t.revisao) cards.push(["Dias para revisão", t.revisao, "não reconstruídos", "warn"]);
-  $("sm-cards").innerHTML = cards.map(([l,v,s,cls]) =>
-    '<div class="sm-card'+(cls?" "+cls:"")+'"><div class="v">'+esc(String(v))+'</div>'
+  if(t.revisao) cards.push(["Dias para revisão", t.revisao, "não reconstruídos", "warn", TIP.diasRevisao]);
+  $("sm-cards").innerHTML = cards.map(([l,v,s,cls,tip]) =>
+    '<div class="sm-card'+(cls?" "+cls:"")+'" data-tip="'+esc(tip)+'"><div class="v">'+esc(String(v))+'</div>'
     + '<div class="l">'+esc(l)+'</div><div class="s">'+esc(s)+'</div></div>').join("");
 
-  $("sm-legenda").innerHTML =
-    '<span><i style="background:'+COR.pref+'"></i>PREF enviado</span>'
-    + '<span><i style="background:'+COR.sop+'"></i>S&amp;OP total ('+sim.blocos.map(esc).join(" + ")+')</span>'
-    + '<span><i style="background:'+COR.pos+'"></i>Q Pós previsto</span>';
-
-  desenharGrafico(sim.dias);
   desenharDesvios(sim.dias);
   desenharTabela(sim);
-}
-
-/* Gráfico de linhas simples, em SVG inline. */
-function desenharGrafico(dias){
-  const el = $("sm-chart");
-  const pts = dias.filter(d => d.qCliente !== null);
-  if(!pts.length){ el.innerHTML = '<p class="sm-msg">Nenhum dia pôde ser reconstruído.</p>'; return; }
-  const W=880, H=250, padL=34, padR=16, padT=12, padB=30, n=pts.length;
-  const serie = k => pts.map(d => Number(d[k]));
-  const v1=serie("pref"), v2=serie("qCliente"), v3=serie("qPos");
-  const max = Math.max(1, ...v1, ...v2, ...v3), min = Math.min(0, ...v1, ...v2, ...v3);
-  const x = i => n <= 1 ? padL : padL + (i/(n-1))*(W-padL-padR);
-  const y = v => H-padB - ((v-min)/(max-min || 1))*(H-padT-padB);
-  const grade = [], ticks = [];
-  for(let s=0;s<=4;s++){
-    const v = min + (max-min)*s/4, yy = y(v);
-    grade.push('<line x1="'+padL+'" x2="'+(W-padR)+'" y1="'+yy.toFixed(1)+'" y2="'+yy.toFixed(1)
-      + '" stroke="var(--line)" stroke-width="1"/>');
-    grade.push('<text x="'+(padL-6)+'" y="'+(yy+3).toFixed(1)+'" text-anchor="end" font-size="9" '
-      + 'fill="var(--mut2)" font-family="var(--mono)">'+Math.round(v)+'</text>');
-  }
-  const passo = Math.max(1, Math.round(n/8));
-  for(let i=0;i<n;i+=passo) ticks.push('<text x="'+x(i).toFixed(1)+'" y="'+(H-8)
-    + '" text-anchor="middle" font-size="9" fill="var(--mut2)" font-family="var(--mono)">'
-    + fmtShort(pts[i].data)+'</text>');
-  const linha = (vals,cor,largura) => '<path d="'+vals.map((v,i)=>(i?"L":"M")+x(i).toFixed(1)+","+y(v).toFixed(1)).join(" ")
-    + '" fill="none" stroke="'+cor+'" stroke-width="'+largura+'" stroke-linejoin="round" stroke-linecap="round"/>';
-  /* Área entre PREF e S&OP só onde o PREF está por cima: é o risco. */
-  const risco = [];
-  pts.forEach((d,i) => { if(d.gap > 0) risco.push('<line x1="'+x(i).toFixed(1)+'" x2="'+x(i).toFixed(1)
-    + '" y1="'+y(d.qCliente).toFixed(1)+'" y2="'+y(d.pref).toFixed(1)+'" stroke="var(--bad)" stroke-width="3" opacity=".35"/>'); });
-
-  el.innerHTML = '<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="PREF, S&OP e Q Pós previsto por dia">'
-    + grade.join("") + risco.join("")
-    + linha(v2, COR.sop, 2) + linha(v3, COR.pos, 3) + linha(v1, COR.pref, 2)
-    + ticks.join("") + '</svg>';
+  ligarAjuda();
 }
 
 function desenharDesvios(dias){
@@ -375,7 +419,10 @@ function desenharDesvios(dias){
 }
 
 function desenharTabela(sim){
-  const cabBlocos = sim.blocos.map(b => "<th>S&amp;OP "+esc(b)+"</th>").join("");
+  const th = (rotulo, tip) => '<th data-tip="'+esc(tip)+'">'+rotulo+'</th>';
+  const cabBlocos = sim.blocos.map(b => th("S&amp;OP "+esc(b),
+    "Linha <b>Esperado</b> da aba de <b>"+esc(b)+"</b>, na coluna deste dia. "
+    + "A coluna é resolvida para a data completa antes de entrar na soma.")).join("");
   const linhas = sim.dias.map(d =>
     '<tr class="st-'+d.status+'">'
     + '<td>'+fmtYmd(d.data)+'</td>'
@@ -387,9 +434,14 @@ function desenharTabela(sim){
     + '<td class="'+(d.correcao < 0 ? "neg" : "")+'">'+sinal(d.correcao)+'</td>'
     + '<td><span class="sm-st st-'+d.status+'">'+esc(SIM_STATUS_LABEL[d.status])+'</span></td>'
     + '<td class="diag">'+esc(d.diagnostico)+'</td></tr>').join("");
-  $("sm-tabela").innerHTML = '<table><thead><tr><th>Data</th>'+cabBlocos
-    + '<th>Q cliente / S&amp;OP</th><th>PREF enviado</th><th>Q Pós previsto</th>'
-    + '<th>Gap PREF × S&amp;OP</th><th>Correção prevista</th><th>Status</th><th>Diagnóstico</th>'
+  $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
+    + th("Q cliente / S&amp;OP", tipSop(sim.blocos))
+    + th("PREF enviado", tipPref())
+    + th("Q Pós previsto", TIP.qPos)
+    + th("Gap PREF × S&amp;OP", TIP.gap)
+    + th("Correção prevista", TIP.corr)
+    + th("Status", TIP.status)
+    + th("Diagnóstico", TIP.diag)
     + '</tr></thead><tbody>'+linhas+'</tbody></table>';
 }
 

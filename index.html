@@ -555,12 +555,6 @@
       <div class="sm-cards" id="sm-cards"></div>
 
       <div class="sm-bloco">
-        <h3>PREF enviado × S&amp;OP × Q Pós previsto</h3>
-        <div class="sm-legenda" id="sm-legenda"></div>
-        <div class="sm-chart" id="sm-chart"></div>
-      </div>
-
-      <div class="sm-bloco">
         <h3>Desvios, do maior para o menor</h3>
         <div class="sm-desvios" id="sm-desvios"></div>
       </div>
@@ -574,6 +568,9 @@
         <button class="vt-btn" id="sm-btnExport">Exportar Retorno Simulado (.xlsx)</button>
       </div>
     </div>
+
+    <!-- balão de ajuda: preenchido e posicionado por js/simulacao-ui.js -->
+    <div class="sm-tip" id="sm-tip" hidden></div>
   </div>
 </div>
 
@@ -582,7 +579,9 @@
 
   <section>
     <h2>O que este app faz</h2>
-    <p class="guia-lead">Quatro perguntas diferentes sobre a mesma operação: <b>a fatura está certa?</b>, <b>o arquivo bate com o que o MELI espera?</b>, <b>quem foram os diaristas do período?</b> e <b>o absenteísmo ficou dentro do range?</b> Cada aba responde uma delas e devolve um Excel pronto.</p>
+    <p class="guia-lead">Cinco perguntas diferentes sobre a mesma operação: <b>a fatura está certa?</b>, <b>o arquivo bate com o que o MELI espera?</b>, <b>quem foram os diaristas do período?</b>, <b>o absenteísmo ficou dentro do range?</b> e <b>a fatura tem inconsistência — e quanto o MELI deve reconhecer?</b> Cada aba responde uma delas e devolve um Excel pronto.</p>
+
+    <div class="keyline" style="margin-top:14px">O app <b>não escreve valor monetário em lugar nenhum</b> — nem na tela, nem em arquivo exportado. Tudo é medido em <b>pessoas, dias, FTE e headcount</b>. Onde a conclusão depende de um lançamento, o que entra na conta é o <b>sinal</b> dele: positivo é cobrança, negativo é estorno — e é essa diferença que separa dupla cobrança de ajuste retroativo. A grandeza não muda nenhuma conclusão, então não é escrita.</div>
 
     <div class="duo" style="margin-top:18px">
       <div class="concept c1">
@@ -621,10 +620,30 @@
       <span class="chiph">Aba 4 · Calcular ABS</span>
       <h3>O absenteísmo ficou dentro do range contratual?</h3>
       <p>Compara, dia a dia, o <b>Quadro S&amp;OP (sem over)</b> com quem esteve <b>presente</b> no período da fatura — 16/N-1 a 15/N, o período de folha. A diferença negativa de cada dia é o déficit.</p>
-      <p>Esse déficit é então compensado pelos <b>diaristas daquele dia</b>, contados uma única vez e só quando têm Groot ID. Ao clicar em <b>Validar</b>, você escolhe quais podem compensar: <b>somente ID Logistics</b> (o padrão — o do MELI é do MELI), <b>somente MELI</b> ou <b>ambos</b>. A agência não importa. O abate é limitado ao próprio déficit: um dia nunca fica positivo por sobra de diarista.</p>
+      <p>Esse déficit é então compensado pelos <b>diaristas daquele dia</b>, contados uma única vez e só quando têm Groot ID. Ao clicar em <b>Validar</b>, você escolhe quais podem compensar: <b>somente ID Logistics</b> (o padrão — o do MELI é do MELI), <b>somente MELI</b> ou <b>ambos</b>. Em <b>ambos a ID tem prioridade</b>: o diarista do MELI só entra no dia <b>depois de esgotados todos os da ID</b>, e apenas no que sobrou do déficit — o total abatido é o mesmo, muda a atribuição, e o resultado diz quanto veio de cada fonte. A agência não importa. O abate é limitado ao próprio déficit: um dia nunca fica positivo por sobra de diarista.</p>
       <p>O pool também é filtrado pela <b>escala da operação</b>, não pela aba do SIGO — as abas se misturam (a aba <i>Pouso Alegre XD</i> carrega linhas <i>SD</i> e <i>FULL</i>). Onde a filial marca a operação na escala, cada cartão leva só a sua; onde marca outra coisa (<i>AM</i>/<i>PM</i>, horário), leva tudo menos o que é das outras operações — e o cartão avisa quando a filial não distingue.</p>
       <p>O resultado sai em dois números — <b>antes</b> e <b>pós compensação</b> — medidos contra o <b>range contratual de 2,5%</b>, com a lista dos dias críticos. Baixa tudo num arquivo unificado ou <b>uma filial por arquivo</b>, para mandar a cada gerente só o que é dele. A linha <b>Contratado</b> do resumo vem da própria planilha mensal quando ela traz o bloco de headcount — é dado de origem, não contagem derivada da grade. Dias sem S&amp;OP no headcount, ou sem lançamento na base de absenteísmo, ficam de fora do percentual em vez de virar zero.</p>
-      <p>Precisa de <b>três bases</b>: duas planilhas mensais de absenteísmo (que cobrem o período) e a base SIGO de diaristas. O S&amp;OP diário vem da linha <b>“Esperado”</b> de cada aba de operação — o headcount avulso virou opcional, só para planilhas no modelo antigo, que não trazem esse bloco.</p>
+      <p>A planilha de absenteísmo é aceita nos <b>dois formatos</b>: um <b>arquivo único do período</b>, com abas nomeadas por intervalo (<code class="inline">PASVC 16.07-15.08</code>) cobrindo dois meses, ou os <b>dois arquivos mensais</b> antigos (<code class="inline">PASVC Jul</code> + <code class="inline">PASVC Ago</code>), um em cada campo. O S&amp;OP diário vem da linha <b>“Esperado”</b> de cada aba de operação — o headcount avulso virou opcional, só para planilhas no modelo antigo, que não trazem esse bloco.</p>
+      <p>No passo 1, as bases <b>obrigatórias</b> (absenteísmo e SIGO) vêm destacadas em âmbar, com a razão de serem obrigatórias; as <b>opcionais</b> ficam apagadas, dizendo em que caso servem. Ao carregar, o campo fica verde e a justificativa some.</p>
+    </div>
+    <div class="concept c5" style="margin-top:14px">
+      <span class="chiph">Aba 5 · Validação Template</span>
+      <h3>A fatura tem inconsistência? E quanto o MELI deve reconhecer?</h3>
+      <p>Dois modos, escolhidos nos botões do topo da aba.</p>
+
+      <p class="modo-nota"><b>Auditar inconsistências da fatura</b> — solte a fatura no template padrão e a aba a examina <b>como um auditor faria</b>: em vez de validar campo a campo, ela junta evidências de linhas diferentes e conclui. Duas linhas com o mesmo Groot ID têm exatamente os mesmos campos preenchidos e podem ser coisas opostas:</p>
+      <p>Se os nomes são <b>o mesmo nome</b> (um traz um sobrenome a mais, ou difere por uma letra), os períodos <b>se encostam</b> sem sobrepor e o vínculo evolui de Temporário para Efetivo, é uma <b>efetivação</b> — sai como <i>Informativo</i>, com a sugestão de consolidar numa linha só, apagando a DATA FIM. Se os nomes <b>não têm relação</b>, os cargos diferem e os períodos <b>se sobrepõem</b> com as duas linhas positivas, são <b>duas pessoas cobrando pelo mesmo identificador</b> — sai como <i>Crítico</i>.</p>
+      <p>O <b>sinal do lançamento</b> muda a conclusão. A mesma sobreposição entre LABOR e DIARISTAS é <b>dupla cobrança</b> quando o LABOR é positivo e cai para <i>Revisar</i> quando é negativo — negativo costuma ser estorno, desligamento retroativo ou a própria devolução do fixo para pagar os dias como diária. O app não decide que um lançamento negativo está errado.</p>
+      <p>O que a aba procura: <b>Groot ID compartilhado por pessoas diferentes</b> · transição <b>Temporário → Efetivo</b> · variação cadastral de nome · períodos sobrepostos · <b>LABOR × DIARISTA</b> · <b>Groot ID ausente</b> (com destaque para auxiliar e operador, os cargos conciliados pessoa a pessoa) · <b>Groot fora do padrão</b>, aprendido da própria planilha — se 97% têm 7 dígitos, o app diz isso em vez de afirmar que o de 6 está errado · homônimos · diária duplicada no mesmo dia · <code class="inline">VALOR FINAL</code> incoerente com quantidade × unitário · datas invertidas · data fora do período · campos obrigatórios vazios · grafia inconsistente do regime · tarifa fora da mediana do mesmo tipo · linhas idênticas · hora extra de quem não está no LABOR.</p>
+      <p>Cada achado sai com <b>severidade</b> (Crítico, Revisar, Cadastro, Informativo), o <b>raciocínio em texto</b> dizendo quais evidências levaram àquela conclusão, uma <b>sugestão de correção</b> e os <b>registros lado a lado</b>. Você registra a decisão em cada caso — manter, consolidar, excluir, marcar como ajuste, ignorar — e ela sai no relatório. <b>Nenhuma linha da fatura é alterada.</b></p>
+
+      <p class="modo-nota"><b>Simular o retorno</b> — antecipa o confronto que a Fusão de Linhas só consegue fazer <i>depois</i> que o retorno oficial chega. Suba a fatura e a planilha operacional: a aba reconstrói o <b>PREF</b> a partir do LABOR, soma o <b>S&amp;OP diário</b> de todas as operações e prevê o que o MELI tende a reconhecer.</p>
+      <code class="formula">Q Pós previsto = MIN(PREF, S&amp;OP)</code>
+      <p>A fórmula é <b>assimétrica de propósito</b>: o MELI pode <b>cortar</b> o que foi apresentado acima do planejamento, mas <b>não paga</b> o que nem sequer foi enviado. PREF 130 contra S&amp;OP 138 não vira 138 — vira 130, e os 8 de folga são alerta de <b>subfaturamento</b> para conferir o Labor, não receita a receber.</p>
+      <p>Duas coisas que a reconstrução <b>não</b> faz. Não soma o S&amp;OP <b>por posição de coluna</b>: cada coluna de cada aba operacional é resolvida para uma data completa antes de qualquer soma — uma aba com uma coluna a mais no começo somaria o dia 16 de uma com o dia 17 da outra, em silêncio. E não trata <b>retroativo como headcount</b>: rateio negativo é ajuste financeiro, e somá-lo diria que havia uma pessoa a menos no turno. Liderança e indiretos também ficam de fora, e cargo que não está na lista do PREF não é chutado para dentro — vira o aviso <i>“cargo requer validação”</i>, nomeando o cargo, porque um PREF subestimado em silêncio é pior que um alerta.</p>
+      <p>Célula de S&amp;OP vazia é <b>ausência, não zero</b>: o dia sai como <b>revisão necessária</b>, sem número previsto. Zero silencioso inventaria um risco de corte que não existe. Se as datas das abas operacionais não coincidirem, o app <b>recusa</b> em vez de somar dias trocados.</p>
+      <p>Cada dia sai com S&amp;OP por operação, S&amp;OP total, PREF, Q Pós previsto, gap, correção prevista, status e diagnóstico. <b>Passe o cursor sobre o título de qualquer coluna ou sobre qualquer cartão</b> para ver como aquele número é composto. O painel separa <b>provável redução</b>, <b>alinhado</b> e <b>possível subfaturamento</b>, do maior desvio para o menor.</p>
+      <p>A exportação gera quatro abas: <b>COMPARATIVO</b> (leitura humana), <b>RETORNO SIMULADO</b> — com os mesmos cabeçalhos que a <b>Fusão de Linhas</b> procura, para servir de retorno de teste lá —, <b>METADADOS</b> (o aviso de que o arquivo é simulado e as fórmulas usadas) e <b>FORA DO PREF</b> (toda linha excluída e por quê). É <b>previsão, nunca retorno confirmado</b>: o rótulo aparece na tela e no arquivo.</p>
     </div>
   </section>
 
