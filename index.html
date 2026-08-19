@@ -714,6 +714,11 @@
         Calcular ABS. Elas saem na aba <b>Diaristas</b>, uma linha por pessoa-dia, com cargo
         <i>Diarista</i> e quantidade 1, exatamente como a fatura lança diária — <b>junto com as
         diárias que a fatura já tinha</b>, que saem como estão.</p>
+      <p><b>Ninguém entra num dia em que não foi solicitado.</b> Cada pessoa-dia escolhido é
+        reconferido contra a base do SIGO, linha a linha, antes de virar linha do arquivo — e dia sem
+        solicitação <b>não</b> é preenchido para emendar intervalo: a pessoa solicitada em 20/07 e
+        22/07 entra nesses dois dias, e o 21/07 fica vazio. O total de conferidos, e de recusados se
+        houver, sai no <code class="inline">METADADOS</code>.</p>
       <p>Repare no efeito: quem cobre a falta é <b>diarista, não quadro fixo</b>, então o
         <code class="inline">Labor</code> exportado fica <b>abaixo do QF</b> nos dias cobertos por diária —
         e é assim mesmo. Lançar essa gente no Labor seria cobrá-la como fixo, que é outra coisa. O aviso

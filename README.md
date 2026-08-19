@@ -392,6 +392,14 @@ lançada nesta fatura —, **primeiro os internos até acabarem** e só então o
 gastar diarista do cliente com interno sobrando escolhe a fonte errada, e o total não denuncia. Nunca
 entra mais gente do que a falta do dia.
 
+**Ninguém entra num dia em que não foi solicitado.** Cada pessoa-dia escolhido é reconferido contra
+um índice montado do zero a partir das linhas cruas do SIGO — não contra o mapa que produziu a
+escolha, porque conferir com a mesma fonte não confere nada — antes de virar linha do arquivo. O que
+não passasse seria descartado e contado, e o total de conferidos e recusados sai no `METADADOS`. A
+garantia já valia por construção; o que ela não tinha era quem a cobrasse, e garantia por construção
+é a que um refactor apaga sem ninguém ver — bastaria alguém emendar o intervalo entre dois dias
+soltos da mesma pessoa para inventar diária que a base não tem.
+
 Essa gente sai na aba **`Diaristas`**, uma linha por pessoa-dia, cargo `Diarista` e quantidade 1 —
 como a fatura lança diária. **Não** no `Labor`: quem cobre a falta é diarista, não quadro fixo, e
 lançá-lo como fixo seria cobrar outra coisa. A consequência é visível e está dita no `METADADOS`: o

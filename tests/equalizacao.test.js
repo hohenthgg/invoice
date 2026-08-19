@@ -523,6 +523,62 @@ const lab = (groot, ini, fim, rateio) => ({ groot, nome:"FIXO "+groot, cargo:"Au
   check(r.totais.incluido === 0 && r.totais.descoberto === 2,
         "sem base de diaristas não se inventa ninguém — a falta fica declarada");
 }
+
+/* ================================================================
+   NINGUÉM ENTRA NUM DIA EM QUE NÃO FOI SOLICITADO
+
+   A regra mais dura da inclusão: cada pessoa-dia escrito no arquivo
+   tem de existir na base do SIGO NAQUELE DIA. O jeito de quebrar isso
+   não é escolher a pessoa errada — é preencher o buraco entre dois
+   dias soltos dela, que parece arrumação e é diária inventada.
+   ================================================================ */
+{
+  const d1 = ymd(2026,7,20), d2 = ymd(2026,7,21), d3 = ymd(2026,7,22);
+  /* Solicitada em 20 e 22, NÃO em 21 — e 21 tem falta e nenhum outro
+     candidato. A tentação de "completar o intervalo" mora aqui. */
+  const r = simInclusoes({ falta:{ [d1]:1, [d2]:1, [d3]:1 }, labor:[],
+    diaristas:[diar("5",d1,"id"), diar("5",d3,"id")] });
+  const p = r.pessoas[0];
+  check(p.dias.join(",") === d1+","+d3,
+        "o dia do buraco não é preenchido: ela só entra onde foi solicitada",
+        JSON.stringify(p.dias));
+  check(p.faixas.length === 2,
+        "…e as faixas mostram os dois trechos, sem emendar por cima do buraco",
+        JSON.stringify(p.faixas));
+  check(r.dias[d2].incluido === 0 && r.dias[d2].descoberto === 1,
+        "o dia sem candidato fica declarado como descoberto");
+}
+{
+  /* A reconferência final roda mesmo quando não tem nada a recusar, e
+     é sobre ela que a garantia se apoia — não sobre a construção. */
+  const d1 = ymd(2026,7,20);
+  const r = simInclusoes({ falta:{ [d1]:2 }, labor:[],
+    diaristas:[diar("6",d1,"id"), diar("7",d1,"meli")] });
+  check(r.conferencia.verificados === 2 && r.conferencia.recusados.length === 0,
+        "toda pessoa-dia escolhida passa pelo índice cru da base antes de virar linha",
+        JSON.stringify(r.conferencia));
+}
+{
+  /* Por dentro do caminho completo, com a fatura inteira: nenhuma
+     pessoa-dia do plano está fora da base. */
+  const gente2 = fixture();
+  const base = [];
+  for(let d = PER.ini; d <= PER.fim; d = ctx.addDays(d,1))
+    if(d % 2 === 0) for(let k=0;k<10;k++) base.push(diar("81"+k, d, "id"));
+  const r = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diaristas:base,
+    opcoes:{ permitirAdiarInicio:true } });
+  const cru = new Set(base.map(x => x.groot+"|"+x.data));
+  const fora = r.inclusoes.pessoas.flatMap(p => p.dias
+    .filter(d => !cru.has(p.groot+"|"+d)).map(d => p.groot+"|"+d));
+  check(fora.length === 0,
+        "no plano completo, toda pessoa-dia incluída existe na base naquele dia",
+        JSON.stringify(fora.slice(0,5)));
+  check(r.inclusoes.conferencia.verificados > 0,
+        "…e a conferência de fato rodou sobre alguma coisa — a garantia não é vácua",
+        String(r.inclusoes.conferencia.verificados));
+  check(r.inclusoes.pessoas.every(p => p.dias.every(d => d % 2 === 0)),
+        "e os dias sem solicitação nenhuma continuam vazios, sem emenda");
+}
 {
   /* Pelo caminho completo: o plano da Validação traz as inclusões
      prontas quando a base do SIGO vem junto. */
