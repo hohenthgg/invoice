@@ -445,5 +445,63 @@ check(JSON.stringify(original) === JSON.stringify(copia),
 const semBloco = simularRetorno({ labor:[P()], blocos:[], periodo:PER, comp:COMP });
 check(!!semBloco.erro, "sem nenhum bloco de S&OP o módulo recusa em vez de prever no vazio");
 
+/* ================================================================
+   O QUADRO DO DIA INCLUI A DIÁRIA JÁ LANÇADA
+
+   O defeito que este bloco trava: a fatura já equalizada voltava ao app
+   com 170 contra um alvo de 182 e "possível subfaturamento de -12" —
+   quando 170 fixos + 12 diárias fecham exatamente em 182. A tela tinha
+   duas definições de quadro: a tabela contava só o LABOR, a equalização
+   contava LABOR + diárias. Duas respostas para o mesmo dia.
+   ================================================================ */
+console.log("\nO quadro do dia inclui a diária já lançada na fatura");
+{
+  const D1 = ymd(2026,7,16);
+  const labor = [P({ groot:"Q1" }), P({ groot:"Q2" })];
+  const diarias = [{ groot:"D9", data:D1, quantidade:1 }];
+  const semDiaria = rodar(labor, [bloco("SVC",3)]);
+  const comDiaria = simularRetorno({ labor, blocos:[bloco("SVC",3)],
+    periodo:PER, comp:COMP, diarias });
+
+  check(noDia(semDiaria, D1).gap === -1,
+        "sem a diária o dia fica 1 abaixo do S&OP");
+  check(noDia(comDiaria, D1).quadro === 3 && noDia(comDiaria, D1).gap === 0,
+        "com a diária lançada o quadro fecha em 3 e o dia fica alinhado",
+        JSON.stringify({ pref:noDia(comDiaria,D1).pref, diarias:noDia(comDiaria,D1).diarias,
+                         quadro:noDia(comDiaria,D1).quadro, gap:noDia(comDiaria,D1).gap }));
+  check(noDia(comDiaria, D1).pref === 2 && noDia(comDiaria, D1).diarias === 1,
+        "…e as duas partes continuam visíveis separadas: 2 fixos + 1 diária");
+  check(noDia(comDiaria, ymd(2026,7,17)).quadro === 2,
+        "no dia sem diária o quadro é só o fixo");
+  check(/2 fixo \+ 1 diária/.test(noDia(comDiaria, D1).diagnostico),
+        "o diagnóstico do dia diz a composição, em vez de falar só do Labor",
+        noDia(comDiaria, D1).diagnostico);
+}
+{
+  /* O Q Pós e a correção também passam a olhar o quadro: prever sobre o
+     fixo sozinho subestimaria o que o cliente vai reconhecer. */
+  const D1 = ymd(2026,7,16);
+  const r = simularRetorno({ labor:[P({ groot:"Q1" }), P({ groot:"Q2" })],
+    blocos:[bloco("SVC",2)], periodo:PER, comp:COMP,
+    diarias:[{ groot:"D9", data:D1, quantidade:1 }] });
+  check(noDia(r,D1).qPos === 2 && noDia(r,D1).gap === 1,
+        "quadro 3 contra S&OP 2: previsto 2, e o excedente de 1 é risco de corte",
+        JSON.stringify({ qPos:noDia(r,D1).qPos, gap:noDia(r,D1).gap }));
+  check(noDia(r,D1).correcao === -1,
+        "a correção prevista desconta do quadro, não do fixo");
+}
+{
+  const r = simularRetorno({ labor:[P({ groot:"Q1" })], blocos:[bloco("SVC",1)],
+    periodo:PER, comp:COMP, diarias:[{ groot:"D9", data:ymd(2026,7,16), quantidade:1 }] });
+  check(r.totais.quadro === r.totais.pref + r.totais.diarias,
+        "o total do período também é fixo + diária",
+        JSON.stringify({ quadro:r.totais.quadro, pref:r.totais.pref, diarias:r.totais.diarias }));
+}
+{
+  const semNada = rodar([P({ groot:"Q1" })], [bloco("SVC",1)]);
+  check(semNada.totais.diarias === 0 && semNada.dias.every(d => d.quadro === d.pref),
+        "sem aba de diárias na fatura, o quadro continua sendo o Labor e nada muda");
+}
+
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");
 process.exit(fail ? 1 : 0);

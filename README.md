@@ -332,7 +332,13 @@ Duas coisas que a reconstrução do PREF **não** faz:
 Célula de S&OP vazia é **ausência, não zero**: o dia sai como `REVISÃO NECESSÁRIA`, sem número
 previsto. Zero silencioso inventaria um risco de corte que não existe.
 
-Cada dia sai com S&OP por operação, S&OP total, PREF, Q Pós previsto, gap, correção prevista,
+O que vai ao confronto é o **quadro do dia**: as linhas do `LABOR` mais as **diárias já lançadas** na
+aba `DIARISTAS` da fatura. Contar só o fixo aqui, enquanto a equalização conta os dois, dava duas
+respostas para o mesmo dia na mesma tela — a fatura já equalizada voltava com 170 contra 182 e
+"possível subfaturamento de −12", quando 170 fixos + 12 diárias fecham exatamente em 182. A célula
+mostra o total com a composição embaixo, e o diagnóstico repete a conta.
+
+Cada dia sai com S&OP por operação, S&OP total, quadro, Q Pós previsto, gap, correção prevista,
 status e diagnóstico em texto. O painel separa **provável redução**, **alinhado** e **possível
 subfaturamento**, do maior desvio para o menor.
 
