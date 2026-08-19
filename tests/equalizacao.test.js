@@ -727,18 +727,39 @@ const dia = (groot, data, extra) => ({ groot, data, quantidade:1, nome:"P"+groot
   const diarias = [];
   for(const d of [ymd(2026,7,20), ymd(2026,7,21), ymd(2026,8,1)])
     for(let k=0;k<5;k++) diarias.push({ groot:"92"+k, data:d, quantidade:1 });
-  const r = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
-  check(r.acoes.length === 0,
+  const manter = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
+  check(manter.acoes.length === 0,
         "o motor não mexe no quadro fixo quando cortar criaria falta em outro dia",
-        JSON.stringify(r.acoes.map(a => a.tipo)));
-  check(r.corte.totais.cortado === 15, "e o excesso sai inteiro em diária: 3 dias × 5",
-        String(r.corte.totais.cortado));
-  check(r.corte.cortes.every(c => diarias.some(d => d.groot === c.groot && d.data === c.data)),
+        JSON.stringify(manter.acoes.map(a => a.tipo)));
+
+  /* PADRÃO É MANTER. A diária já foi alocada e já está faturada: reduzir
+     é decisão de quem opera, e o app não toma essa decisão sozinho. */
+  check(manter.decisaoDiarias === "manter" && manter.corte.totais.cortado === 0,
+        "sem decisão do usuário, nenhuma diária é retirada",
+        manter.decisaoDiarias+" · "+manter.corte.totais.cortado);
+  check(manter.corteDisponivel.totais.cortado === 15,
+        "mas o quanto DARIA para cortar é calculado e oferecido: 3 dias × 5",
+        String(manter.corteDisponivel.totais.cortado));
+  check(Object.values(manter.revisar).reduce((a,b) => a+b, 0) === 15,
+        "e o excesso mantido sai inteiro em REVISAR, dia a dia",
+        JSON.stringify(manter.revisar));
+  check(manter.totais.excessoDepois === 15,
+        "os indicadores refletem a escolha: o excesso continua lá");
+
+  /* Escolhendo reduzir, o mesmo plano fecha. */
+  const reduzir = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias,
+    opcoes:{ cortarDiarias:true } });
+  check(reduzir.decisaoDiarias === "reduzir" && reduzir.corte.totais.cortado === 15,
+        "com a decisão de reduzir, sai só o necessário para chegar ao QF");
+  check(reduzir.corte.cortes.every(c => diarias.some(d => d.groot === c.groot && d.data === c.data)),
         "…e toda diária cortada existia mesmo na fatura, naquele dia");
-  check(r.dias.every(d => d.difPos <= 0),
+  check(reduzir.dias.every(d => d.difPos <= 0),
         "depois do plano inteiro nenhum dia fica acima do QF",
-        JSON.stringify(r.dias.filter(d => d.difPos > 0).map(d => d.data+":"+d.difPos)));
-  check(r.totais.excessoDepois === 0, "e o excesso do período zera");
+        JSON.stringify(reduzir.dias.filter(d => d.difPos > 0).map(d => d.data+":"+d.difPos)));
+  check(reduzir.totais.excessoDepois === 0 && Object.keys(reduzir.revisar).length === 0,
+        "e o excesso do período zera, sem sobrar nada para revisar");
+  check(JSON.stringify(manter.acoes.map(a => a.id)) === JSON.stringify(reduzir.acoes.map(a => a.id)),
+        "a decisão sobre a diária NÃO muda o que foi feito no Labor — ele é ajustado antes, e igual");
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");

@@ -747,9 +747,24 @@ function simPlanoEqualizacao(dados){
   const falta    = chavesYmd(plano.incluir[SIM_GRUPO]?.dias);
 
   /* O que as quatro fases não resolveram não é mais quadro fixo: é
-     diária lançada por cima do teto. Ela sai aqui, e o que ainda
-     sobrar depois disso é que vai para revisão manual. */
-  const corte = simCortarDiarias({ residual, diarias:dados.diarias, diaristas:dados.diaristas });
+     diária lançada por cima do teto — gente que já foi alocada e já está
+     faturada. Mexer nela é DECISÃO DE QUEM OPERA, não do app: o Labor se
+     ajusta sozinho porque é projeção, mas a diária já aconteceu.
+
+     Então o corte é sempre CALCULADO e só é APLICADO se o usuário
+     escolher reduzir. Sem escolha, o padrão é manter: o excesso residual
+     sai declarado em REVISAR, com nome e dia, e o arquivo exportado sai
+     com ele. */
+  const corteDisponivel = simCortarDiarias({ residual,
+    diarias:dados.diarias, diaristas:dados.diaristas });
+  const reduzir = opc.cortarDiarias === true;
+  const corte = reduzir ? corteDisponivel : {
+    cortes: [],
+    dias: Object.fromEntries(Object.entries(corteDisponivel.dias)
+      .map(([d,c]) => [d, { ...c, cortado:0, restante:c.excesso }])),
+    totais: { excesso:corteDisponivel.totais.excesso, cortado:0,
+              restante:corteDisponivel.totais.excesso, id:0, meli:0, sem:0 }
+  };
   const revisar = {};
   for(const [d,c] of Object.entries(corte.dias)) if(c.restante > 0) revisar[+d] = c.restante;
 
@@ -769,9 +784,11 @@ function simPlanoEqualizacao(dados){
   }
 
   return {
-    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta, inclusoes, corte,
+    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta, inclusoes,
+    corte, corteDisponivel, decisaoDiarias: reduzir ? "reduzir" : "manter",
     opcoes:{ permitirAdiarInicio: opc.permitirAdiarInicio !== false,
-             pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null },
+             pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null,
+             cortarDiarias: reduzir },
     totais:{
       pessoas: pessoas.length,
       diarias: Math.round(listaDias.reduce((s,d) => s + (diariasDoDia[d]||0), 0)*100)/100,

@@ -20,7 +20,9 @@ const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,""
   .toUpperCase().replace(/\s+/g," ").trim();
 
 const S = { fatura:null, sop:null, diar:null, sim:null,
-            nomeF:"", nomeS:"", nomeD:"", fonte:"planilha" };
+            nomeF:"", nomeS:"", nomeD:"", fonte:"planilha",
+            /* null = ninguém decidiu ainda; "manter" | "reduzir" */
+            decisaoDiarias:null };
 
 /* De onde vem o S&OP: da planilha operacional, dia a dia por operação,
    ou de um valor fixo que vale para todos os dias do período. O fixo
@@ -368,6 +370,7 @@ function carregar(qual, file, drop){
                   S[qual] = null; return pronto(); }
       if(qual === "fatura"){
         S.fatura = r; S.nomeF = file.name;
+        S.decisaoDiarias = null;   // fatura nova, decisão nova
         /* O arquivo cru fica guardado: a exportação devolve a FATURA
            INTEIRA com duas abas trocadas, e as outras onze só continuam
            lá se vierem do original. */
@@ -738,7 +741,23 @@ function opcoesEq(){
   const c = $("sm-eqAdiar"), p = $("sm-eqPausa");
   let pausaDesde = null;
   if(p && p.value){ const [y,m,d] = p.value.split("-").map(Number); pausaDesde = ymd(y,m,d); }
-  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde };
+  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde,
+           cortarDiarias: S.decisaoDiarias === "reduzir" };
+}
+
+/* A DECISÃO SOBRE A DIÁRIA JÁ ALOCADA
+
+   O Labor se ajusta sozinho porque é projeção. A diária não: ela já foi
+   alocada e já está faturada, e reduzir a quantidade de um dia é decisão
+   de quem opera. Por isso o app calcula quanto DARIA para cortar, mostra,
+   e não corta até alguém escolher — e a exportação fica bloqueada
+   enquanto a escolha não for feita, para o arquivo nunca sair de um
+   estado que ninguém decidiu.
+
+   `S.decisaoDiarias` é null (não decidido), "manter" ou "reduzir". */
+function decidirDiarias(escolha){
+  S.decisaoDiarias = escolha;
+  desenharEqualizacao();
 }
 
 const faixaTxt = f => f.de === f.ate ? fmtShort(f.de) : fmtShort(f.de)+"–"+fmtShort(f.ate);
@@ -864,8 +883,29 @@ function desenharEqualizacao(){
           + 'como fixo seria cobrar outra coisa.</p></div></div>').join("")
       + '</div>' : "";
 
-  /* O corte de diária é a quinta ação, e vem depois das quatro do motor
-     justamente porque só existe quando elas não deram conta. */
+  /* A quinta ação só existe quando as quatro do motor não deram conta —
+     e, diferente delas, não é aplicada sozinha: depende da decisão. */
+  const podeCortar = plano.corteDisponivel ? plano.corteDisponivel.totais.cortado : 0;
+  const decisao = (podeCortar > 0) ? (() => {
+    const d = S.decisaoDiarias;
+    const dias = Object.keys(plano.corteDisponivel.dias).length;
+    const bt = (chave,rot,desc) =>
+      '<button class="sm-eqdec'+(d === chave ? " ativo" : "")+'" data-dec="'+chave+'">'
+      + '<b>'+rot+'</b><i>'+desc+'</i></button>';
+    return '<div class="sm-eqdecisao'+(d ? " decidido" : "")+'">'
+      + '<div class="tit">'+(d ? "Decisão tomada" : "Falta uma decisão sua")+' — '
+      + '<b>'+n2(plano.corteDisponivel.totais.excesso)+' HC-dia</b> acima do QF em '+dias+' dia(s), '
+      + 'e o quadro fixo já está no teto</div>'
+      + '<p>O Labor foi ajustado até onde dava: cortar mais gente fixa criaria falta em outro dia. '
+      + 'O que passa do QF nesses dias é <b>diária já alocada e faturada</b>, e reduzir isso é '
+      + 'decisão de quem opera — o app não faz sozinho.</p>'
+      + '<div class="sm-eqdecs">'
+      + bt("manter","Manter diaristas", "nada mais a ajustar no Labor; o excesso sai declarado em REVISAR")
+      + bt("reduzir","Reduzir diaristas", "retira só o necessário para chegar ao QF — "
+          + n2(podeCortar)+" pessoa-dia, a interna primeiro")
+      + '</div></div>';
+  })() : "";
+
   const cortes = (plano.corte && plano.corte.cortes.length) ? (() => {
     const t = plano.corte.totais;
     const porDia = new Map();
@@ -875,9 +915,8 @@ function desenharEqualizacao(){
     }
     return '<div class="sm-eqgrupo"><header><span class="sm-eqchip cortar">Retirar diária</span>'
       + '<span class="n">'+n2(t.cortado)+' pessoa-dia</span></header>'
-      + '<div class="det aberto"><p>Nestes dias o <b>quadro fixo já está no teto</b> e o que passa '
-      + 'do QF é diária lançada por cima. Cortar mais gente fixa criaria falta em outro dia, então '
-      + 'quem sai é a diária excedente — <b>a interna primeiro, a do cliente por último</b> '
+      + '<div class="det aberto"><p>Você escolheu <b>reduzir</b>. Sai só o necessário para chegar ao '
+      + 'QF — <b>a interna primeiro, a do cliente por último</b> '
       + '('+t.id+' interna(s) · '+t.meli+' do cliente'
       + (t.sem ? ' · '+t.sem+' sem solicitante no SIGO' : "")+'), '
       + 'e nunca mais do que o excesso do dia.</p></div>'
@@ -914,9 +953,21 @@ function desenharEqualizacao(){
     + '<div class="sm-eqselo">Este plano equaliza <b>matematicamente</b> o Labor ao QF. '
     + 'Confirme se corresponde à movimentação operacional real antes de aplicar — '
     + 'nada é alterado na fatura por aqui.</div>'
-    + grupos + cortes + grupoInc + revisar + falta
-    + '<div class="vt-acoes-fim"><button class="vt-btn" id="sm-btnExportEq">'
-    + 'Exportar fatura equalizada (.xlsx)</button></div>';
+    + grupos + decisao + cortes + grupoInc + revisar + falta
+    + '<div class="vt-acoes-fim">'
+    + '<button class="vt-btn" id="sm-btnExportEq"'+(podeCortar > 0 && !S.decisaoDiarias ? " disabled" : "")+'>'
+    + 'Exportar fatura equalizada (.xlsx)</button>'
+    + (podeCortar > 0 && !S.decisaoDiarias
+        ? '<span class="sm-msg">Escolha acima o que fazer com as diárias acima do QF.</span>'
+        : podeCortar > 0
+          ? '<span class="sm-msg">O arquivo vai sair '
+            + (S.decisaoDiarias === "reduzir"
+                ? 'com '+n2(plano.corte.totais.cortado)+' diária(s) a menos.'
+                : 'com o excesso mantido e declarado em REVISAR.')+'</span>'
+          : "")
+    + '</div>';
+  [...$("sm-eq").querySelectorAll(".sm-eqdec")].forEach(b =>
+    b.onclick = () => decidirDiarias(b.dataset.dec));
   const btn = $("sm-btnExportEq");
   if(btn) btn.onclick = exportarEqualizado;
 }
@@ -1207,9 +1258,14 @@ async function exportarEqualizado(){
   if(!incLinhas.length) incLinhas.push(["(ninguém a incluir)"]);
 
   const revLinhas = [];
+  const diariasDe = {};
+  for(const d of plano.dias) diariasDe[d.data] = d.diarias || 0;
   for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
-    revLinhas.push(["Excesso sem solução", dt(+d), q,
-      "Nem as quatro ações sobre o quadro fixo nem a retirada de diária resolveram este dia."]);
+    revLinhas.push(["Excesso mantido", dt(+d), q,
+      plano.decisaoDiarias === "manter" && diariasDe[+d] >= q
+        ? "O quadro fixo já está no teto e o que passa do QF são as "+diariasDe[+d]
+          + " diária(s) já alocadas neste dia. Mantidas por decisão do usuário."
+        : "Nem as quatro ações sobre o quadro fixo nem a redução de diária resolveram este dia."]);
   if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
     { if(c.descoberto > 0) revLinhas.push(["Falta descoberta", dt(+d), c.descoberto,
       "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
@@ -1228,6 +1284,9 @@ async function exportarEqualizado(){
     ["Dias que fecham no QF", fechados+" de "+plano.dias.length],
     ["Permitir adiar início", plano.opcoes.permitirAdiarInicio ? "sim" : "não"],
     ["Pausar a partir de", plano.opcoes.pausaDesde ? fmtYmd(plano.opcoes.pausaDesde) : "não"],
+    ["Diárias acima do QF", plano.decisaoDiarias === "reduzir"
+      ? "REDUZIR — decisão do usuário; retirado só o necessário para chegar ao QF"
+      : "MANTER — decisão do usuário; o excesso residual sai declarado em REVISAR"],
     ["", ""],
     ["Linhas do LABOR mantidas", mantidas],
     ["Linhas do LABOR ajustadas", ajustadas],
