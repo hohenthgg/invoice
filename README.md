@@ -6,7 +6,7 @@ perguntas diferentes sobre ela, uma em cada aba.
 Todo o processamento acontece no navegador. Nenhum dado sai da máquina: não há
 servidor, banco nem envio de arquivos.
 
-## As cinco abas
+## As seis abas
 
 | Aba | Pergunta | Entrega |
 |---|---|---|
@@ -14,6 +14,7 @@ servidor, banco nem envio de arquivos.
 | **Fusão de Linhas** | O arquivo bate com o alvo do cliente? | Labor equalizado dia a dia contra o retorno |
 | **Extração · Diarista** | Quem foram os diaristas do período? | Uma planilha por operação, no layout de origem |
 | **Calcular ABS** | O absenteísmo ficou dentro do range? | Absenteísmo antes e pós diaristas, com o Excel gerencial |
+| **Validação Template** | A fatura tem inconsistência? | Apontamentos explicados, com sugestão de correção |
 | **Guia** | — | Resumo conceitual do que cada aba faz |
 
 A aba é escolhida pelo topo da página e também pela URL: `index.html#fusao` abre
@@ -208,6 +209,53 @@ sem turno vira a seção `TOTAL`. Quando as duas fontes trazem o mesmo dia, o
 arquivo avulso prevalece — carregá-lo é um ato explícito — e o seletor diz de onde
 o número veio.
 
+### Validação Template
+
+Recebe uma fatura no template padrão e a audita **como um auditor faria**: cruza GROOT ID, nome,
+cargo, vínculo, datas e valores entre as abas `LABOR` e `DIARISTAS` e separa o que é erro do que é
+movimentação legítima de contrato ou ajuste financeiro. `RESUMO` e `HORA EXTRA` entram como apoio.
+
+O ponto da aba não são as regras isoladas — é a **combinação de evidências**. Duas linhas com o
+mesmo GROOT ID têm exatamente os mesmos campos preenchidos e podem ser coisas opostas:
+
+```
+GROOT 2110045  MARIANA COSTA DO AMARAL SANTOS  Temporário  30/03→10/08
+GROOT 2110045  MARIANA COSTA DO AMARAL             Efetivo     11/08→aberto   → efetivação
+
+GROOT 2110046  BRUNO TEIXEIRA LOPES   Efetivo     Líder      23/03→aberto
+GROOT 2110046  SERGIO ALMEIDA CUNHA       Temporário  Auxiliar   03/06→04/08   → duas pessoas
+```
+
+No primeiro caso um nome é o outro com um sobrenome a mais, os períodos se **encostam** sem
+sobrepor e o vínculo evolui de Temporário para Efetivo: o app classifica como **Informativo** e
+sugere consolidar numa linha só, apagando a DATA FIM. No segundo os nomes não têm relação, os
+cargos diferem e os períodos **se sobrepõem** com as duas linhas positivas: **Crítico**.
+
+O sinal do valor muda a conclusão. A mesma sobreposição LABOR × DIARISTA é dupla cobrança quando o
+LABOR é positivo e cai para **Revisar** quando é negativo — negativo costuma ser estorno,
+desligamento retroativo ou a própria devolução do fixo para pagar os dias como diária. O app não
+decide que um valor negativo está errado.
+
+O que a aba procura: GROOT compartilhado por pessoas diferentes · transição Temporário → Efetivo ·
+variação cadastral de nome · períodos sobrepostos · LABOR × DIARISTA · GROOT ausente (com destaque
+para auxiliar e operador, os cargos conciliados pessoa a pessoa) · GROOT fora do padrão
+**aprendido da própria planilha** · homônimos · diária duplicada no mesmo dia · `VALOR FINAL` ≠
+quantidade × unitário · datas invertidas · data fora do período · campos obrigatórios vazios ·
+grafia inconsistente do regime · tarifa destoante da mediana do mesmo tipo · linhas idênticas ·
+hora extra de quem não está no LABOR.
+
+Cada achado sai com quatro coisas: a **severidade** (Crítico, Revisar, Cadastro, Informativo), o
+**raciocínio em texto** dizendo quais evidências levaram àquela conclusão, uma **sugestão de
+correção** e os **registros envolvidos lado a lado**. As opções de decisão (manter, consolidar,
+excluir, marcar como ajuste, ignorar) ficam registradas e saem no relatório.
+
+**Nenhuma linha da fatura é alterada.** A aba aponta, explica e sugere; a correção é feita por
+você na planilha.
+
+```
+Soltar a fatura  →  apontamentos por severidade  →  decidir caso a caso  →  Baixar relatório (.xlsx)
+```
+
 ## A regra em uma frase
 
 O faturamento congela um retrato do quadro no dia 15 e **projeta** a cobrança de
@@ -251,8 +299,8 @@ O arquivo `.nojekyll` já está no repositório para o Pages servir tudo sem pro
 ## Estrutura
 
 ```
-index.html            as cinco abas e a ordem de carga dos scripts
-css/styles.css        estilos das cinco abas
+index.html            as seis abas e a ordem de carga dos scripts
+css/styles.css        estilos das seis abas
 js/identity.js        normalização de GROOT e a chave pessoa-dia, para o app inteiro
 js/config.js          nomes de abas, colunas aceitas, dia de corte
 js/dates.js           datas como inteiro AAAAMMDD, imune a fuso horário
@@ -271,6 +319,8 @@ js/fusao.js           aba Fusão de Linhas, inteira (IIFE)
 js/extracao.js        aba Extração · Diarista, inteira (IIFE)
 js/extraction-dedup.js  deduplicação pessoa-dia, global e testável
 js/abs.js             aba Calcular ABS, inteira (IIFE)
+js/validacao.js       motor de auditoria da fatura — puro, sem DOM
+js/validacao-ui.js    leitura do .xlsx e tela da Validação Template (IIFE)
 js/tabs.js            navegação entre as abas principais
 tests/                testes do motor e da conciliação, sem dependências
 docs/REGRAS.md        regras de negócio detalhadas
@@ -335,6 +385,13 @@ sobrando no dia, o interno é sempre consumido até o teto, e o total abatido
 continua sendo
 `min(pool inteiro, déficit)`. O defeito que ele pega é invisível no total — só
 aparece na repartição entre as duas fontes.
+
+`tests/validacao.test.js` cobre o julgamento da Validação Template — a parte que decide se duas
+linhas do mesmo GROOT ID são uma efetivação ou duas pessoas. Reproduz casos de uma fatura real e
+prova os dois sentidos do erro: que uma efetivação normal não vira Crítico, e que pessoas
+diferentes com períodos sobrepostos e ambas as linhas positivas viram. Cobre também a queda de
+severidade quando há estorno em jogo, o aprendizado do padrão de GROOT a partir da própria
+planilha, e que uma fatura limpa não gera achado nenhum.
 
 `tests/reconciliation.test.js` cobre a conciliação entre duas faturas: as
 classificações de status, a reconstrução da cobrança original (o corte projeta
