@@ -400,12 +400,29 @@ o Excel abre o arquivo pedindo para "recuperar":
 Acontece no round-trip puro, sem edição nenhuma, então não há o que ajustar na escrita. Perde-se a
 lista suspensa de duas colunas e o realce condicional de duas células; ganha-se um arquivo que abre.
 
-**Quinta ação: retirar diária acima do QF.** As quatro fases do motor mexem no quadro fixo. Quando
-elas terminam e ainda sobra excesso, esse excesso não é fixo: é diária lançada por cima de um quadro
-já no teto, e cortar mais gente fixa criaria falta em outro dia. Então sai a diária excedente — nunca
-mais que o excesso do dia, nunca num dia sem excesso. A ordem é a do abate "ambos" **lida ao
-contrário**: lá se gasta primeiro o diarista interno e o do cliente por último; aqui, para devolver
-excesso, sai primeiro o interno e o do cliente fica por último, pelo mesmo motivo dos dois lados.
+#### A quinta ação, e a decisão que ela exige
+
+As quatro fases do motor mexem no **quadro fixo**. Quando elas terminam e ainda sobra excesso, esse
+excesso não é fixo: é diária lançada por cima de um quadro já no teto, e cortar mais gente fixa
+criaria falta em outro dia.
+
+Só que a diária **já foi alocada e já está faturada**. O Labor se ajusta sozinho porque é projeção;
+a diária não. Por isso o app **calcula** quanto daria para cortar, mostra, e **não corta** — a
+exportação fica bloqueada até alguém escolher, para o arquivo nunca sair de um estado que ninguém
+decidiu:
+
+| | o que acontece |
+|---|---|
+| **Manter diaristas** | nada mais a ajustar no Labor. O excesso residual sai declarado em `REVISAR`, dia a dia, com quantas diárias havia naquele dia |
+| **Reduzir diaristas** | retira **só o necessário** para chegar ao QF — nunca mais que o excesso do dia, nunca num dia sem excesso |
+
+A decisão não mexe no que foi feito no Labor: ele é ajustado antes, e igual nos dois caminhos. O que
+muda são os indicadores finais, o conteúdo da aba `DIARISTAS` e o que sai em `REVISAR` — e o
+`METADADOS` registra qual foi a escolha.
+
+Escolhendo reduzir, a ordem de quem sai é a do abate "ambos" **lida ao contrário**: lá se gasta
+primeiro o diarista interno e o do cliente por último; aqui, para devolver excesso, sai primeiro o
+interno e o do cliente fica por último, pelo mesmo motivo dos dois lados.
 
 O quadro do dia é **o fixo do `LABOR` mais as diárias que a fatura já lança** na aba `DIARISTAS`, e é
 esse total que vai ao confronto com o QF. A diária entra no motor como pessoa *imutável*: conta na
