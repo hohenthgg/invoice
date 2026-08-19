@@ -561,6 +561,72 @@ function simInclusoes(dados){
     pessoas: pessoas.length, id: conta("id"), meli: conta("meli"), sem: conta("") } };
 }
 
+/* ================================================================
+   FASE 5 — RETIRAR DIÁRIA ACIMA DO QF
+
+   As quatro fases do motor compartilhado mexem no quadro FIXO, que é
+   linha de Labor. Quando elas terminam e ainda sobra excesso, esse
+   excesso não é mais fixo: é diária que a fatura lançou por cima de um
+   quadro que já está no teto. Cortar mais gente fixa para compensar
+   criaria falta em outro dia — e é justamente o que o motor se recusa
+   a fazer.
+
+   Então o que sai é a diária excedente, e só ela: nunca mais do que o
+   excesso do dia, nunca num dia sem excesso.
+
+   A ORDEM DE QUEM SAI é a do abate "ambos" da aba Calcular ABS, lida
+   ao contrário. Lá, para COBRIR falta, gasta-se primeiro o diarista
+   interno e o do cliente por último. Aqui, para DEVOLVER excesso, sai
+   primeiro o interno e o do cliente fica por último — pelo mesmo
+   motivo dos dois lados: diária pedida pelo cliente é custo do cliente,
+   e é a última de que se abre mão. Sem o SIGO carregado não há como
+   saber quem pediu, e aí o desempate é só o GROOT, para a escolha ser
+   estável entre execuções.
+   ================================================================ */
+const SIM_PRIO_CORTE = { id:0, "":1, meli:2 };
+
+function simCortarDiarias(dados){
+  const residual = dados.residual || {};
+  const diarias = dados.diarias || [];
+  const porDiaSigo = simDiaristasPorDia(dados.diaristas);
+
+  /* Uma entrada por pessoa-dia lançado na fatura. */
+  const porDia = new Map();
+  for(const d of diarias){
+    const g = simGrootNum(d.groot);
+    if(!g || !isValidYmd(d.data)) continue;
+    if(!porDia.has(d.data)) porDia.set(d.data, []);
+    porDia.get(d.data).push({ groot:g, nome:d.nome || "", data:d.data,
+      quantidade:(typeof d.quantidade === "number" && isFinite(d.quantidade)) ? d.quantidade : 1,
+      solic: (porDiaSigo.get(d.data) || new Map()).get(g) || "" });
+  }
+
+  const cortes = [];
+  const dias = {};
+  let excesso = 0, cortado = 0, restante = 0;
+  for(const chave of Object.keys(residual).map(Number).sort((a,b) => a-b)){
+    const alvo = residual[chave];
+    excesso += alvo;
+    const doDia = (porDia.get(chave) || []).slice().sort((a,b) =>
+      (SIM_PRIO_CORTE[a.solic] ?? 1) - (SIM_PRIO_CORTE[b.solic] ?? 1)
+      || b.groot.localeCompare(a.groot));
+    let falta = alvo, tirados = 0;
+    for(const c of doDia){
+      if(falta < c.quantidade) break;          // não passar do excesso do dia
+      cortes.push(c); falta -= c.quantidade; tirados += c.quantidade;
+    }
+    cortado += tirados; restante += falta;
+    dias[chave] = { excesso:alvo, cortado:tirados, restante:falta,
+                    disponiveis:doDia.length };
+  }
+  const conta = t => cortes.filter(c => c.solic === t).length;
+  return { cortes, dias, totais:{
+    excesso: Math.round(excesso*100)/100,
+    cortado: Math.round(cortado*100)/100,
+    restante: Math.round(restante*100)/100,
+    id: conta("id"), meli: conta("meli"), sem: conta("") } };
+}
+
 function simPlanoEqualizacao(dados){
   const labor = dados.labor || [];
   const alvo = Number(dados.alvo);
@@ -677,8 +743,15 @@ function simPlanoEqualizacao(dados){
 
   const chavesYmd = o => Object.fromEntries(Object.entries(o || {})
     .map(([n,q]) => [eqParaYmd(+n), q]));
-  const revisar = chavesYmd(plano.incluir.__revisar?.[SIM_GRUPO]);
-  const falta   = chavesYmd(plano.incluir[SIM_GRUPO]?.dias);
+  const residual = chavesYmd(plano.incluir.__revisar?.[SIM_GRUPO]);
+  const falta    = chavesYmd(plano.incluir[SIM_GRUPO]?.dias);
+
+  /* O que as quatro fases não resolveram não é mais quadro fixo: é
+     diária lançada por cima do teto. Ela sai aqui, e o que ainda
+     sobrar depois disso é que vai para revisão manual. */
+  const corte = simCortarDiarias({ residual, diarias:dados.diarias, diaristas:dados.diaristas });
+  const revisar = {};
+  for(const [d,c] of Object.entries(corte.dias)) if(c.restante > 0) revisar[+d] = c.restante;
 
   /* A falta é o outro lado do mesmo plano: com a base do SIGO carregada,
      ela deixa de ser "faltam 18" e vira 18 pessoas com nome. */
@@ -686,8 +759,17 @@ function simPlanoEqualizacao(dados){
     ? simInclusoes({ falta, diaristas:dados.diaristas, labor, diarias:dados.diarias }) : null;
 
   const conta = t => acoes.filter(a => a.tipo === t).length;
+  /* A curva depois do plano INTEIRO — fixo ajustado e diária cortada. */
+  const cortadoPorDia = {};
+  for(const c of corte.cortes) cortadoPorDia[c.data] = (cortadoPorDia[c.data] || 0) + c.quantidade;
+  for(const l of linhasDias){
+    l.diariasCortadas = cortadoPorDia[l.data] || 0;
+    l.quadroPos = Math.round((l.prefPos + l.diarias - l.diariasCortadas)*1e6)/1e6;
+    l.difPos = Math.round((l.quadroPos - alvo)*1e6)/1e6;
+  }
+
   return {
-    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta, inclusoes,
+    alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta, inclusoes, corte,
     opcoes:{ permitirAdiarInicio: opc.permitirAdiarInicio !== false,
              pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null },
     totais:{
@@ -738,6 +820,6 @@ function simLinhasRetorno(sim){
 
 if(typeof module !== "undefined" && module.exports){
   module.exports = { simularRetorno, simClassificarLinhas, simLinhasRetorno,
-                     simPlanoEqualizacao, simInclusoes, simJaCobrado, SIM_GRUPO,
+                     simPlanoEqualizacao, simInclusoes, simJaCobrado, simCortarDiarias, SIM_GRUPO,
                      SIM_STATUS, SIM_STATUS_LABEL, SIM_AVISO_METADADOS };
 }

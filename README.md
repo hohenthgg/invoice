@@ -378,10 +378,23 @@ se a movimentação aconteceu de verdade é a operação — e o aviso está na 
 
 #### A fatura equalizada, pronta
 
-O botão no fim da seção gera o `.xlsx` **no layout da fatura**: as duas abas que o cliente lê,
-`Labor` e `Diaristas`, com as mesmas colunas, larguras, cabeçalho amarelo e bordas do modelo —
-escrito com ExcelJS, porque o SheetJS da leitura não carrega estilo. No `Labor`, as retiradas somem,
-os inícios e fins ajustados já vêm mudados, e uma pausa vira duas linhas da mesma pessoa.
+O botão no fim da seção devolve **a fatura inteira**: as mesmas abas que entraram, com estilos e
+fórmulas, e o `LABOR` e o `DIARISTAS` reescritos com o resultado do plano. Exportar duas abas soltas
+obrigava a colar de volta à mão, e colar à mão é onde a correção volta a virar erro. As quatro abas
+de documentação — `EQUALIZACAO`, `INCLUSOES`, `REVISAR`, `METADADOS` — entram no fim.
+
+A reescrita é **no lugar**, célula a célula: `spliceRows` do ExcelJS não remove nada numa aba cujas
+linhas carregam fórmula — sai em silêncio, sem efeito — e o arquivo saía com o Labor **duplicado**.
+Escrever por cima ainda tem a vantagem de cada célula guardar o próprio formato. Data vira **serial**,
+nunca objeto `Date`, porque o ExcelJS grava `Date` pelo fuso local. O que muda além das duas abas são
+só **resultados de fórmula em cache**, que o Excel recalcula ao abrir.
+
+**Quinta ação: retirar diária acima do QF.** As quatro fases do motor mexem no quadro fixo. Quando
+elas terminam e ainda sobra excesso, esse excesso não é fixo: é diária lançada por cima de um quadro
+já no teto, e cortar mais gente fixa criaria falta em outro dia. Então sai a diária excedente — nunca
+mais que o excesso do dia, nunca num dia sem excesso. A ordem é a do abate "ambos" **lida ao
+contrário**: lá se gasta primeiro o diarista interno e o do cliente por último; aqui, para devolver
+excesso, sai primeiro o interno e o do cliente fica por último, pelo mesmo motivo dos dois lados.
 
 O quadro do dia é **o fixo do `LABOR` mais as diárias que a fatura já lança** na aba `DIARISTAS`, e é
 esse total que vai ao confronto com o QF. A diária entra no motor como pessoa *imutável*: conta na
