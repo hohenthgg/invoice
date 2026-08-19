@@ -17,7 +17,7 @@ const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,""
   .toUpperCase().replace(/\s+/g," ").trim();
 
 /* Estado da aba. `marcas` guarda a decisão humana por achado. */
-const V = { auditoria:null, filtro:"todos", marcas:{}, arquivo:"" };
+const V = { auditoria:null, filtro:"todos", marcas:{}, arquivo:"", abertos:new Set() };
 
 /* ================================================================
    LEITURA DO ARQUIVO
@@ -187,6 +187,7 @@ function analisar(file){
       V.arquivo = file.name;
       V.marcas = {};
       V.filtro = "todos";
+      V.abertos = new Set();
       V.auditoria = auditarFatura({ labor:L.linhas, diaristas:D.linhas, horaExtra:HE.linhas, periodo });
       V.auditoria.periodo.origem = periodo.origem;
       render();
@@ -210,6 +211,7 @@ const fmtD = d => d instanceof Date
   : "—";
 
 const SEV_LABEL = { critico:"Crítico", revisar:"Revisar", cadastro:"Cadastro", info:"Informativo" };
+const VAL_SEV_ORDEM = ["critico","revisar","cadastro","info"];
 /* O lançamento aparece pelo SINAL — positivo é cobrança, negativo é
    estorno. A grandeza não é escrita em lugar nenhum do app. */
 const LANC_LABEL = { positivo:"positivo", negativo:"negativo", neutro:"" };
@@ -255,11 +257,29 @@ function render(){
   $("vt-progresso").textContent = total + " apontamento(s) · " + decididos
     + " com decisão registrada · " + (total-decididos) + " pendente(s)";
 
-  const lista = a.achados.filter(x => V.filtro === "todos" || x.severidade === V.filtro);
-  $("vt-lista").innerHTML = lista.map(cardAchado).join("")
-    || '<div class="vt-vazio"><b>Nada nesta categoria</b></div>';
+  /* A lista é por GRUPO, não corrida: uma fatura real gera dezenas de
+     achados, e trinta cartões em coluna escondem quantos assuntos
+     distintos existem ali. Cada grupo é um bloco que se abre. */
+  const porId = new Map(a.achados.map(x => [x.id, x]));
+  const visivel = x => V.filtro === "todos" || x.severidade === V.filtro;
 
-  [...$("vt-lista").querySelectorAll(".vt-achado header")].forEach(h =>
+  const blocos = a.grupos.map(g => {
+    const itens = g.ids.map(id => porId.get(id)).filter(visivel);
+    if(!itens.length) return "";
+    return cardGrupo(g, itens);
+  }).filter(Boolean);
+
+  $("vt-lista").innerHTML = blocos.join("")
+    || '<div class="vt-vazio"><b>Nada nesta severidade</b>'
+       + '<p>Nenhum apontamento se encaixa no filtro escolhido.</p></div>';
+
+  [...$("vt-lista").querySelectorAll(".vt-grupo > header")].forEach(h =>
+    h.onclick = () => {
+      const g = h.parentElement, chave = g.dataset.grupo;
+      if(V.abertos.has(chave)) V.abertos.delete(chave); else V.abertos.add(chave);
+      g.classList.toggle("aberto", V.abertos.has(chave));
+    });
+  [...$("vt-lista").querySelectorAll(".vt-achado > header")].forEach(h =>
     h.onclick = () => h.parentElement.classList.toggle("aberto"));
   [...$("vt-lista").querySelectorAll(".vt-acao")].forEach(b =>
     b.onclick = ev => {
@@ -268,6 +288,29 @@ function render(){
       V.marcas[id] = V.marcas[id] === marca ? null : marca;
       render();
     });
+}
+
+/* Um bloco por categoria. O cabeçalho carrega a severidade do PIOR caso
+   que ele guarda, o total, e quantos de cada severidade — para o leitor
+   decidir se abre sem precisar abrir. */
+function cardGrupo(g, itens){
+  const aberto = V.abertos.has(g.chave);
+  const decididos = itens.filter(x => V.marcas[x.id]).length;
+  const selos = VAL_SEV_ORDEM.filter(sv => g.porSev[sv] > 0).map(sv =>
+    '<span class="vt-selo sev-'+sv+'">'+g.porSev[sv]+' '+SEV_LABEL[sv]+'</span>').join("");
+
+  return '<section class="vt-grupo sev-'+g.severidade+(aberto?" aberto":"")
+    + '" data-grupo="'+esc(g.chave)+'">'
+    + '<header>'
+    +   '<span class="vt-gn">'+itens.length+'</span>'
+    +   '<div class="vt-gtit"><b>'+esc(g.titulo)+'</b><small>'+esc(g.resumo)+'</small></div>'
+    +   '<div class="vt-selos">'+selos
+    +     (decididos ? '<span class="vt-selo decidido">'+decididos+' decidido(s)</span>' : "")
+    +   '</div>'
+    +   '<span class="vt-seta">▾</span>'
+    + '</header>'
+    + '<div class="vt-gcorpo">'+itens.map(cardAchado).join("")+'</div>'
+    + '</section>';
 }
 
 function cardAchado(x){
@@ -323,17 +366,19 @@ function tabelaRegistros(regs){
 function exportar(){
   const a = V.auditoria;
   if(!a) return;
-  const aoa = [["Severidade","Regra","Título","GROOT","Nome","Cargo","Aba","Datas","Lançamento",
-                "Por que foi sinalizado","Sugestão","Decisão"]];
+  const titulos = {};
+  for(const g of a.grupos) titulos[g.chave] = g.titulo;
+  const aoa = [["Categoria","Severidade","Regra","Título","GROOT","Nome","Cargo","Aba","Datas",
+                "Lançamento","Por que foi sinalizado","Sugestão","Decisão"]];
   for(const x of a.achados){
-    aoa.push([ SEV_LABEL[x.severidade], x.regra, x.titulo, x.groot, x.nome, x.cargo, x.aba, x.datas,
-      x.lancamento || "", x.raciocinio, x.sugestao,
+    aoa.push([ titulos[x.categoria] || "", SEV_LABEL[x.severidade], x.regra, x.titulo, x.groot,
+      x.nome, x.cargo, x.aba, x.datas, x.lancamento || "", x.raciocinio, x.sugestao,
       V.marcas[x.id] || "Pendente" ]);
   }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws["!cols"] = [{wch:12},{wch:26},{wch:40},{wch:11},{wch:34},{wch:24},{wch:16},{wch:30},
-                 {wch:20},{wch:120},{wch:80},{wch:12}];
+  ws["!cols"] = [{wch:38},{wch:12},{wch:34},{wch:40},{wch:11},{wch:34},{wch:24},{wch:16},
+                 {wch:30},{wch:20},{wch:120},{wch:80},{wch:12}];
   XLSX.utils.book_append_sheet(wb, ws, "Achados");
 
   const resumo = [["Arquivo", V.arquivo],
@@ -342,7 +387,9 @@ function exportar(){
     ["Linhas LABOR", a.totais.labor],
     ["Linhas DIARISTAS", a.totais.diaristas],
     [], ["Crítico", a.resumo.critico], ["Revisar", a.resumo.revisar],
-    ["Cadastro", a.resumo.cadastro], ["Informativo", a.resumo.info]];
+    ["Cadastro", a.resumo.cadastro], ["Informativo", a.resumo.info],
+    [], ["Por categoria", ""],
+    ...a.grupos.map(g => [g.titulo, g.total])];
   const wsR = XLSX.utils.aoa_to_sheet(resumo);
   wsR["!cols"] = [{wch:22},{wch:44}];
   XLSX.utils.book_append_sheet(wb, wsR, "Resumo");

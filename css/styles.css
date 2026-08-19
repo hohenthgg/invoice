@@ -1256,3 +1256,41 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
   text-underline-offset:3px}
 #panel-validacao .sm-tabela th[data-tip]:hover{color:var(--amber)}
 #panel-validacao .sm-card[data-tip]:hover{border-color:var(--line2)}
+
+/* ---- Validação Template: achados reunidos por categoria ----
+   Uma fatura real gera dezenas de apontamentos. Em coluna corrida eles
+   viram uma parede: o leitor rola sem saber quantos assuntos distintos
+   existem ali. Cada categoria vira um bloco fechado, com o total e a
+   quebra por severidade no cabeçalho — dá para decidir se abre sem
+   precisar abrir. */
+#panel-validacao .vt-grupo{background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--sev);border-radius:var(--radius-sm);margin-bottom:10px;
+  overflow:hidden}
+#panel-validacao .vt-grupo > header{display:flex;align-items:center;gap:13px;
+  padding:13px 15px;cursor:pointer;user-select:none}
+#panel-validacao .vt-grupo > header:hover{background:var(--panel2)}
+#panel-validacao .vt-gn{flex:none;min-width:30px;height:30px;padding:0 8px;border-radius:15px;
+  background:var(--sev);color:var(--navy);font-family:var(--mono);font-size:.86rem;font-weight:800;
+  display:flex;align-items:center;justify-content:center}
+#panel-validacao .vt-gtit{flex:1;min-width:0}
+#panel-validacao .vt-gtit b{display:block;font-size:.87rem;line-height:1.35}
+#panel-validacao .vt-gtit small{display:block;font-size:.72rem;color:var(--mut);
+  margin-top:3px;line-height:1.5}
+#panel-validacao .vt-selos{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end;flex:none;
+  max-width:40%}
+#panel-validacao .vt-selo{font-size:.63rem;border-radius:99px;padding:2px 8px;white-space:nowrap;
+  border:1px solid var(--sev);color:var(--sev)}
+#panel-validacao .vt-selo.decidido{border-color:var(--ok);color:var(--ok)}
+#panel-validacao .vt-grupo > header .vt-seta{transition:transform .15s}
+#panel-validacao .vt-grupo.aberto > header .vt-seta{transform:rotate(180deg)}
+#panel-validacao .vt-gcorpo{display:none;padding:0 12px 12px;border-top:1px solid var(--line)}
+#panel-validacao .vt-grupo.aberto .vt-gcorpo{display:block}
+/* dentro do grupo o achado é mais discreto: a cor já veio do bloco */
+#panel-validacao .vt-gcorpo .vt-achado{background:var(--navy);margin-top:10px;margin-bottom:0}
+#panel-validacao .vt-gcorpo .vt-achado > header{padding:10px 12px}
+#panel-validacao .vt-gcorpo .vt-tit b{font-size:.81rem}
+
+@media (max-width:640px){
+  #panel-validacao .vt-grupo > header{flex-wrap:wrap}
+  #panel-validacao .vt-selos{max-width:100%;justify-content:flex-start}
+}
