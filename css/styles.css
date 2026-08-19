@@ -1306,14 +1306,29 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 #panel-validacao .vq-tit b{font-size:.84rem}
 #panel-validacao .vq-tit small{display:block;font-size:.71rem;color:var(--mut);
   margin-top:3px;line-height:1.5}
-#panel-validacao .vq-nums{display:flex;flex-wrap:wrap;gap:22px;margin:11px 0 10px}
+#panel-validacao .vq-nums{display:flex;flex-wrap:wrap;gap:22px;margin:11px 0 0}
 #panel-validacao .vq-nums span{display:block;font-size:.62rem;letter-spacing:.5px;
   text-transform:uppercase;color:var(--mut2)}
 #panel-validacao .vq-nums b{font-family:var(--mono);font-size:1.05rem;color:var(--ink)}
-#panel-validacao .vq-graf{display:flex;align-items:flex-end;gap:2px;height:52px;
-  border-bottom:1px solid var(--line)}
-#panel-validacao .vq-b{flex:1;background:var(--s-labor);border-radius:2px 2px 0 0;
-  min-height:3px;cursor:help;transition:background .12s}
-#panel-validacao .vq-b:hover{background:var(--amber)}
-#panel-validacao .vq-eixo{display:flex;justify-content:space-between;font-family:var(--mono);
-  font-size:.66rem;color:var(--mut2);margin-top:5px}
+
+/* fonte do S&OP na simulação: planilha (diária) ou valor fixo do mês */
+#panel-validacao .sm-fonte{flex:1;border:1.5px dashed var(--line2);border-radius:var(--radius-sm);
+  padding:12px 14px;background:var(--navy)}
+#panel-validacao .sm-fonte .ttl{font-size:.68rem;font-weight:700;letter-spacing:.5px;
+  text-transform:uppercase;color:var(--mut);margin-bottom:9px}
+#panel-validacao .sm-op{display:flex;gap:8px;align-items:flex-start;cursor:pointer;
+  font-size:.76rem;margin-bottom:7px}
+#panel-validacao .sm-op input{margin-top:3px;accent-color:var(--amber);flex:none}
+#panel-validacao .sm-op b{display:block;font-weight:600}
+#panel-validacao .sm-op i{display:block;font-style:normal;font-size:.7rem;color:var(--mut2);
+  line-height:1.45}
+/* só o campo da fonte escolhida fica ativo */
+#panel-validacao .sm-fonte .sm-drop{margin:0 0 11px 22px;padding:10px 12px;border-width:1px}
+#panel-validacao .sm-fixo{margin-left:22px}
+#panel-validacao .sm-fixo label{font-size:.72rem;color:var(--mut);display:inline-flex;
+  align-items:center;gap:8px}
+#panel-validacao .sm-fixo input{width:82px;background:var(--navy2);border:1px solid var(--line2);
+  border-radius:var(--radius-sm);color:var(--ink);font-family:var(--mono);font-size:.82rem;
+  padding:6px 9px}
+#panel-validacao .vt-painel:not(.fonte-fixo) .sm-fixo{opacity:.4;pointer-events:none}
+#panel-validacao .vt-painel.fonte-fixo .sm-fonte .sm-drop{opacity:.4;pointer-events:none}

@@ -239,6 +239,37 @@ check(noDia(meio, PER.ini).pref === 1,
       "dois rateios de 0,5 somam 1 HC — o rateio entra na conta");
 
 /* ================================================================
+   S&OP DE VALOR FIXO
+
+   Além do S&OP diário da planilha, a tela aceita um valor fixo do mês —
+   o número que o contrato fecha — aplicado igual em todos os dias. Para
+   o motor isso é só um bloco único e constante: a assimetria e o resto
+   das regras não mudam, e é isso que se prova aqui.
+   ================================================================ */
+console.log("\nS&OP de valor fixo");
+
+const fixo = rodar([
+  ...Array.from({length:164},(_,i) => P({ groot:"X"+i }))
+], [bloco("S&OP fixo", 182)]);
+const dFixo = noDia(fixo, PER.ini);
+check(dFixo.qCliente === 182, "o valor fixo vale para o dia", String(dFixo.qCliente));
+check(fixo.dias.every(x => x.qCliente === 182), "…e para todos os 31 dias do período");
+check(dFixo.pref === 164 && dFixo.qPos === 164,
+      "PREF 164 contra fixo 182: o previsto é o PREF, não o S&OP",
+      dFixo.pref+" / "+dFixo.qPos);
+check(dFixo.gap === -18 && dFixo.correcao === 0,
+      "…gap de 18 abaixo, e nenhuma correção presumida", dFixo.gap+" / "+dFixo.correcao);
+check(dFixo.status === SIM_STATUS.SUB, "…classificado como possível subfaturamento");
+
+/* Acima do fixo, a correção volta a aparecer — a assimetria é a mesma. */
+const fixoAcima = rodar(Array.from({length:200},(_,i) => P({ groot:"Y"+i })),
+                        [bloco("S&OP fixo", 182)]);
+const dFA = noDia(fixoAcima, PER.ini);
+check(dFA.qPos === 182 && dFA.correcao === -18,
+      "PREF 200 contra fixo 182: previsto 182 e correção de -18",
+      dFA.qPos+" / "+dFA.correcao);
+
+/* ================================================================
    PARIDADE COM A FUSÃO DE LINHAS
 
    As duas abas reconstroem o MESMO número a partir do mesmo Labor: a

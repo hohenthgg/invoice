@@ -19,7 +19,26 @@ const $ = id => document.getElementById(id);
 const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,"")
   .toUpperCase().replace(/\s+/g," ").trim();
 
-const S = { fatura:null, sop:null, sim:null, nomeF:"", nomeS:"" };
+const S = { fatura:null, sop:null, sim:null, nomeF:"", nomeS:"", fonte:"planilha" };
+
+/* De onde vem o S&OP: da planilha operacional, dia a dia por operação,
+   ou de um valor fixo que vale para todos os dias do período. O fixo
+   dispensa a planilha — é o número que o contrato fecha para o mês. */
+function fonteSop(){
+  const m = document.querySelector('input[name="sm-fonte"]:checked');
+  return m ? m.value : "planilha";
+}
+function sopFixo(){
+  const el = $("sm-sopFixo");
+  const n = el ? Number(el.value) : NaN;
+  return isFinite(n) && n >= 0 ? n : null;
+}
+/* Um bloco único, com o mesmo valor em cada dia do período. */
+function blocoFixo(periodo, valor){
+  const dias = {};
+  for(let d = periodo.ini; d <= periodo.fim; d = addDays(d,1)) dias[d] = valor;
+  return [{ rotulo:"S&OP fixo", aba:"(informado na tela)", dias, periodo }];
+}
 
 /* ================================================================
    MODOS DA ABA
@@ -236,16 +255,33 @@ function carregar(qual, file, drop){
 }
 
 function pronto(){
-  const ok = !!(S.fatura && S.sop);
+  const fixo = fonteSop() === "fixo";
+  const painel = $("vt-painel-simulacao");
+  if(painel) painel.classList.toggle("fonte-fixo", fixo);
+
+  const ok = !!S.fatura && (fixo ? sopFixo() !== null : !!S.sop);
   $("sm-btnRun").disabled = !ok;
-  $("sm-msgRun").textContent = ok ? "Pronto para analisar."
-    : (!S.fatura && !S.sop) ? "Carregue os dois arquivos."
-    : !S.fatura ? "Falta a fatura." : "Falta a planilha operacional.";
+  $("sm-msgRun").textContent =
+      ok               ? "Pronto para analisar."
+    : !S.fatura        ? "Falta a fatura."
+    : fixo             ? "Informe o HC por dia."
+                       : "Falta a planilha operacional.";
 }
 
 function analisar(){
   const err = $("sm-err");
   err.classList.add("hidden");
+  const fixo = fonteSop() === "fixo";
+
+  /* Com S&OP fixo não há planilha para conferir: o período vem da
+     própria fatura, e o valor informado vale para todos os dias. */
+  if(fixo){
+    const per = periodoDaFatura();
+    if(!per){ return falhar(err, "Não consegui deduzir o período da fatura para aplicar o S&OP fixo."); }
+    const v = sopFixo();
+    return rodar(blocosFixoDoPeriodo(per, v), per, "fixo", v);
+  }
+
   const blocos = S.sop.blocos;
 
   /* Validações de compatibilidade ANTES de somar qualquer coisa. */
@@ -263,19 +299,39 @@ function analisar(){
     }
   }
   if(problemas.length){
-    err.innerHTML = "<b>Não dá para somar o S&amp;OP com segurança:</b><br>" + problemas.join(";<br>") + ".";
-    err.classList.remove("hidden");
-    $("sm-result").classList.add("hidden");
-    return;
+    return falhar(err, "<b>Não dá para somar o S&amp;OP com segurança:</b><br>"
+      + problemas.join(";<br>") + ".", true);
   }
+  rodar(blocos, per, "planilha", null);
+}
 
+function falhar(err, msg, html){
+  if(html) err.innerHTML = msg; else err.textContent = msg;
+  err.classList.remove("hidden");
+  $("sm-result").classList.add("hidden");
+}
+
+/* O período faturado a partir da competência da própria fatura: o ciclo
+   16 do mês anterior → 15 do mês da competência. */
+function periodoDaFatura(){
+  const c = S.fatura && S.fatura.comp;
+  if(!c) return null;
+  const ini = c.m === 1 ? ymd(c.y-1, 12, 16) : ymd(c.y, c.m-1, 16);
+  return { ini, fim: ymd(c.y, c.m, 15) };
+}
+const blocosFixoDoPeriodo = (per, valor) => blocoFixo(per, valor);
+
+function rodar(blocos, per, fonte, valorFixo){
   /* A competência é a da fatura; sem ela, deduz-se do fim do período. */
   const comp = S.fatura.comp
     ? buildCompetence(S.fatura.comp.y, S.fatura.comp.m)
     : buildCompetence(ymdParts(per.fim).y, ymdParts(per.fim).m);
 
   const sim = simularRetorno({ labor:S.fatura.linhas, blocos, periodo:per, comp });
-  if(sim.erro){ err.textContent = sim.erro; err.classList.remove("hidden"); return; }
+  if(sim.erro) return falhar($("sm-err"), sim.erro);
+  sim.fonte = fonte;
+  sim.valorFixo = valorFixo;
+  S.fonte = fonte;
   S.sim = sim;
   render();
 }
@@ -379,6 +435,15 @@ function render(){
   const sim = S.sim, t = sim.totais;
   $("sm-result").classList.remove("hidden");
 
+  const selo = $("sm-result").querySelector(".sm-selo");
+  if(selo){
+    selo.innerHTML = 'Retorno <b>previsto</b> — estimado por MIN(PREF, S&amp;OP). Não é o retorno '
+      + 'oficial do cliente. S&amp;OP '
+      + (sim.fonte === "fixo"
+          ? 'de <b>valor fixo</b>: '+n2(sim.valorFixo)+' HC em todos os dias do período.'
+          : 'da <b>planilha operacional</b>, dia a dia ('+sim.blocos.map(esc).join(" + ")+').');
+  }
+
   $("sm-avisos").innerHTML = sim.avisos.map(a =>
     '<div class="sm-aviso '+a.tipo+'">'+esc(a.texto)+'</div>').join("");
 
@@ -420,29 +485,29 @@ function desenharDesvios(dias){
 
 function desenharTabela(sim){
   const th = (rotulo, tip) => '<th data-tip="'+esc(tip)+'">'+rotulo+'</th>';
-  const cabBlocos = sim.blocos.map(b => th("S&amp;OP "+esc(b),
+  /* A coluna por operação só existe quando há mais de uma: com um bloco
+     só — o caso do S&OP fixo — ela repetiria o total logo ao lado. */
+  const detalhar = sim.blocos.length > 1;
+  const cabBlocos = detalhar ? sim.blocos.map(b => th(esc(b),
     "Linha <b>Esperado</b> da aba de <b>"+esc(b)+"</b>, na coluna deste dia. "
-    + "A coluna é resolvida para a data completa antes de entrar na soma.")).join("");
-  const temEstorno = !!sim.totais.estornos;
+    + "A coluna é resolvida para a data completa antes de entrar na soma.")).join("") : "";
   const linhas = sim.dias.map(d =>
     '<tr class="st-'+d.status+'">'
     + '<td>'+fmtYmd(d.data)+'</td>'
-    + d.blocos.map(b => '<td>'+n2(b.valor)+'</td>').join("")
+    + (detalhar ? d.blocos.map(b => '<td>'+n2(b.valor)+'</td>').join("") : "")
     + '<td class="forte">'+n2(d.qCliente)+'</td>'
     + '<td class="forte">'+n2(d.pref)+'</td>'
-    + (temEstorno ? '<td class="fraco">'+n2(d.bruto)+'</td>' : "")
     + '<td class="forte">'+n2(d.qPos)+'</td>'
     + '<td class="'+(d.gap > 0 ? "pos" : d.gap < 0 ? "neg" : "")+'">'+sinal(d.gap)+'</td>'
     + '<td class="'+(d.correcao < 0 ? "neg" : "")+'">'+sinal(d.correcao)+'</td>'
     + '<td><span class="sm-st st-'+d.status+'">'+esc(SIM_STATUS_LABEL[d.status])+'</span></td>'
     + '<td class="diag">'+esc(d.diagnostico)+'</td></tr>').join("");
   $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
-    + th("Q cliente / S&amp;OP", tipSop(sim.blocos))
-    + th("PREF enviado", tipPref())
-    + (temEstorno ? th("Headcount bruto", TIP.bruto) : "")
-    + th("Q Pós previsto", TIP.qPos)
-    + th("Gap PREF × S&amp;OP", TIP.gap)
-    + th("Correção prevista", TIP.corr)
+    + th("S&amp;OP", tipSop(sim.blocos))
+    + th("PREF", tipPref())
+    + th("Q Pós", TIP.qPos)
+    + th("Gap", TIP.gap)
+    + th("Correção", TIP.corr)
     + th("Status", TIP.status)
     + th("Diagnóstico", TIP.diag)
     + '</tr></thead><tbody>'+linhas+'</tbody></table>';
@@ -490,8 +555,11 @@ function exportar(){
     ["AVISO", SIM_AVISO_METADADOS],
     [],
     ["Fatura de origem", S.nomeF],
-    ["Planilha operacional", S.nomeS],
+    ["Planilha operacional", sim.fonte === "fixo" ? "(não usada)" : S.nomeS],
     ["Período", fmtYmd(sim.periodo.ini)+" a "+fmtYmd(sim.periodo.fim)],
+    ["Fonte do S&OP", sim.fonte === "fixo"
+      ? "valor fixo informado na tela: "+sim.valorFixo+" HC em todos os dias"
+      : "planilha operacional, dia a dia por operação"],
     ["Competência", sim.comp ? sim.comp.label : ""],
     ["Blocos de S&OP somados", sim.blocos.join(" + ")],
     [],
@@ -556,6 +624,10 @@ function formatarDatas(ws, linhas, coluna){
    ================================================================ */
 bindDrop("sm-dropF","sm-fileF",(f,d) => carregar("fatura",f,d));
 bindDrop("sm-dropS","sm-fileS",(f,d) => carregar("sop",f,d));
+document.querySelectorAll('input[name="sm-fonte"]').forEach(r => r.onchange = pronto);
+const campoFixo = $("sm-sopFixo");
+if(campoFixo) campoFixo.oninput = pronto;
+pronto();   // deixa o passo 3 e o destaque da fonte coerentes já na abertura
 const btnRun = $("sm-btnRun"); if(btnRun) btnRun.onclick = analisar;
 const btnExp = $("sm-btnExport"); if(btnExp) btnExp.onclick = exportar;
 
