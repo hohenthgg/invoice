@@ -237,15 +237,16 @@ function simDiagnostico(dia){
       + " Nenhum valor foi previsto para não inventar número.";
   }
   const fontes = dia.blocos.map(b => b.rotulo+" "+n(b.valor)).join(" + ");
-  /* O número que foi ao confronto é o quadro. Quando há diária, dizer
-     só "o Labor" esconderia metade da conta. */
-  const comp = dia.diarias
-    ? "o quadro do dia ("+n(dia.pref)+" fixo + "+n(dia.diarias)+" diária = "+n(dia.quadro)+")"
-    : "o Labor enviado";
+  /* O confronto é sobre o quadro do LABOR. A diária do dia é informada
+     à parte quando existe, porque muda o que fazer com o gap — não o
+     tamanho dele. */
+  const comp = "o Labor enviado";
+  const extraDiaria = dia.diarias
+    ? " Neste dia a fatura já lança "+n(dia.diarias)+" diária(s), à parte do quadro fixo." : "";
   if(dia.status === SIM_STATUS.REDUCAO){
     return "Com "+comp+", foram enviados "+n(dia.gap)+" HC acima do S&OP total deste dia ("
       + fontes + " = "+n(dia.qCliente)+"). Caso o cliente limite o reconhecimento ao "
-      + "planejamento, há risco de redução de "+n(dia.gap)+" HC.";
+      + "planejamento, há risco de redução de "+n(dia.gap)+" HC."+extraDiaria;
   }
   if(dia.status === SIM_STATUS.SUB){
     return "Contando "+comp+", está "+n(-dia.gap)+" HC abaixo do S&OP disponível ("+fontes
@@ -257,21 +258,24 @@ function simDiagnostico(dia){
             + (dia.diaristas.ocupados ? ", fora "+n(dia.diaristas.ocupados)
                                         + " que já constam no LABOR do dia" : "")
             + " — dariam para cobrir "+n(dia.abatePossivel)+" HC."
-          : "");
+          : "") + extraDiaria;
   }
-  return "Quadro e S&OP total batem em "+n(dia.qCliente)+" ("+fontes
-    + (dia.diarias ? "; quadro = "+n(dia.pref)+" fixo + "+n(dia.diarias)+" diária" : "")
-    + "). Sem correção prevista.";
+  return "Labor e S&OP total batem em "+n(dia.qCliente)+" ("+fontes+"). Sem correção prevista."
+    + extraDiaria;
 }
 
 function simularRetorno(dados){
   const labor = dados.labor || [], blocos = dados.blocos || [];
   const diaristas = dados.diaristas || [];
-  /* O quadro do dia é o fixo MAIS a diária já lançada na fatura. Contar
-     só o fixo aqui, enquanto a equalização conta os dois, dava duas
-     respostas para o mesmo dia na mesma tela: a fatura equalizada
-     voltava com 170 contra 182 e "possível subfaturamento" de -12, quando
-     170 + 12 diárias fecham exatamente em 182. */
+  /* O QUADRO DO DIA É O DO LABOR, e só ele.
+     O alvo se chama QUADRO FIXO: a diária não é quadro fixo, é cobrança
+     à parte, e somar as duas contra o mesmo alvo mistura categoria. O
+     gap é a distância entre o que o Labor tem e o que o alvo pede —
+     pessoas faltantes ou excedentes —, e é dele que saem as duas
+     sugestões: acrescentar diarista onde falta, baixar a curva do Labor
+     onde sobra.
+     A diária lançada continua sendo lida e informada, porque ela evita
+     sugerir como diarista alguém que já está cobrado assim no dia. */
   const porDiaDiarias = simDiariasPorDia(dados.diarias);
   const ini = dados.periodo.ini, fim = dados.periodo.fim;
   const comp = dados.comp;
@@ -342,23 +346,21 @@ function simularRetorno(dados){
     let diarias = 0;
     for(const [, q] of (porDiaDiarias.get(d) || new Map())) diarias += q;
     diarias = Math.round(diarias*1e6)/1e6;
-    const quadro = Math.round((pref + diarias)*1e6)/1e6;
 
     const revisao = [];
     if(faltando.length) revisao.push("o S&OP de "+faltando.map(b=>b.rotulo).join(" e ")+" não tem valor para este dia.");
 
-    const dia = { data:d, blocos:porBloco, revisao, pref, bruto, diarias, quadro };
+    const dia = { data:d, blocos:porBloco, revisao, pref, bruto, diarias, quadro:pref };
     if(revisao.length){
       dia.qCliente = null; dia.qPos = null; dia.gap = null; dia.correcao = null;
       dia.status = SIM_STATUS.REVISAO;
     } else {
       const qCliente = porBloco.reduce((s,b) => s + b.valor, 0);
-      /* Quem vai ao confronto é o QUADRO, não o fixo sozinho. */
-      const qPos = Math.min(quadro, qCliente);
+      const qPos = Math.min(pref, qCliente);
       dia.qCliente = qCliente;
       dia.qPos = qPos;
-      dia.gap = Math.round((quadro - qCliente)*1e6)/1e6;
-      dia.correcao = Math.round((qPos - quadro)*1e6)/1e6;
+      dia.gap = Math.round((pref - qCliente)*1e6)/1e6;
+      dia.correcao = Math.round((qPos - pref)*1e6)/1e6;
       dia.status = dia.gap > 0 ? SIM_STATUS.REDUCAO
                  : dia.gap < 0 ? SIM_STATUS.SUB
                  : SIM_STATUS.ALINHADO;
@@ -390,7 +392,7 @@ function simularRetorno(dados){
       pref: Math.round(totalPref*100)/100,
       bruto: Math.round(totalBruto*100)/100,
       diarias: Math.round(totalDiarias*100)/100,
-      quadro: Math.round((totalPref+totalDiarias)*100)/100,
+      quadro: Math.round(totalPref*100)/100,
       estornos: nNeg,
       cliente: Math.round(totalCliente*100)/100,
       pos: Math.round(totalPos*100)/100,
@@ -561,72 +563,6 @@ function simInclusoes(dados){
     pessoas: pessoas.length, id: conta("id"), meli: conta("meli"), sem: conta("") } };
 }
 
-/* ================================================================
-   FASE 5 — RETIRAR DIÁRIA ACIMA DO QF
-
-   As quatro fases do motor compartilhado mexem no quadro FIXO, que é
-   linha de Labor. Quando elas terminam e ainda sobra excesso, esse
-   excesso não é mais fixo: é diária que a fatura lançou por cima de um
-   quadro que já está no teto. Cortar mais gente fixa para compensar
-   criaria falta em outro dia — e é justamente o que o motor se recusa
-   a fazer.
-
-   Então o que sai é a diária excedente, e só ela: nunca mais do que o
-   excesso do dia, nunca num dia sem excesso.
-
-   A ORDEM DE QUEM SAI é a do abate "ambos" da aba Calcular ABS, lida
-   ao contrário. Lá, para COBRIR falta, gasta-se primeiro o diarista
-   interno e o do cliente por último. Aqui, para DEVOLVER excesso, sai
-   primeiro o interno e o do cliente fica por último — pelo mesmo
-   motivo dos dois lados: diária pedida pelo cliente é custo do cliente,
-   e é a última de que se abre mão. Sem o SIGO carregado não há como
-   saber quem pediu, e aí o desempate é só o GROOT, para a escolha ser
-   estável entre execuções.
-   ================================================================ */
-const SIM_PRIO_CORTE = { id:0, "":1, meli:2 };
-
-function simCortarDiarias(dados){
-  const residual = dados.residual || {};
-  const diarias = dados.diarias || [];
-  const porDiaSigo = simDiaristasPorDia(dados.diaristas);
-
-  /* Uma entrada por pessoa-dia lançado na fatura. */
-  const porDia = new Map();
-  for(const d of diarias){
-    const g = simGrootNum(d.groot);
-    if(!g || !isValidYmd(d.data)) continue;
-    if(!porDia.has(d.data)) porDia.set(d.data, []);
-    porDia.get(d.data).push({ groot:g, nome:d.nome || "", data:d.data,
-      quantidade:(typeof d.quantidade === "number" && isFinite(d.quantidade)) ? d.quantidade : 1,
-      solic: (porDiaSigo.get(d.data) || new Map()).get(g) || "" });
-  }
-
-  const cortes = [];
-  const dias = {};
-  let excesso = 0, cortado = 0, restante = 0;
-  for(const chave of Object.keys(residual).map(Number).sort((a,b) => a-b)){
-    const alvo = residual[chave];
-    excesso += alvo;
-    const doDia = (porDia.get(chave) || []).slice().sort((a,b) =>
-      (SIM_PRIO_CORTE[a.solic] ?? 1) - (SIM_PRIO_CORTE[b.solic] ?? 1)
-      || b.groot.localeCompare(a.groot));
-    let falta = alvo, tirados = 0;
-    for(const c of doDia){
-      if(falta < c.quantidade) break;          // não passar do excesso do dia
-      cortes.push(c); falta -= c.quantidade; tirados += c.quantidade;
-    }
-    cortado += tirados; restante += falta;
-    dias[chave] = { excesso:alvo, cortado:tirados, restante:falta,
-                    disponiveis:doDia.length };
-  }
-  const conta = t => cortes.filter(c => c.solic === t).length;
-  return { cortes, dias, totais:{
-    excesso: Math.round(excesso*100)/100,
-    cortado: Math.round(cortado*100)/100,
-    restante: Math.round(restante*100)/100,
-    id: conta("id"), meli: conta("meli"), sem: conta("") } };
-}
-
 function simPlanoEqualizacao(dados){
   const labor = dados.labor || [];
   const alvo = Number(dados.alvo);
@@ -645,35 +581,31 @@ function simPlanoEqualizacao(dados){
     id:i, ini:eqDeYmd(l.inicio), fim:isValidYmd(l.fim) ? eqDeYmd(l.fim) : null,
     rateio:simRateio(l), desempate:l.matricula || "", grupo:SIM_GRUPO }));
 
-  /* A DIÁRIA JÁ LANÇADA NA FATURA OCUPA VAGA DO DIA.
-     Ela entra no motor como pessoa `imutavel`: conta na curva contra o
-     QF, mas nenhuma das quatro fases pode escolhê-la — quem equaliza
-     mexe no quadro fixo, não em diária que já aconteceu. Sem isso a
-     falta saía inflada e o app pedia diarista onde a fatura já pagava
-     um. */
+  /* A DIÁRIA DA FATURA NÃO ENTRA NA CURVA.
+     O alvo se chama quadro FIXO, e diária não é quadro fixo: é cobrança
+     à parte. O que a equalização compara com o QF é o quadro do Labor, e
+     o gap é a distância entre os dois — pessoas faltantes ou excedentes.
+     Onde falta, a sugestão é acrescentar diarista; onde sobra, baixar a
+     curva do Labor pelas quatro fases do motor.
+     A diária lançada segue sendo lida para dois fins que continuam
+     valendo: informar o dia, e impedir que alguém já cobrado como
+     diarista naquele dia seja sugerido de novo. */
   const porDiaDiarias = simDiariasPorDia(dados.diarias);
   const diariasDoDia = {};
-  const pessoasDiaria = [];
   for(const d of listaDias){
     let soma = 0;
     for(const [, q] of (porDiaDiarias.get(d) || new Map())) soma += q;
     diariasDoDia[d] = Math.round(soma*1e6)/1e6;
-    if(soma) pessoasDiaria.push({ id:"diaria:"+d, ini:eqDeYmd(d), fim:eqDeYmd(d),
-      rateio:soma, desempate:"", grupo:SIM_GRUPO, imutavel:true });
   }
-  const todas = pessoas.concat(pessoasDiaria);
   const dias = listaDias.map(d => ({ dia:eqDeYmd(d), alvo, grupo:SIM_GRUPO }));
 
-  const plano = eqEqualizar(todas, dias, {
+  const plano = eqEqualizar(pessoas, dias, {
     pausaDesde: isValidYmd(opc.pausaDesde) ? eqDeYmd(opc.pausaDesde) : null,
     permitirAdiarInicio: opc.permitirAdiarInicio !== false });
 
   /* A curva antes e depois do plano. A de depois é a prova: se o plano
      está certo, ela encosta no alvo sem furar para baixo. */
   const ativoAntes = (p,n) => p.ini <= n && n <= (p.fim == null ? EQ_INF : p.fim);
-  /* `pref` é só o quadro fixo; `quadro` é o que o dia apresenta ao
-     cliente — fixo mais as diárias já lançadas. É `quadro` que vai ao
-     confronto com o QF. */
   const linhasDias = listaDias.map((d,k) => {
     let antes = 0, depois = 0;
     for(const p of pessoas){
@@ -681,12 +613,10 @@ function simPlanoEqualizacao(dados){
       if(eqAtivoApos(p, plano.acoes.get(p.id), eixo[k])) depois += p.rateio;
     }
     antes = Math.round(antes*1e6)/1e6; depois = Math.round(depois*1e6)/1e6;
-    const dia = diariasDoDia[d] || 0;
-    const quadro = Math.round((antes+dia)*1e6)/1e6;
-    const quadroPos = Math.round((depois+dia)*1e6)/1e6;
-    return { data:d, pref:antes, diarias:dia, quadro, alvo,
-             dif:Math.round((quadro-alvo)*1e6)/1e6,
-             prefPos:depois, quadroPos, difPos:Math.round((quadroPos-alvo)*1e6)/1e6 };
+    return { data:d, pref:antes, diarias:diariasDoDia[d] || 0, quadro:antes, alvo,
+             dif:Math.round((antes-alvo)*1e6)/1e6,
+             prefPos:depois, quadroPos:depois,
+             difPos:Math.round((depois-alvo)*1e6)/1e6 };
   });
 
   /* Quem também aparece no SIGO, e em que dias. Mesma regra de
@@ -746,27 +676,7 @@ function simPlanoEqualizacao(dados){
   const residual = chavesYmd(plano.incluir.__revisar?.[SIM_GRUPO]);
   const falta    = chavesYmd(plano.incluir[SIM_GRUPO]?.dias);
 
-  /* O que as quatro fases não resolveram não é mais quadro fixo: é
-     diária lançada por cima do teto — gente que já foi alocada e já está
-     faturada. Mexer nela é DECISÃO DE QUEM OPERA, não do app: o Labor se
-     ajusta sozinho porque é projeção, mas a diária já aconteceu.
-
-     Então o corte é sempre CALCULADO e só é APLICADO se o usuário
-     escolher reduzir. Sem escolha, o padrão é manter: o excesso residual
-     sai declarado em REVISAR, com nome e dia, e o arquivo exportado sai
-     com ele. */
-  const corteDisponivel = simCortarDiarias({ residual,
-    diarias:dados.diarias, diaristas:dados.diaristas });
-  const reduzir = opc.cortarDiarias === true;
-  const corte = reduzir ? corteDisponivel : {
-    cortes: [],
-    dias: Object.fromEntries(Object.entries(corteDisponivel.dias)
-      .map(([d,c]) => [d, { ...c, cortado:0, restante:c.excesso }])),
-    totais: { excesso:corteDisponivel.totais.excesso, cortado:0,
-              restante:corteDisponivel.totais.excesso, id:0, meli:0, sem:0 }
-  };
-  const revisar = {};
-  for(const [d,c] of Object.entries(corte.dias)) if(c.restante > 0) revisar[+d] = c.restante;
+  const revisar = residual;
 
   /* A falta é o outro lado do mesmo plano: com a base do SIGO carregada,
      ela deixa de ser "faltam 18" e vira 18 pessoas com nome. */
@@ -774,21 +684,10 @@ function simPlanoEqualizacao(dados){
     ? simInclusoes({ falta, diaristas:dados.diaristas, labor, diarias:dados.diarias }) : null;
 
   const conta = t => acoes.filter(a => a.tipo === t).length;
-  /* A curva depois do plano INTEIRO — fixo ajustado e diária cortada. */
-  const cortadoPorDia = {};
-  for(const c of corte.cortes) cortadoPorDia[c.data] = (cortadoPorDia[c.data] || 0) + c.quantidade;
-  for(const l of linhasDias){
-    l.diariasCortadas = cortadoPorDia[l.data] || 0;
-    l.quadroPos = Math.round((l.prefPos + l.diarias - l.diariasCortadas)*1e6)/1e6;
-    l.difPos = Math.round((l.quadroPos - alvo)*1e6)/1e6;
-  }
-
   return {
     alvo, periodo:{ ini, fim }, dias:linhasDias, acoes, revisar, falta, inclusoes,
-    corte, corteDisponivel, decisaoDiarias: reduzir ? "reduzir" : "manter",
     opcoes:{ permitirAdiarInicio: opc.permitirAdiarInicio !== false,
-             pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null,
-             cortarDiarias: reduzir },
+             pausaDesde: isValidYmd(opc.pausaDesde) ? opc.pausaDesde : null },
     totais:{
       pessoas: pessoas.length,
       diarias: Math.round(listaDias.reduce((s,d) => s + (diariasDoDia[d]||0), 0)*100)/100,
@@ -837,6 +736,6 @@ function simLinhasRetorno(sim){
 
 if(typeof module !== "undefined" && module.exports){
   module.exports = { simularRetorno, simClassificarLinhas, simLinhasRetorno,
-                     simPlanoEqualizacao, simInclusoes, simJaCobrado, simCortarDiarias, SIM_GRUPO,
+                     simPlanoEqualizacao, simInclusoes, simJaCobrado, SIM_GRUPO,
                      SIM_STATUS, SIM_STATUS_LABEL, SIM_AVISO_METADADOS };
 }

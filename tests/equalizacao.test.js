@@ -599,12 +599,13 @@ const lab = (groot, ini, fim, rateio) => ({ groot, nome:"FIXO "+groot, cargo:"Au
 }
 
 /* ================================================================
-   A DIÁRIA QUE A FATURA JÁ LANÇA
+   A DIÁRIA QUE A FATURA JÁ LANÇA — LIDA, MAS FORA DA CONTA
 
-   O defeito que estes testes travam: a falta era calculada contra o
-   LABOR só, e a aba DIARISTAS da fatura nunca era lida. Num dia em que
-   a fatura já pagava 15 diárias o app pedia mais 23, e 29 pessoa-dia
-   apareciam nas duas listas — cobrança dobrada, com nome e data.
+   O alvo se chama quadro FIXO, e diária não é quadro fixo: é cobrança à
+   parte. Ela não entra na curva nem muda o gap. Continua sendo lida por
+   um motivo que não mudou: impedir que alguém já cobrado como diarista
+   naquele dia seja sugerido de novo — que é dupla cobrança com nome e
+   data.
    ================================================================ */
 secao("Diárias já lançadas na fatura");
 {
@@ -614,27 +615,32 @@ secao("Diárias já lançadas na fatura");
   const sem = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, opcoes:{} });
   const com = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
   const dSem = sem.dias.find(x => x.data === d1), dCom = com.dias.find(x => x.data === d1);
-  check(dCom.quadro === dCom.pref + 5,
-        "o quadro do dia é o fixo MAIS as diárias já lançadas",
-        dCom.pref + " + " + dCom.diarias + " = " + dCom.quadro);
-  check(dCom.dif === dSem.dif + 5,
-        "e é o quadro, não o fixo, que vai ao confronto com o QF");
-  check((com.falta[d1] || 0) === Math.max(0, (sem.falta[d1] || 0) - 5),
-        "a falta do dia sai descontada das diárias que a fatura já paga",
+  check(dCom.quadro === dCom.pref,
+        "o quadro do dia é o do Labor — a diária não entra",
+        dCom.pref + " · quadro " + dCom.quadro);
+  check(dCom.dif === dSem.dif,
+        "e o gap é o mesmo com ou sem diária lançada no dia",
+        dSem.dif + " · " + dCom.dif);
+  check(dCom.diarias === 5, "…mas a diária do dia continua informada, à parte");
+  check((com.falta[d1] || 0) === (sem.falta[d1] || 0),
+        "a falta do dia não é descontada da diária: são coisas separadas",
         "sem " + (sem.falta[d1]||0) + " · com " + (com.falta[d1]||0));
 }
 {
-  /* A diária conta na curva mas não pode virar ação: quem equaliza mexe
-     no quadro fixo, não em diária que já aconteceu. */
+  /* A diária não vira ação, nem entra no pool: o que a equalização mexe
+     é linha do Labor. */
   const gente2 = fixture();
   const diarias = [];
   for(let d = PER.ini; d <= PER.fim; d = ctx.addDays(d,1))
     for(let k=0;k<8;k++) diarias.push({ groot:"7100"+k, data:d, quantidade:1 });
-  const r = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
-  check(r.acoes.every(a => gente2.some(p => p.groot === a.linha.groot)),
+  const semD = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, opcoes:{} });
+  const comD = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
+  check(JSON.stringify(semD.acoes.map(a => a.id)) === JSON.stringify(comD.acoes.map(a => a.id)),
+        "o plano do Labor é idêntico com ou sem diária na fatura");
+  check(comD.acoes.every(a => gente2.some(p => p.groot === a.linha.groot)),
         "nenhuma ação do plano cai sobre uma diária — só sobre linha do Labor");
-  check(r.totais.diarias === 8 * r.dias.length,
-        "e o total de diárias do período é contado", r.totais.diarias);
+  check(comD.totais.diarias === 8 * comD.dias.length,
+        "e o total de diárias do período é contado, à parte", comD.totais.diarias);
 }
 {
   /* O teste que morde de verdade: quem já está lançado como diária
@@ -656,110 +662,6 @@ secao("Diárias já lançadas na fatura");
     diaristas:[diar("91",D2,"id")] });
   check(r.totais.incluido === 1,
         "diária em OUTRO dia não bloqueia a pessoa — a ocupação é por dia");
-}
-
-/* ================================================================
-   FASE 5 — RETIRAR A DIÁRIA ACIMA DO QF
-
-   As quatro fases do motor mexem no quadro FIXO. Quando elas terminam e
-   ainda sobra excesso, o excesso não é mais fixo — é diária lançada por
-   cima de um quadro que já está no teto, e cortar mais gente fixa para
-   compensar criaria falta em outro dia.
-
-   O que morde aqui é a ORDEM: um total certo com a repartição errada
-   devolve a diária do cliente enquanto sobra interna, e o total não
-   denuncia. É o mesmo defeito do abate "ambos", pelo avesso.
-   ================================================================ */
-secao("Retirar diária acima do QF");
-
-const { simCortarDiarias } = ctx;
-const dia = (groot, data, extra) => ({ groot, data, quantidade:1, nome:"P"+groot, ...extra });
-
-{
-  const D3 = ymd(2026,7,24);
-  const r = simCortarDiarias({ residual:{ [D3]:2 },
-    diarias:[dia("1",D3), dia("2",D3), dia("3",D3), dia("4",D3)],
-    diaristas:[diar("1",D3,"meli"), diar("2",D3,"id"), diar("3",D3,"meli"), diar("4",D3,"id")] });
-  check(r.totais.cortado === 2, "corta exatamente o excesso do dia — nem mais, nem menos");
-  check(r.totais.id === 2 && r.totais.meli === 0,
-        "sai a interna primeiro; a do cliente é a última a sair",
-        r.totais.id+" internas, "+r.totais.meli+" do cliente");
-}
-{
-  const D3 = ymd(2026,7,24);
-  const r = simCortarDiarias({ residual:{ [D3]:3 },
-    diarias:[dia("1",D3), dia("2",D3), dia("3",D3)],
-    diaristas:[diar("1",D3,"meli"), diar("2",D3,"id"), diar("3",D3,"meli")] });
-  check(r.totais.id === 1 && r.totais.meli === 2,
-        "esgotada a interna, a do cliente entra no corte — e só o que faltou");
-}
-{
-  /* Nunca passar do excesso: com 5 de excesso e 2 diárias, saem 2 e o
-     resto fica declarado. Cortar quadro fixo aqui criaria falta. */
-  const D3 = ymd(2026,7,24);
-  const r = simCortarDiarias({ residual:{ [D3]:5 },
-    diarias:[dia("1",D3), dia("2",D3)], diaristas:[] });
-  check(r.totais.cortado === 2 && r.totais.restante === 3,
-        "só há o que cortar até acabar a diária; o resto sai declarado",
-        JSON.stringify(r.totais));
-}
-{
-  const D3 = ymd(2026,7,24), D4 = ymd(2026,7,25);
-  const r = simCortarDiarias({ residual:{ [D3]:1 },
-    diarias:[dia("1",D4), dia("2",D4)], diaristas:[] });
-  check(r.totais.cortado === 0 && r.totais.restante === 1,
-        "diária de OUTRO dia não serve para resolver este — o corte é por dia");
-}
-{
-  const r = simCortarDiarias({ residual:{}, diarias:[dia("1",ymd(2026,7,24))], diaristas:[] });
-  check(r.cortes.length === 0, "dia sem excesso não perde diária nenhuma");
-}
-{
-  /* Pelo caminho completo: o plano corta a diária só depois de as quatro
-     fases terem feito o que podiam no quadro fixo. */
-  /* Quadro fixo EXATAMENTE no QF o período inteiro: nenhuma das quatro
-     fases pode cortar ninguém sem furar outro dia. O excesso dos três
-     dias com diária é, por construção, só diária. */
-  const gente2 = [];
-  for(let i=0;i<QF;i++) gente2.push({ groot:"95"+String(i).padStart(4,"0"),
-    nome:"FIXO "+i, matricula:"M"+i, cargo:"Auxiliar de Apoio Log I", conta:"LABOR DIRETO",
-    inicio:PER.ini, fim:null, rateio:1, linha:i+2 });
-  const diarias = [];
-  for(const d of [ymd(2026,7,20), ymd(2026,7,21), ymd(2026,8,1)])
-    for(let k=0;k<5;k++) diarias.push({ groot:"92"+k, data:d, quantidade:1 });
-  const manter = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias, opcoes:{} });
-  check(manter.acoes.length === 0,
-        "o motor não mexe no quadro fixo quando cortar criaria falta em outro dia",
-        JSON.stringify(manter.acoes.map(a => a.tipo)));
-
-  /* PADRÃO É MANTER. A diária já foi alocada e já está faturada: reduzir
-     é decisão de quem opera, e o app não toma essa decisão sozinho. */
-  check(manter.decisaoDiarias === "manter" && manter.corte.totais.cortado === 0,
-        "sem decisão do usuário, nenhuma diária é retirada",
-        manter.decisaoDiarias+" · "+manter.corte.totais.cortado);
-  check(manter.corteDisponivel.totais.cortado === 15,
-        "mas o quanto DARIA para cortar é calculado e oferecido: 3 dias × 5",
-        String(manter.corteDisponivel.totais.cortado));
-  check(Object.values(manter.revisar).reduce((a,b) => a+b, 0) === 15,
-        "e o excesso mantido sai inteiro em REVISAR, dia a dia",
-        JSON.stringify(manter.revisar));
-  check(manter.totais.excessoDepois === 15,
-        "os indicadores refletem a escolha: o excesso continua lá");
-
-  /* Escolhendo reduzir, o mesmo plano fecha. */
-  const reduzir = simPlanoEqualizacao({ labor:gente2, periodo:PER, alvo:QF, diarias,
-    opcoes:{ cortarDiarias:true } });
-  check(reduzir.decisaoDiarias === "reduzir" && reduzir.corte.totais.cortado === 15,
-        "com a decisão de reduzir, sai só o necessário para chegar ao QF");
-  check(reduzir.corte.cortes.every(c => diarias.some(d => d.groot === c.groot && d.data === c.data)),
-        "…e toda diária cortada existia mesmo na fatura, naquele dia");
-  check(reduzir.dias.every(d => d.difPos <= 0),
-        "depois do plano inteiro nenhum dia fica acima do QF",
-        JSON.stringify(reduzir.dias.filter(d => d.difPos > 0).map(d => d.data+":"+d.difPos)));
-  check(reduzir.totais.excessoDepois === 0 && Object.keys(reduzir.revisar).length === 0,
-        "e o excesso do período zera, sem sobrar nada para revisar");
-  check(JSON.stringify(manter.acoes.map(a => a.id)) === JSON.stringify(reduzir.acoes.map(a => a.id)),
-        "a decisão sobre a diária NÃO muda o que foi feito no Labor — ele é ajustado antes, e igual");
 }
 
 console.log("\n" + pass + " passaram, " + fail + " falharam\n");

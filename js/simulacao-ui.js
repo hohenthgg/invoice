@@ -20,9 +20,7 @@ const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,""
   .toUpperCase().replace(/\s+/g," ").trim();
 
 const S = { fatura:null, sop:null, diar:null, sim:null,
-            nomeF:"", nomeS:"", nomeD:"", fonte:"planilha",
-            /* null = ninguém decidiu ainda; "manter" | "reduzir" */
-            decisaoDiarias:null };
+            nomeF:"", nomeS:"", nomeD:"", fonte:"planilha" };
 
 /* De onde vem o S&OP: da planilha operacional, dia a dia por operação,
    ou de um valor fixo que vale para todos os dias do período. O fixo
@@ -370,7 +368,6 @@ function carregar(qual, file, drop){
                   S[qual] = null; return pronto(); }
       if(qual === "fatura"){
         S.fatura = r; S.nomeF = file.name;
-        S.decisaoDiarias = null;   // fatura nova, decisão nova
         /* O arquivo cru fica guardado: a exportação devolve a FATURA
            INTEIRA com duas abas trocadas, e as outras onze só continuam
            lá se vierem do original. */
@@ -502,9 +499,9 @@ function rodar(blocos, per, fonte, valorFixo){
    recortado na borda do scroll.
    ================================================================ */
 function tipPref(){
-  return "<b>Quadro do dia</b> = as linhas do LABOR ativas mais as <b>diárias já lançadas</b> na aba "
-    + "DIARISTAS da fatura. É esse total que vai ao confronto com o S&OP: vaga ocupada por diária é "
-    + "vaga ocupada. A parte fixa é a "
+  return "<b>Quantidade de pessoas que o LABOR tem no dia.</b> A diária que a fatura lança NÃO entra "
+    + "aqui: o alvo se chama quadro <b>fixo</b>, e diária é cobrança à parte. Ela aparece embaixo, em "
+    + "cinza, porque muda o que fazer com o gap — não o tamanho dele. A conta é a "
     + "<b>início ≤ dia</b> e <b>fim ≥ dia</b>, com DATA FIM vazia valendo até o fim do período. "
     + "Entram só as linhas de <b>LABOR DIRETO</b>, com cargo da lista do PREF e classificadas como "
     + "competência corrente. Ficam de fora liderança e indiretos, a linha de ABS e todo retroativo.";
@@ -610,8 +607,8 @@ function render(){
     '<div class="sm-aviso '+a.tipo+'">'+esc(a.texto)+'</div>').join("");
 
   const cards = [
-    ["Quadro total enviado", n2(t.quadro), "HC-dia"
-      + (t.diarias ? " · "+n2(t.pref)+" fixo + "+n2(t.diarias)+" diária" : ""),
+    ["Labor total enviado", n2(t.pref), "HC-dia"
+      + (t.diarias ? " · "+n2(t.diarias)+" diária à parte" : ""),
       "", TIP.totalPref+" "+tipPref()],
     ["S&OP total", n2(t.cliente), "HC-dia", "", TIP.totalSop+" "+tipSop(sim.blocos)],
     ["Q Pós total previsto", n2(t.pos), "HC-dia", "ok", TIP.totalPos+" "+TIP.qPos],
@@ -672,12 +669,13 @@ function celulaDiaristas(d){
     + '</td>';
 }
 
-/* O quadro do dia, com a composição embaixo quando há diária. Mostrar
-   só o fixo faria a fatura já equalizada voltar como "12 HC abaixo",
-   quando 170 fixos + 12 diárias fecham exatamente no alvo. */
+/* A primeira coluna é a quantidade de pessoas que o LABOR tem no dia.
+   A diária da fatura sai embaixo, em cinza, como informação: ela não
+   entra na conta contra o QF — o alvo é quadro FIXO —, mas muda o que
+   fazer com o gap. */
 function celulaQuadro(d){
-  return '<td class="forte">'+n2(d.quadro)
-    + (d.diarias ? '<small class="sm-comp">'+n2(d.pref)+' fixo + '+n2(d.diarias)+' diária</small>' : "")
+  return '<td class="forte">'+n2(d.pref)
+    + (d.diarias ? '<small class="sm-comp">+ '+n2(d.diarias)+' diária à parte</small>' : "")
     + '</td>';
 }
 
@@ -706,7 +704,7 @@ function desenharTabela(sim){
      seria dizer que veio da planilha operacional, e não veio. */
   $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
     + th(sim.fonte === "fixo" ? "QF" : "S&amp;OP", tipSop(sim.blocos))
-    + th(sim.totais.diarias ? "Quadro" : "PREF", tipPref())
+    + th("Labor", tipPref())
     + th("Q Pós", TIP.qPos)
     + th("Gap", TIP.gap)
     + (temDiar ? th("Diaristas disp.", TIP.diaristas) : "")
@@ -741,23 +739,7 @@ function opcoesEq(){
   const c = $("sm-eqAdiar"), p = $("sm-eqPausa");
   let pausaDesde = null;
   if(p && p.value){ const [y,m,d] = p.value.split("-").map(Number); pausaDesde = ymd(y,m,d); }
-  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde,
-           cortarDiarias: S.decisaoDiarias === "reduzir" };
-}
-
-/* A DECISÃO SOBRE A DIÁRIA JÁ ALOCADA
-
-   O Labor se ajusta sozinho porque é projeção. A diária não: ela já foi
-   alocada e já está faturada, e reduzir a quantidade de um dia é decisão
-   de quem opera. Por isso o app calcula quanto DARIA para cortar, mostra,
-   e não corta até alguém escolher — e a exportação fica bloqueada
-   enquanto a escolha não for feita, para o arquivo nunca sair de um
-   estado que ninguém decidiu.
-
-   `S.decisaoDiarias` é null (não decidido), "manter" ou "reduzir". */
-function decidirDiarias(escolha){
-  S.decisaoDiarias = escolha;
-  desenharEqualizacao();
+  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde };
 }
 
 const faixaTxt = f => f.de === f.ate ? fmtShort(f.de) : fmtShort(f.de)+"–"+fmtShort(f.ate);
@@ -810,17 +792,17 @@ function desenharEqualizacao(){
   if(plano.erro){ $("sm-eq").innerHTML = '<div class="sm-aviso">'+esc(plano.erro)+'</div>'; return; }
 
   const t = plano.totais;
-  const quadros = plano.dias.map(d => d.quadro);
+  const quadros = plano.dias.map(d => d.pref);
   const item = (l,v) => '<div><span>'+l+'</span><b>'+v+'</b></div>';
-  /* O quadro do dia é fixo + diária já lançada. Mostrar só o fixo
-     esconderia a vaga que a diária ocupa, e foi assim que a falta saiu
-     inflada. */
+  /* O quadro é o do LABOR — o alvo se chama quadro FIXO, e diária não é
+     quadro fixo. A diária do período aparece à parte, porque muda o que
+     fazer com o gap, não o tamanho dele. */
   const resumo = '<div class="sm-eqresumo">'
     + item("Período", fmtShort(plano.periodo.ini)+" → "+fmtShort(plano.periodo.fim))
     + item("QF do cliente", n2(alvo))
-    + item("Quadro mínimo", n2(Math.min(...quadros)))
-    + item("Quadro máximo", n2(Math.max(...quadros)))
-    + (t.diarias ? item("Diárias já na fatura", n2(t.diarias)+" pessoa-dia") : "")
+    + item("Labor mínimo", n2(Math.min(...quadros)))
+    + item("Labor máximo", n2(Math.max(...quadros)))
+    + (t.diarias ? item("Diárias na fatura", n2(t.diarias)+" pessoa-dia, à parte") : "")
     + item("Excesso no período", n2(t.excessoAntes)+" HC-dia")
     + item("Excesso após o plano", n2(t.excessoDepois)+" HC-dia")
     + '</div>';
@@ -849,8 +831,6 @@ function desenharEqualizacao(){
       + '</div>';
   }).join("");
 
-  /* `falta` guarda o tamanho da falta como número positivo; na tela ela
-     é uma queda em relação ao QF e sai com sinal negativo. */
   /* As pessoas que faltam, com nome — só existe com a base do SIGO. */
   const inc = plano.inclusoes;
   const grupoInc = (inc && inc.pessoas.length)
@@ -883,64 +863,16 @@ function desenharEqualizacao(){
           + 'como fixo seria cobrar outra coisa.</p></div></div>').join("")
       + '</div>' : "";
 
-  /* A quinta ação só existe quando as quatro do motor não deram conta —
-     e, diferente delas, não é aplicada sozinha: depende da decisão. */
-  const podeCortar = plano.corteDisponivel ? plano.corteDisponivel.totais.cortado : 0;
-  const decisao = (podeCortar > 0) ? (() => {
-    const d = S.decisaoDiarias;
-    const dias = Object.keys(plano.corteDisponivel.dias).length;
-    const bt = (chave,rot,desc) =>
-      '<button class="sm-eqdec'+(d === chave ? " ativo" : "")+'" data-dec="'+chave+'">'
-      + '<b>'+rot+'</b><i>'+desc+'</i></button>';
-    return '<div class="sm-eqdecisao'+(d ? " decidido" : "")+'">'
-      + '<div class="tit">'+(d ? "Decisão tomada" : "Falta uma decisão sua")+' — '
-      + '<b>'+n2(plano.corteDisponivel.totais.excesso)+' HC-dia</b> acima do QF em '+dias+' dia(s), '
-      + 'e o quadro fixo já está no teto</div>'
-      + '<p>O Labor foi ajustado até onde dava: cortar mais gente fixa criaria falta em outro dia. '
-      + 'O que passa do QF nesses dias é <b>diária já alocada e faturada</b>, e reduzir isso é '
-      + 'decisão de quem opera — o app não faz sozinho.</p>'
-      + '<div class="sm-eqdecs">'
-      + bt("manter","Manter diaristas", "nada mais a ajustar no Labor; o excesso sai declarado em REVISAR")
-      + bt("reduzir","Reduzir diaristas", "retira só o necessário para chegar ao QF — "
-          + n2(podeCortar)+" pessoa-dia, a interna primeiro")
-      + '</div></div>';
-  })() : "";
-
-  const cortes = (plano.corte && plano.corte.cortes.length) ? (() => {
-    const t = plano.corte.totais;
-    const porDia = new Map();
-    for(const c of plano.corte.cortes){
-      if(!porDia.has(c.data)) porDia.set(c.data, []);
-      porDia.get(c.data).push(c);
-    }
-    return '<div class="sm-eqgrupo"><header><span class="sm-eqchip cortar">Retirar diária</span>'
-      + '<span class="n">'+n2(t.cortado)+' pessoa-dia</span></header>'
-      + '<div class="det aberto"><p>Você escolheu <b>reduzir</b>. Sai só o necessário para chegar ao '
-      + 'QF — <b>a interna primeiro, a do cliente por último</b> '
-      + '('+t.id+' interna(s) · '+t.meli+' do cliente'
-      + (t.sem ? ' · '+t.sem+' sem solicitante no SIGO' : "")+'), '
-      + 'e nunca mais do que o excesso do dia.</p></div>'
-      + [...porDia.entries()].sort((a,b) => a[0]-b[0]).map(([d,cs]) =>
-          '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
-          + '<div class="cab"><div class="nm">'+fmtYmd(d)
-          + '<small>'+cs.length+' diária(s) acima do QF</small></div>'
-          + '<div class="mud">−'+cs.length+'<small>'+esc(cs.map(c =>
-              c.solic === "id" ? "interna" : c.solic === "meli" ? "cliente" : "s/ solic.")
-              .join(" · "))+'</small></div></div>'
-          + '<div class="det"><p>'+cs.map(c => esc(c.nome || "(sem nome)")
-              + ' <b>'+esc(c.groot)+'</b>').join(' · ')+'</p></div></div>').join("")
-      + '</div>';
-  })() : "";
-
+  /* `falta` guarda o tamanho da falta como número positivo; na tela ela
+     é uma queda em relação ao QF e sai com sinal negativo. */
   const listaDias = (o, neg) => Object.keys(o).map(Number).sort((a,b)=>a-b)
     .map(d => fmtShort(d)+" ("+sinal(neg ? -o[d] : o[d])+")").join(" · ");
   const revisar = Object.keys(plano.revisar).length
     ? '<div class="sm-eqgrupo revisar"><header><span class="sm-eqchip revisar">Revisar</span>'
       + '<span class="n">'+Object.keys(plano.revisar).length+' dia(s)</span></header>'
-      + '<div class="det aberto"><p>Nestes dias sobra quadro que nenhuma das quatro ações resolve. '
-      + 'Onde há diária já lançada na fatura, é dela que vem a sobra — o quadro fixo já está no '
-      + 'teto e a equalização não mexe em diária que já aconteceu. Nos demais, zerar exigiria '
-      + 'partir um contrato de um jeito que o motor não faz sozinho. Avalie caso a caso.</p>'
+      + '<div class="det aberto"><p>Nestes dias o Labor continua acima do QF e nenhuma das quatro '
+      + 'ações resolve: zerar exigiria partir um contrato de um jeito que o motor não faz sozinho, '
+      + 'ou cortar quem cobre um dia sem sobra. Avalie caso a caso.</p>'
       + '<p class="dias">'+listaDias(plano.revisar,false)+'</p></div></div>' : "";
   const falta = (Object.keys(plano.falta).length && !grupoInc)
     ? '<div class="sm-eqgrupo falta"><header><span class="sm-eqchip falta">Falta</span>'
@@ -953,21 +885,9 @@ function desenharEqualizacao(){
     + '<div class="sm-eqselo">Este plano equaliza <b>matematicamente</b> o Labor ao QF. '
     + 'Confirme se corresponde à movimentação operacional real antes de aplicar — '
     + 'nada é alterado na fatura por aqui.</div>'
-    + grupos + decisao + cortes + grupoInc + revisar + falta
-    + '<div class="vt-acoes-fim">'
-    + '<button class="vt-btn" id="sm-btnExportEq"'+(podeCortar > 0 && !S.decisaoDiarias ? " disabled" : "")+'>'
-    + 'Exportar fatura equalizada (.xlsx)</button>'
-    + (podeCortar > 0 && !S.decisaoDiarias
-        ? '<span class="sm-msg">Escolha acima o que fazer com as diárias acima do QF.</span>'
-        : podeCortar > 0
-          ? '<span class="sm-msg">O arquivo vai sair '
-            + (S.decisaoDiarias === "reduzir"
-                ? 'com '+n2(plano.corte.totais.cortado)+' diária(s) a menos.'
-                : 'com o excesso mantido e declarado em REVISAR.')+'</span>'
-          : "")
-    + '</div>';
-  [...$("sm-eq").querySelectorAll(".sm-eqdec")].forEach(b =>
-    b.onclick = () => decidirDiarias(b.dataset.dec));
+    + grupos + grupoInc + revisar + falta
+    + '<div class="vt-acoes-fim"><button class="vt-btn" id="sm-btnExportEq">'
+    + 'Exportar fatura equalizada (.xlsx)</button></div>';
   const btn = $("sm-btnExportEq");
   if(btn) btn.onclick = exportarEqualizado;
 }
@@ -1183,26 +1103,16 @@ async function exportarEqualizado(){
     }
   }
 
-  /* ---- DIARISTAS: as da fatura menos as cortadas, mais as novas ---- */
+  /* ---- DIARISTAS: as da fatura, intactas, mais as novas ---- */
   const layD = fat.layoutDiarias;
   const incluir = $("sm-eqIncluir");
   const inc = (incluir && incluir.checked) ? plano.inclusoes : null;
   const escala = escalaDoDiarista(fat.unidade);
 
-  /* Cada corte tira UMA pessoa-dia; casar por (groot, data) e consumir
-     um por vez evita apagar duas linhas quando a fatura repete a pessoa
-     no mesmo dia. */
-  const aCortar = new Map();
-  for(const c of (plano.corte ? plano.corte.cortes : []))
-    aCortar.set(c.groot+"|"+c.data, (aCortar.get(c.groot+"|"+c.data) || 0) + 1);
-
-  const linhasDiar = [];
-  let cortadas = 0;
-  for(const d of (fat.diarias || [])){
-    const k = simGrootNum(d.groot)+"|"+d.data;
-    if(aCortar.get(k) > 0){ aCortar.set(k, aCortar.get(k)-1); cortadas++; continue; }
-    linhasDiar.push(d.bruta ? d.bruta.slice() : []);
-  }
+  /* As diárias da fatura saem como estão: elas não entram na conta
+     contra o QF e a equalização não mexe nelas. O que o app acrescenta
+     vem depois. */
+  const linhasDiar = (fat.diarias || []).map(d => d.bruta ? d.bruta.slice() : []);
   let novas = 0;
   if(inc && layD){
     const CD = layD.cols;
@@ -1241,12 +1151,6 @@ async function exportarEqualizado(){
     dt(a.linha.inicio), dt(a.linha.fim), dt(a.novoInicio), dt(a.novoFim),
     a.pausas.map(p => fmtYmd(p.fim)+" a "+fmtYmd(p.ini)).join(" · "),
     -a.impacto.hc, a.impacto.dias, a.motivo]);
-  for(const c of (plano.corte ? plano.corte.cortes : []))
-    eqLinhas.push(["Retirar diária", numSePuder(c.groot), c.nome, "Diarista",
-      dt(c.data), dt(c.data), null, null, "", -c.quantidade, 1,
-      "Diária lançada acima do QF num dia em que o quadro fixo já estava no teto. "
-      + "Sai a interna primeiro; a do cliente é a última ("
-      + (c.solic === "id" ? "interna" : c.solic === "meli" ? "do cliente" : "sem solicitante no SIGO")+")."]);
   if(!eqLinhas.length) eqLinhas.push(["(nada a ajustar)"]);
 
   const incLinhas = [];
@@ -1258,14 +1162,10 @@ async function exportarEqualizado(){
   if(!incLinhas.length) incLinhas.push(["(ninguém a incluir)"]);
 
   const revLinhas = [];
-  const diariasDe = {};
-  for(const d of plano.dias) diariasDe[d.data] = d.diarias || 0;
   for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
-    revLinhas.push(["Excesso mantido", dt(+d), q,
-      plano.decisaoDiarias === "manter" && diariasDe[+d] >= q
-        ? "O quadro fixo já está no teto e o que passa do QF são as "+diariasDe[+d]
-          + " diária(s) já alocadas neste dia. Mantidas por decisão do usuário."
-        : "Nem as quatro ações sobre o quadro fixo nem a redução de diária resolveram este dia."]);
+    revLinhas.push(["Excesso sem solução", dt(+d), q,
+      "O Labor continua acima do QF e nenhuma das quatro ações resolve sem criar falta "
+      + "em outro dia. Avaliar caso a caso."]);
   if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
     { if(c.descoberto > 0) revLinhas.push(["Falta descoberta", dt(+d), c.descoberto,
       "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
@@ -1284,18 +1184,11 @@ async function exportarEqualizado(){
     ["Dias que fecham no QF", fechados+" de "+plano.dias.length],
     ["Permitir adiar início", plano.opcoes.permitirAdiarInicio ? "sim" : "não"],
     ["Pausar a partir de", plano.opcoes.pausaDesde ? fmtYmd(plano.opcoes.pausaDesde) : "não"],
-    ["Diárias acima do QF", plano.decisaoDiarias === "reduzir"
-      ? "REDUZIR — decisão do usuário; retirado só o necessário para chegar ao QF"
-      : "MANTER — decisão do usuário; o excesso residual sai declarado em REVISAR"],
     ["", ""],
     ["Linhas do LABOR mantidas", mantidas],
     ["Linhas do LABOR ajustadas", ajustadas],
     ["Linhas do LABOR removidas", removidas],
     ["Diárias da fatura mantidas", linhasDiar.length - novas],
-    ["Diárias retiradas por estar acima do QF", cortadas],
-    ["  · internas", plano.corte ? plano.corte.totais.id : 0],
-    ["  · do cliente", plano.corte ? plano.corte.totais.meli : 0],
-    ["  · sem solicitante no SIGO", plano.corte ? plano.corte.totais.sem : 0],
     ["Diárias acrescentadas para cobrir falta", novas],
     ["  · da ID", inc ? inc.totais.id : 0],
     ["  · do cliente", inc ? inc.totais.meli : 0],
@@ -1307,11 +1200,13 @@ async function exportarEqualizado(){
     ["", ""],
     ["AVISO", "As alterações equalizam MATEMATICAMENTE o quadro ao QF. Confirme se "
       + "correspondem à movimentação operacional real antes de enviar."],
-    ["O que é o quadro do dia", "Quadro fixo do LABOR MAIS as diárias da aba de diaristas. "
-      + "É esse total que vai ao confronto com o QF."],
-    ["Ordem das ações", "Primeiro as quatro do motor sobre o quadro FIXO — retirar linha, adiar "
-      + "início, pausar/retomar, antecipar fim —, nenhuma delas criando falta em outro dia. O que "
-      + "sobrar de excesso depois disso não é fixo: é diária acima do QF, e sai por último."],
+    ["O que é o quadro do dia", "O quadro do LABOR, e só ele. O alvo se chama quadro FIXO, e "
+      + "diária é cobrança à parte: as diárias da fatura NÃO entram na conta contra o QF e saem "
+      + "no arquivo como estavam."],
+    ["Ordem das ações", "O gap é a distância entre o Labor e o QF. Onde SOBRA, as quatro ações do "
+      + "motor baixam a curva do Labor — retirar linha, adiar início, pausar/retomar, antecipar "
+      + "fim —, nenhuma delas criando falta em outro dia. Onde FALTA, a sugestão é acrescentar "
+      + "diarista."],
     ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada NAQUELE DIA e sem cobrança "
       + "no dia — nem no LABOR, nem como diária já lançada. Prioridade para os diaristas da ID; "
       + "o do cliente só entra depois de esgotados os internos. Cada pessoa-dia é reconferido "
@@ -1385,12 +1280,12 @@ function exportar(){
   const wb = XLSX.utils.book_new();
 
   /* --- aba 1: o comparativo, para leitura humana --- */
-  const cab = ["Data", ...sim.blocos.map(b => "S&OP "+b), "Q cliente / S&OP", "Quadro do dia",
-               "Diárias já lançadas", "Q Pós previsto", "Gap Quadro x S&OP", "Correção prevista",
+  const cab = ["Data", ...sim.blocos.map(b => "S&OP "+b), "Q cliente / S&OP", "Labor do dia",
+               "Diárias já lançadas (à parte)", "Q Pós previsto", "Gap Labor x S&OP", "Correção prevista",
                "Status", "Diagnóstico"];
   const aoa = [cab];
   for(const d of sim.dias){
-    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.quadro, d.diarias, d.qPos,
+    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.pref, d.diarias, d.qPos,
       d.gap, d.correcao, SIM_STATUS_LABEL[d.status], d.diagnostico ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -1434,9 +1329,8 @@ function exportar(){
     ["Linhas do LABOR no PREF", sim.linhas.dentro],
     ["Linhas fora do PREF", sim.linhas.fora.length],
     [],
-    ["Quadro total (HC-dia)", sim.totais.quadro],
-    ["  · quadro fixo do LABOR", sim.totais.pref],
-    ["  · diárias já lançadas", sim.totais.diarias],
+    ["Labor total (HC-dia)", sim.totais.pref],
+    ["Diárias já lançadas na fatura (à parte)", sim.totais.diarias],
 
     ["Linhas de estorno no PREF", sim.totais.estornos],
     ["S&OP total (HC-dia)", sim.totais.cliente],

@@ -1388,17 +1388,4 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 .sm-eqgrupo .det .dias{font-family:var(--mono);font-size:.73rem;color:var(--ink);margin-top:6px}
 .sm-eqchip.incluir{background:var(--ok);color:#04240f}
 .sm-tabela td .sm-comp{display:block;color:var(--mut);font-size:.66rem;font-weight:400;margin-top:2px;white-space:nowrap}
-.sm-eqchip.cortar{background:#ff8a5c;color:#3a1204}
-.sm-eqdecisao{background:rgba(255,176,32,.1);border:1px solid var(--warn);border-radius:var(--radius-md);
-  padding:13px 15px;margin-bottom:10px}
-.sm-eqdecisao.decidido{background:rgba(61,220,132,.08);border-color:rgba(61,220,132,.45)}
-.sm-eqdecisao .tit{font-size:.82rem;margin-bottom:6px}
-.sm-eqdecisao p{font-size:.78rem;line-height:1.55;color:var(--mut);margin-bottom:11px;max-width:82ch}
-.sm-eqdecs{display:flex;gap:9px;flex-wrap:wrap}
-.sm-eqdec{flex:1;min-width:250px;text-align:left;background:var(--navy2);border:1px solid var(--line);
-  border-radius:var(--radius-md);padding:10px 13px;cursor:pointer;color:var(--ink);font:inherit}
-.sm-eqdec:hover{border-color:var(--amber)}
-.sm-eqdec.ativo{border-color:var(--ok);background:rgba(61,220,132,.12)}
-.sm-eqdec b{display:block;font-size:.82rem;margin-bottom:2px}
-.sm-eqdec i{display:block;font-style:normal;font-size:.72rem;color:var(--mut);line-height:1.45}
 .vt-acoes-fim .sm-msg{margin-left:11px;font-size:.76rem;color:var(--mut)}

@@ -704,19 +704,14 @@
         as mesmas abas que entraram, com estilos e fórmulas —, com o LABOR e o DIARISTAS reescritos pelo
         plano: as retiradas somem, os inícios e fins ajustados já vêm mudados, e uma pausa vira duas linhas
         da mesma pessoa. Não é preciso colar nada de volta à mão.</p>
-      <p><b>A quinta ação, e a decisão que ela exige.</b> As quatro fases do motor mexem no quadro fixo.
-        Se depois delas ainda sobra excesso, ele não é fixo — é diária lançada por cima de um quadro já no
-        teto, e cortar mais gente fixa criaria falta em outro dia. Só que essa diária <b>já foi alocada e já
-        está faturada</b>: o Labor se ajusta sozinho porque é projeção, a diária não. Então o app calcula
-        quanto daria para cortar, mostra, e <b>não corta</b> — a exportação fica bloqueada até você escolher
-        entre <b>manter</b> (o excesso sai declarado em REVISAR) e <b>reduzir</b> (retira só o necessário
-        para chegar ao QF). A escolha não mexe no que foi feito no Labor, e fica registrada no METADADOS.</p>
-      <p>Escolhendo reduzir, a ordem de quem sai é a do abate da aba ABS <b>ao contrário</b>: para cobrir
-        falta gasta-se a interna primeiro; para devolver excesso, sai a interna primeiro e a do cliente fica
-        por último.</p>
-      <p><b>O quadro do dia é o fixo do LABOR mais as diárias que a fatura já lança</b> na aba
-        DIARISTAS, e é esse total que vai ao confronto com o QF. A diária conta na curva — vaga ocupada
-        é vaga ocupada — mas a equalização não mexe nela: quem ela ajusta é o quadro fixo.</p>
+      <p><b>O que vai ao confronto é o quadro do LABOR, e só ele.</b> O alvo se chama quadro
+        <b>fixo</b>, e diária não é quadro fixo: é cobrança à parte. O gap é a distância entre os dois
+        — pessoas faltantes ou excedentes —, e é dele que saem as duas sugestões: onde <b>sobra</b>,
+        baixar a curva do Labor pelas quatro ações do motor; onde <b>falta</b>, acrescentar diarista.</p>
+      <p>A diária que a fatura já lança continua <b>lida e informada</b> — aparece embaixo do número,
+        em cinza, e no diagnóstico do dia. O que ela não faz é mudar o tamanho do gap. Ela é lida por um
+        motivo que não mudou: impedir que alguém <b>já cobrado como diarista naquele dia</b> seja
+        sugerido de novo, que é dupla cobrança com nome e data.</p>
       <p><b>E as pessoas que faltam já vêm preenchidas</b>, se a base do SIGO estiver carregada: nos dias
         abaixo do QF o app escolhe diaristas <b>solicitados naquele dia e sem cobrança naquele dia</b>
         — nem no LABOR, nem como diária já lançada nesta fatura —,
@@ -729,10 +724,9 @@
         solicitação <b>não</b> é preenchido para emendar intervalo: a pessoa solicitada em 20/07 e
         22/07 entra nesses dois dias, e o 21/07 fica vazio. O total de conferidos, e de recusados se
         houver, sai no <code class="inline">METADADOS</code>.</p>
-      <p>Repare no efeito: quem cobre a falta é <b>diarista, não quadro fixo</b>, então o
-        <code class="inline">Labor</code> exportado fica <b>abaixo do QF</b> nos dias cobertos por diária —
-        e é assim mesmo. Lançar essa gente no Labor seria cobrá-la como fixo, que é outra coisa. O aviso
-        está escrito no <code class="inline">METADADOS</code> do arquivo.</p>
+      <p>Repare no efeito: como a diária não entra na conta, o <code class="inline">Labor</code>
+        exportado fica <b>abaixo do QF</b> nos dias em que a falta foi coberta por diária — e é assim
+        mesmo. O quadro fixo é aquele; a diferença é diária, cobrada à parte.</p>
       <p>Vão junto, sempre, as abas que explicam o que houve: <code class="inline">EQUALIZACAO</code>
         (cada ação com o motivo, o impacto e as datas de antes e depois), <code class="inline">INCLUSOES</code>
         (quem entrou, por qual solicitante e em que dias), <code class="inline">REVISAR</code> (excesso sem
