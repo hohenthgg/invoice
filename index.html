@@ -460,20 +460,21 @@
 <div class="apppanel" id="panel-validacao">
 
   <div class="vt-modos" id="vt-modos">
-    <button class="vt-modo ativo" data-modo="auditoria">
-      <b>Auditar inconsistências da fatura</b>
-      <i>Cruza LABOR × DIARISTAS e aponta GROOT ID repetido, dupla cobrança, cadastro
-         incompleto e valor incoerente — com o porquê de cada apontamento.</i>
+    <button class="vt-modo ativo" data-modo="simulacao">
+      <b>Fechar a fatura</b>
+      <i>Assistente passo a passo: valida cadastro, confronta quadro × S&amp;OP, cobre
+         falta com diarista ID, elimina excesso com o motor da Fusão — e devolve o
+         mesmo template corrigido.</i>
     </button>
-    <button class="vt-modo" data-modo="simulacao">
-      <b>Simular o retorno</b>
-      <i>Confronta o PREF que o Labor envia com o S&amp;OP diário e prevê, dia a dia,
-         quanto o cliente tende a reconhecer.</i>
+    <button class="vt-modo" data-modo="auditoria">
+      <b>Inconsistências</b>
+      <i>Cards compactos: GROOT repetido, dupla cobrança, mudança de vínculo,
+         cadastro incompleto. Clique num card para entender o motivo.</i>
     </button>
   </div>
 
-  <!-- ---------------- MODO 1 — auditoria ---------------- -->
-  <div class="vt-painel ativo" id="vt-painel-auditoria">
+  <!-- ---------------- MODO 2 — inconsistências ---------------- -->
+  <div class="vt-painel" id="vt-painel-auditoria">
 
   <p class="vt-intro">Audita uma fatura no template padrão como um auditor faria: cruza <b>GROOT ID, nome,
     cargo, vínculo, datas e valores</b> entre as abas <b>LABOR</b> e <b>DIARISTAS</b>, separa o que é erro
@@ -494,12 +495,6 @@
     <div id="vt-cabecalho"></div>
     <div id="vt-quadro"></div>
 
-    <div class="vt-legenda">
-      <span><i class="sev-critico"></i><b>Crítico</b> — provável erro que gera faturamento incorreto</span>
-      <span><i class="sev-revisar"></i><b>Revisar</b> — suspeito, mas pode ser legítimo</span>
-      <span><i class="sev-cadastro"></i><b>Cadastro</b> — padronização ou qualidade de dado</span>
-      <span><i class="sev-info"></i><b>Informativo</b> — encontrado e aparentemente justificável</span>
-    </div>
 
     <div class="vt-cards" id="vt-cards"></div>
     <div class="vt-progresso" id="vt-progresso"></div>
@@ -511,14 +506,14 @@
   </div>
   </div>
 
-  <!-- ---------------- MODO 2 — simulação de retorno ---------------- -->
-  <div class="vt-painel" id="vt-painel-simulacao">
+  <!-- ---------------- MODO 1 — assistente de fechamento ---------------- -->
+  <div class="vt-painel ativo" id="vt-painel-simulacao">
 
-    <p class="vt-intro">Reconstrói o <b>PREF</b> a partir da aba LABOR da fatura, soma o <b>S&amp;OP diário</b>
-      de todas as operações da planilha operacional e prevê o que o cliente tende a reconhecer:
-      <b>Q Pós previsto = MIN(PREF, S&amp;OP)</b>. A previsão é assimétrica de propósito — o cliente pode
-      cortar o que foi enviado acima do planejamento, mas não paga o que não foi enviado.
-      <b>É previsão, não retorno oficial.</b></p>
+    <p class="vt-intro">Suba a fatura no template padrão e receba <b>a mesma fatura corrigida</b> —
+      estrutura, abas e formatação preservadas. O assistente valida o cadastro contra a base
+      oficial de GROOT, confronta o quadro com o S&amp;OP, cobre falta com diarista ID e elimina
+      excesso com o <b>mesmo motor da Fusão de Linhas</b>. Cada correção passa por você antes de
+      entrar no arquivo.</p>
 
     <div class="sm-passos">
       <div class="sm-passo">
@@ -550,11 +545,19 @@
       </div>
       <div class="sm-passo">
         <div class="sm-n">+</div>
-        <div class="sm-drop opcional" id="sm-dropD">
-          <div class="ttl">Diaristas — SIGO <span class="abs-opc">opcional</span></div>
-          <div class="fname" id="sm-fnD">Clique ou arraste o .xlsx</div>
-          <div class="hint">mostra, em cada dia, quantos diaristas havia para cobrir a falta</div>
-          <div class="st" id="sm-stD"></div>
+        <div class="sm-opcionais">
+          <div class="sm-drop opcional" id="sm-dropD">
+            <div class="ttl">Diaristas — SIGO <span class="abs-opc">opcional</span></div>
+            <div class="fname" id="sm-fnD">Clique ou arraste o .xlsx</div>
+            <div class="hint">para cobrir a falta de cada dia com diarista ID</div>
+            <div class="st" id="sm-stD"></div>
+          </div>
+          <div class="sm-drop opcional" id="sm-dropG">
+            <div class="ttl">Base oficial de GROOT <span class="abs-opc">opcional</span></div>
+            <div class="fname" id="sm-fnG">Clique ou arraste o .xlsx</div>
+            <div class="hint">colunas <code>Groot ID · Nome · CPF · Filiais</code> — corrige GROOT digitado errado</div>
+            <div class="st" id="sm-stG"></div>
+          </div>
         </div>
       </div>
       <div class="sm-passo">
@@ -565,46 +568,50 @@
         </div>
       </div>
     </div>
-    <input type="file" id="sm-fileF" accept=".xlsx,.xls"><input type="file" id="sm-fileS" accept=".xlsx,.xls"><input type="file" id="sm-fileD" accept=".xlsx,.xls">
+    <input type="file" id="sm-fileF" accept=".xlsx,.xls"><input type="file" id="sm-fileS" accept=".xlsx,.xls"><input type="file" id="sm-fileD" accept=".xlsx,.xls"><input type="file" id="sm-fileG" accept=".xlsx,.xls">
     <div id="sm-err" class="err hidden"></div>
 
     <div id="sm-result" class="hidden">
-      <div class="sm-selo">Retorno <b>previsto</b> — estimado por MIN(PREF, S&amp;OP). Não é o retorno oficial do cliente.</div>
-      <div id="sm-avisos"></div>
-      <div class="sm-cards" id="sm-cards"></div>
 
-      <div class="sm-bloco">
-        <h3>Desvios, do maior para o menor</h3>
-        <div class="sm-desvios" id="sm-desvios"></div>
-      </div>
+      <!-- O fluxo de fechamento: cada passo é uma seção; o corpo detalhado
+           abre no clique. Quem preenche tudo é js/simulacao-ui.js. -->
+      <section class="fx-passo" id="fx-cadastro" hidden>
+        <header><span class="fx-num">1</span><b>Cadastro × base oficial</b><span class="fx-resumo" id="fx-cadResumo"></span></header>
+        <div class="fx-corpo" id="fx-cadCorpo"></div>
+      </section>
 
-      <div class="sm-bloco">
-        <h3>Dia a dia</h3>
-        <div class="sm-tabela" id="sm-tabela"></div>
-      </div>
+      <section class="fx-passo" id="fx-quadro">
+        <header><span class="fx-num">2</span><b>Quadro × S&amp;OP</b><span class="fx-resumo" id="fx-quadroResumo"></span></header>
+        <div class="fx-corpo" id="fx-quadroCorpo"></div>
+      </section>
 
-      <!-- Sugestões de equalização: mesmo motor da Fusão de Linhas, alvo = QF do cliente.
-           Só aparece quando a fonte do S&OP é o valor fixo do mês. -->
-      <div class="sm-bloco" id="sm-eq-bloco" hidden>
-        <h3>Sugestões de equalização</h3>
-        <p class="sm-eqlead">Quais linhas do LABOR poderiam ser retiradas ou ajustadas para o quadro
-          encostar no QF do cliente sem criar falta em nenhum outro dia. É o <b>mesmo motor</b> que a
-          Fusão de Linhas usa para gerar o Labor ajustado — aqui ele só sugere.</p>
+      <section class="fx-passo" id="fx-faltas">
+        <header><span class="fx-num">3</span><b>Cobrir faltas com diarista ID</b><span class="fx-resumo" id="fx-faltasResumo"></span></header>
+        <div class="fx-corpo" id="fx-faltasCorpo"></div>
+      </section>
+
+      <section class="fx-passo" id="fx-excessos">
+        <header><span class="fx-num">4</span><b>Corrigir excessos no Labor</b><span class="fx-resumo" id="fx-excessosResumo"></span></header>
+        <div class="fx-corpo" id="fx-excessosCorpo"></div>
+      </section>
+
+      <section class="fx-passo fx-final" id="fx-final">
+        <header><span class="fx-num">5</span><b>Revisão e exportação</b><span class="fx-resumo" id="fx-finalResumo"></span></header>
+        <div class="fx-corpo" id="fx-finalCorpo"></div>
+      </section>
+
+      <details class="fx-detalhes" id="fx-detalhes">
+        <summary>Detalhes técnicos e opções</summary>
         <div class="sm-eqopts">
           <label><input type="checkbox" id="sm-eqAdiar" checked> Permitir adiar data de início</label>
           <label>Pausar/retomar a partir de <input type="date" id="sm-eqPausa"></label>
           <label><input type="checkbox" id="sm-eqIncluir" checked> Preencher a falta com diaristas do SIGO</label>
           <span class="nota">As mesmas opções da Fusão de Linhas. Data vazia = nunca pausar automaticamente.</span>
         </div>
-        <div id="sm-eq"></div>
-      </div>
-
-      <div class="vt-acoes-fim">
-        <button class="vt-btn" id="sm-btnExport">Exportar Retorno Simulado (.xlsx)</button>
-      </div>
+        <div id="sm-avisos"></div>
+      </details>
     </div>
 
-    <!-- balão de ajuda: preenchido e posicionado por js/simulacao-ui.js -->
     <div class="sm-tip" id="sm-tip" hidden></div>
   </div>
 </div>
@@ -663,10 +670,42 @@
     </div>
     <div class="concept c5" style="margin-top:14px">
       <span class="chiph">Aba 5 · Validação Template</span>
-      <h3>A fatura tem inconsistência? E quanto o MELI deve reconhecer?</h3>
-      <p>Dois modos, escolhidos nos botões do topo da aba.</p>
+      <h3>Fechar a fatura: do template enviado ao template corrigido</h3>
+      <p>Dois modos, escolhidos nos botões do topo da aba. O principal é o <b>assistente de
+        fechamento</b>: você sobe a fatura e recebe <b>a mesma fatura corrigida</b>, com estrutura,
+        abas e formatação preservadas. O fluxo é passo a passo, e cada correção passa por você.</p>
+      <p class="modo-nota"><b>Fechar a fatura</b> — cinco passos, um embaixo do outro:</p>
+      <p><b>1 · Cadastro × base oficial.</b> Com a base de GROOT carregada
+        (<code class="inline">Groot ID · Nome · CPF · Filiais</code>), o app confere cada pessoa da
+        fatura. GROOT que não bate mas cujo nome existe na base vira <b>sugestão de correção</b>
+        (<i>211618 → 2611618</i>) — nome + filial como contexto, CPF como confirmação forte quando
+        existe. Com <b>mais de um candidato plausível</b> o app não escolhe: marca para decisão
+        humana e lista os candidatos. Nada é corrigido sem o seu clique, e toda correção aplicada
+        pode ser desfeita.</p>
+      <p><b>2 · Quadro × S&amp;OP.</b> A tabela mais simples do app, de propósito:
+        <code class="inline">Data | Quadro | SOP | Diferença</code>. O quadro é o Labor ativo mais as
+        diárias já lançadas na fatura; estornos (rateio ≤ 0) não são pessoas, ficam <b>preservados
+        como estão</b> e nunca são candidatos a ajuste.</p>
+      <p><b>3 · Cobrir faltas com diarista ID.</b> Onde o quadro fica abaixo do alvo, entra diarista
+        da base SIGO <b>solicitado naquele mesmo dia</b> — primeiro os da ID, só a quantidade
+        necessária. Ninguém entra em dia em que já está no Labor, já é diária da fatura ou já foi
+        adicionado pelo próprio processo. A tela diz só <i>“faltavam X → adicionados X”</i>; os
+        nomes abrem no clique. As novas diárias entram na <b>própria aba DIARISTAS</b> do template,
+        no padrão das linhas originais.</p>
+      <p><b>4 · Corrigir excessos no Labor.</b> O <b>mesmo motor da Fusão de Linhas</b>, sem heurística
+        nova: analisa o período inteiro e decide entre retirar linha, adiar início, antecipar fim ou
+        pausar e retomar — cada ajuste só entra se resolver excesso <b>sem criar falta indevida em
+        outro dia</b>. O Labor é sempre a primeira camada. Se depois disso ainda sobra excesso causado
+        por diárias já lançadas, o app <b>pergunta antes de exportar</b>: <i>manter diaristas</i>
+        (aceitar o excesso residual, declarado em REVISAR) ou <i>reduzir diaristas</i> (retirar só o
+        necessário). Nunca decide sozinho.</p>
+      <p><b>5 · Revisão e exportação.</b> Um resumo curto — <i>+ X diaristas · − X linhas · ↪ X inícios
+        · ↩ X fins · ✎ X GROOTs · ⚠ X para revisar</i> — e o botão que devolve <b>a própria fatura
+        original corrigida</b>, não um relatório paralelo: as mesmas abas que entraram, com LABOR e
+        DIARISTAS corrigidos e o memorial em EQUALIZACAO / INCLUSOES / CADASTRO / REVISAR /
+        METADADOS. Tudo que não foi objeto de correção sai como entrou.</p>
 
-      <p class="modo-nota"><b>Auditar inconsistências da fatura</b> — solte a fatura no template padrão e a aba a examina <b>como um auditor faria</b>: em vez de validar campo a campo, ela junta evidências de linhas diferentes e conclui. Duas linhas com o mesmo Groot ID têm exatamente os mesmos campos preenchidos e podem ser coisas opostas:</p>
+      <p class="modo-nota"><b>Inconsistências</b> — a tela de diagnóstico, agora compacta: cards de uma linha (<i>nome · o que há</i>) que abrem no clique para mostrar o raciocínio. Solte a fatura e a aba a examina <b>como um auditor faria</b>: em vez de validar campo a campo, ela junta evidências de linhas diferentes e conclui. Duas linhas com o mesmo Groot ID têm exatamente os mesmos campos preenchidos e podem ser coisas opostas:</p>
       <p>Se os nomes são <b>o mesmo nome</b> (um traz um sobrenome a mais, ou difere por uma letra), os períodos <b>se encostam</b> sem sobrepor e o vínculo evolui de Temporário para Efetivo, é uma <b>efetivação</b> — sai como <i>Informativo</i>, com a sugestão de consolidar numa linha só, apagando a DATA FIM. Se os nomes <b>não têm relação</b>, os cargos diferem e os períodos <b>se sobrepõem</b> com as duas linhas positivas, são <b>duas pessoas cobrando pelo mesmo identificador</b> — sai como <i>Crítico</i>.</p>
       <p>O <b>sinal do lançamento</b> muda a conclusão. A mesma sobreposição entre LABOR e DIARISTAS é <b>dupla cobrança</b> quando o LABOR é positivo e cai para <i>Revisar</i> quando é negativo — negativo costuma ser estorno, desligamento retroativo ou a própria devolução do fixo para pagar os dias como diária. O app não decide que um lançamento negativo está errado.</p>
       <p>O que a aba procura: <b>Groot ID compartilhado por pessoas diferentes</b> · transição <b>Temporário → Efetivo</b> · variação cadastral de nome · períodos sobrepostos · <b>LABOR × DIARISTA</b> · <b>Groot ID ausente</b> (com destaque para auxiliar e operador, os cargos conciliados pessoa a pessoa) · <b>Groot fora do padrão</b>, aprendido da própria planilha — se 97% têm 7 dígitos, o app diz isso em vez de afirmar que o de 6 está errado · homônimos · diária duplicada no mesmo dia · <code class="inline">VALOR FINAL</code> incoerente com quantidade × unitário · datas invertidas · data fora do período · campos obrigatórios vazios · grafia inconsistente do regime · tarifa fora da mediana do mesmo tipo · linhas idênticas · hora extra de quem não está no LABOR.</p>
@@ -794,6 +833,7 @@
 
 <!-- Aba 5: o motor de auditoria vem antes da tela que o consome. -->
 <script src="js/validacao.js"></script>
+<script src="js/cadastro.js"></script>
 <script src="js/validacao-ui.js"></script>
 <script src="js/simulacao.js"></script>
 <script src="js/simulacao-ui.js"></script>

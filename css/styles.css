@@ -1389,3 +1389,97 @@ body[data-modo-conciliacao="conciliar"] footer{display:none!important}
 .sm-eqchip.incluir{background:var(--ok);color:#04240f}
 .sm-tabela td .sm-comp{display:block;color:var(--mut);font-size:.66rem;font-weight:400;margin-top:2px;white-space:nowrap}
 .vt-acoes-fim .sm-msg{margin-left:11px;font-size:.76rem;color:var(--mut)}
+
+/* ---- Fluxo de fechamento (Validação Template · assistente) ---- */
+.fx-passo{border:1px solid var(--line);border-radius:var(--radius-md);background:var(--navy2);
+  margin-bottom:12px;overflow:hidden}
+.fx-passo>header{display:flex;align-items:center;gap:11px;padding:11px 15px;background:var(--panel);
+  border-bottom:1px solid var(--line)}
+.fx-passo>header b{font-size:.88rem}
+.fx-num{width:24px;height:24px;border-radius:50%;background:var(--amber);color:#1a1305;
+  font-weight:800;font-size:.78rem;display:flex;align-items:center;justify-content:center;flex:none}
+.fx-resumo{margin-left:auto;font-size:.74rem;color:var(--mut);font-family:var(--mono);text-align:right}
+.fx-corpo{padding:13px 15px}
+.fx-nada{font-size:.78rem;color:var(--mut);line-height:1.6}
+.fx-frase{font-size:.8rem;line-height:1.65;margin-bottom:11px;max-width:88ch}
+.fx-exp>summary{cursor:pointer;font-size:.78rem;color:var(--amber);padding:4px 0}
+.fx-detalhes{margin-top:4px}
+.fx-detalhes>summary{cursor:pointer;font-size:.78rem;color:var(--mut);padding:6px 2px}
+.fx-detalhes[open]>summary{color:var(--amber)}
+
+/* passo 2 — a tabela mais simples do app, de propósito */
+.fx-tab{width:100%;border-collapse:collapse;font-size:.8rem}
+.fx-tab th{text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--mut);padding:7px 10px;border-bottom:1px solid var(--line)}
+.fx-tab td{padding:6px 10px;border-bottom:1px solid var(--line);font-family:var(--mono)}
+.fx-tab td small{display:block;color:var(--mut2);font-size:.66rem}
+.fx-tab .forte{font-weight:700}
+.fx-tab .pos{color:var(--bad);font-weight:700}
+.fx-tab .neg{color:var(--warn);font-weight:700}
+.fx-tab tr.ok td:last-child{color:var(--ok)}
+.fx-tab tr.acima{background:rgba(255,107,107,.05)}
+.fx-tab tr.abaixo{background:rgba(255,176,32,.05)}
+
+/* passo 5 — o resumo curto */
+.fx-resumofinal{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.fx-rl{display:flex;align-items:baseline;gap:9px;font-size:.84rem;font-family:var(--mono)}
+.fx-rl span{width:20px;text-align:center;font-weight:800}
+.fx-rl.mais span{color:var(--ok)}
+.fx-rl.menos span{color:var(--bad)}
+.fx-rl.aj span{color:var(--amber)}
+.fx-rl.rev span{color:var(--warn)}
+.fx-rl.ok span{color:var(--ok)}
+
+/* cards de cadastro (passo 1) */
+.cad-card{border:1px solid var(--line);border-radius:var(--radius-md);background:var(--panel);
+  margin-bottom:8px;overflow:hidden}
+.cad-card .cab{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;flex-wrap:wrap}
+.cad-card .cab b{font-size:.82rem}
+.cad-card .cab code{font-family:var(--mono);font-size:.78rem;color:var(--amber)}
+.cad-card .conf{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:var(--mut)}
+.cad-card .conf.alta{color:var(--ok)}
+.cad-card .cab .vt-btn.mini{margin-left:auto;font-size:.72rem;padding:5px 12px}
+.cad-card .det{display:none;padding:2px 12px 11px;font-size:.76rem;line-height:1.6;color:var(--mut)}
+.cad-card.aberto .det{display:block}
+.cad-card .det .ref b{color:var(--ink)}
+.cad-chip{font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  padding:3px 8px;border-radius:999px;background:var(--line2);color:var(--ink);flex:none}
+.cad-chip.corrigir{background:var(--bad);color:#2a0d0d}
+.cad-chip.preencher{background:var(--amber);color:#2a1e05}
+.cad-chip.ambiguo{background:#b98cff;color:#1c0d33}
+.cad-cands{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}
+.cad-cand{background:var(--navy2);border:1px solid var(--line);border-radius:9px;color:var(--ink);
+  font:inherit;font-size:.74rem;padding:7px 11px;cursor:pointer}
+.cad-cand:hover{border-color:var(--amber)}
+.cad-fora{margin-top:9px}
+.cad-fora>summary{cursor:pointer;font-size:.76rem;color:var(--mut)}
+.cad-foraitem{font-size:.75rem;color:var(--mut);padding:6px 2px;border-bottom:1px solid var(--line);line-height:1.5}
+.cad-foraitem b{color:var(--ink)}
+.cad-aplicadas{margin-bottom:9px}
+.cad-ok{font-size:.78rem;color:var(--ok);padding:5px 0;font-family:var(--mono)}
+.cad-ok code{color:var(--ink)}
+.cad-undo{background:none;border:1px solid var(--line);border-radius:7px;color:var(--mut);
+  font:inherit;font-size:.68rem;padding:2px 8px;cursor:pointer;margin-left:6px}
+.cad-undo:hover{border-color:var(--bad);color:var(--bad)}
+
+/* a decisão sobre a diária (voltou no passo 4) */
+.sm-eqdecisao{background:rgba(255,176,32,.1);border:1px solid var(--warn);border-radius:var(--radius-md);
+  padding:13px 15px;margin-bottom:10px}
+.sm-eqdecisao.decidido{background:rgba(61,220,132,.08);border-color:rgba(61,220,132,.45)}
+.sm-eqdecisao .tit{font-size:.82rem;margin-bottom:6px}
+.sm-eqdecisao p{font-size:.78rem;line-height:1.55;color:var(--mut);margin-bottom:11px;max-width:82ch}
+.sm-eqdecs{display:flex;gap:9px;flex-wrap:wrap}
+.sm-eqdec{flex:1;min-width:250px;text-align:left;background:var(--navy2);border:1px solid var(--line);
+  border-radius:var(--radius-md);padding:10px 13px;cursor:pointer;color:var(--ink);font:inherit}
+.sm-eqdec:hover{border-color:var(--amber)}
+.sm-eqdec.ativo{border-color:var(--ok);background:rgba(61,220,132,.12)}
+.sm-eqdec b{display:block;font-size:.82rem;margin-bottom:2px}
+.sm-eqdec i{display:block;font-style:normal;font-size:.72rem;color:var(--mut);line-height:1.45}
+.sm-eqchip.cortar{background:#ff8a5c;color:#3a1204}
+.vt-acoes-fim .sm-msg{margin-left:11px;font-size:.76rem;color:var(--mut)}
+.sm-opcionais{display:flex;gap:10px;flex-wrap:wrap;flex:1}
+.sm-opcionais .sm-drop{flex:1;min-width:240px}
+.vt-btn.mini{font-size:.72rem;padding:5px 12px}
+.vt-linha1{font-size:.74rem;color:var(--mut);font-family:var(--mono);margin-bottom:10px}
+.fx-exp-grupo{padding:0}
+.fx-exp-grupo>summary{padding:8px 13px;border-bottom:1px solid var(--line)}

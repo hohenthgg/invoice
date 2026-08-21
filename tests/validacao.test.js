@@ -42,6 +42,14 @@ const acharRegra = (r,regra) => r.achados.filter(a => a.regra === regra);
 /* ================================================================ */
 console.log("\nComparação de nomes — a base de todo o resto");
 
+/* Token repetido não pode inflar a contenção: "LORRANY SILVA SANTOS
+   SILVA" repete SILVA, e contar a repetição fazia "JULIANA DA SILVA" —
+   dois tokens, ambos presentes em Lorrany — passar por variação. Gente
+   diferente virando variação é o pior erro deste comparador. */
+check(valCompararNomes("LORRANY SILVA SANTOS SILVA","JULIANA DA SILVA").relacao !== "variacao",
+      "sobrenome repetido não faz outra pessoa virar variação");
+check(valCompararNomes("LORRANY SILVA SANTOS SILVA","MARCELA SILVA DOS SANTOS").relacao !== "variacao",
+      "dois sobrenomes em comum sem contenção real seguem sendo outra pessoa");
 check(valCompararNomes("MARIANA COSTA DO AMARAL SANTOS","MARIANA COSTA DO AMARAL").relacao === "variacao",
       "um sobrenome a mais é a mesma pessoa, não outra");
 check(valCompararNomes("SIMONE APARECIDA CARDOSO","SIMONE PARECIDA CARDOSO").relacao === "variacao",

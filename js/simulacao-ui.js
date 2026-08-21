@@ -20,7 +20,10 @@ const norm = s => String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g,""
   .toUpperCase().replace(/\s+/g," ").trim();
 
 const S = { fatura:null, sop:null, diar:null, sim:null,
-            nomeF:"", nomeS:"", nomeD:"", fonte:"planilha" };
+            baseG:null, cadastro:null, correcoes:[],
+            nomeF:"", nomeS:"", nomeD:"", nomeG:"", fonte:"planilha",
+            /* null = ninguém decidiu ainda; "manter" | "reduzir" */
+            decisaoDiarias:null };
 
 /* De onde vem o S&OP: da planilha operacional, dia a dia por operação,
    ou de um valor fixo que vale para todos os dias do período. O fixo
@@ -87,7 +90,7 @@ function lerFatura(wb){
   const iG=col(c,"GROOT ID"), iN=col(c,"NOME"), iC=col(c,"CARGO"), iCt=col(c,"DESCRICAO CONTA"),
         iR=col(c,"REGIME DE CONTRATO"), iI=col(c,"DATA DE INICIO"), iF=col(c,"DATA FIM"),
         iRa=col(c,"% RATEIO","RATEIO"), iP=col(c,"PERIODO"), iMt=col(c,"MATRICULA"),
-        iDf=col(c,"DIAS TRABALHADOS X FOLGA"), iEs=col(c,"ESCALA");
+        iDf=col(c,"DIAS TRABALHADOS X FOLGA"), iEs=col(c,"ESCALA"), iU=col(c,"UNIDADE");
   const faltando = [];
   if(iI < 0) faltando.push("DATA DE INÍCIO");
   if(iF < 0) faltando.push("DATA FIM");
@@ -121,7 +124,12 @@ function lerFatura(wb){
   }
   if(!linhas.length) return { erro:'A aba "'+nome+'" não tem linhas com dado.' };
   const diarias = lerDiariasDaFatura(wb);
-  return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb),
+  /* O código da unidade (SMG9) sai da própria coluna UNIDADE do LABOR —
+     é ele que casa com a coluna Filiais da base oficial. */
+  let unidadeCod = "";
+  if(iU >= 0) for(const l of linhas){ const v = String(l.bruta[iU] ?? "").trim();
+    if(v){ unidadeCod = v; break; } }
+  return { aba:nome, linhas, comp, unidade: unidadeDaFatura(wb), unidadeCod,
     diarias, layoutDiarias: lerDiariasDaFatura.layout || null,
     layout:{ topo: rows.slice(0, h.idx+1), largura: Math.max(h.cels.length,
       ...linhas.map(l => l.bruta.length)),
@@ -185,6 +193,37 @@ function unidadeDaFatura(wb){
     }
   }
   return "";
+}
+
+/* ================================================================
+   LEITURA — BASE OFICIAL DE GROOT
+
+   Groot ID | Nome | CPF | Filiais, em qualquer aba: vale a primeira
+   cujo cabeçalho tenha GROOT e NOME. CPF e Filiais são opcionais —
+   sem eles a conferência perde força, não a validade.
+   ================================================================ */
+function lerBaseGroot(wb){
+  for(const nomeAba of wb.SheetNames){
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[nomeAba],{header:1,defval:""});
+    const h = acharCabecalho(rows,["GROOT","NOME"]);
+    if(!h) continue;
+    const c = h.cels;
+    const iG=col(c,"GROOT ID","GROOT"), iN=col(c,"NOME"),
+          iC=col(c,"CPF"), iF=col(c,"FILIAIS","FILIAL");
+    const regs = [];
+    for(let i=h.idx+1;i<rows.length;i++){
+      const r = rows[i]; if(!r) continue;
+      const groot = String(r[iG] ?? "").replace(/\D/g,"");
+      const nomeP = String(r[iN] ?? "").trim();
+      if(!groot || !nomeP) continue;
+      regs.push({ groot, nome:nomeP,
+        cpf: iC >= 0 ? String(r[iC] ?? "").trim() : "",
+        filiais: iF >= 0 ? String(r[iF] ?? "").trim() : "" });
+    }
+    if(regs.length) return { aba:nomeAba, regs,
+      comCpf: regs.filter(r => r.cpf).length };
+  }
+  return { erro:"Nenhuma aba com colunas GROOT ID e NOME — é este o formato da base oficial." };
 }
 
 /* ================================================================
@@ -349,7 +388,8 @@ function bindDrop(idDrop, idFile, fn){
   file.onchange = () => { const f = file.files[0]; file.value = ""; if(f) fn(f, drop); };
 }
 
-const CAMPOS = { fatura:["sm-stF","sm-fnF"], sop:["sm-stS","sm-fnS"], diar:["sm-stD","sm-fnD"] };
+const CAMPOS = { fatura:["sm-stF","sm-fnF"], sop:["sm-stS","sm-fnS"],
+                 diar:["sm-stD","sm-fnD"], groot:["sm-stG","sm-fnG"] };
 
 function carregar(qual, file, drop){
   const [idSt, idFn] = CAMPOS[qual];
@@ -363,11 +403,14 @@ function carregar(qual, file, drop){
       const wb = XLSX.read(e.target.result,{type:"array",cellDates:true});
       const r = qual === "fatura" ? lerFatura(wb)
               : qual === "sop"    ? lerSop(wb)
+              : qual === "groot"  ? lerBaseGroot(wb)
                                   : lerDiaristasSigo(wb, S.fatura ? S.fatura.unidade : "");
       if(r.erro){ st.textContent = "✗ "+r.erro; st.className = "st bad"; drop.classList.add("err");
                   S[qual] = null; return pronto(); }
       if(qual === "fatura"){
         S.fatura = r; S.nomeF = file.name;
+        S.decisaoDiarias = null;   // fatura nova, decisão nova
+        S.correcoes = []; S.cadastro = null;
         /* O arquivo cru fica guardado: a exportação devolve a FATURA
            INTEIRA com duas abas trocadas, e as outras onze só continuam
            lá se vierem do original. */
@@ -384,6 +427,12 @@ function carregar(qual, file, drop){
         S.sop = r; S.nomeS = file.name;
         st.textContent = "✓ "+r.blocos.length+" bloco(s): "+r.blocos.map(b=>b.rotulo).join(" + ")
           + (r.recusadas.length ? " · "+r.recusadas.length+" aba(s) ignorada(s)" : "");
+      } else if(qual === "groot"){
+        S.baseG = r; S.nomeG = file.name;
+        st.textContent = "✓ aba "+r.aba+" · "+r.regs.length+" pessoa(s) na base"
+          + (r.comCpf ? " · "+r.comCpf+" com CPF" : "");
+        /* Base carregada depois da análise: reconfere na hora. */
+        if(S.sim) desenharCadastro();
       } else {
         S.diar = r; S.nomeD = file.name;
         const nId = r.regs.filter(x => x.solic === "id").length;
@@ -486,247 +535,27 @@ function rodar(blocos, per, fonte, valorFixo){
 }
 
 /* ================================================================
-   AJUDA NO HOVER
+   TELA — O FLUXO DE FECHAMENTO
 
-   Cada número da tela é composto de um jeito, e o jeito não é óbvio:
-   "Q Pós previsto" não é o S&OP, "HC-dia em risco" não desconta os
-   dias abaixo, e o PREF não é a contagem de linhas do LABOR. Em vez de
-   um parágrafo de legenda que ninguém lê, a composição fica atrás do
-   cursor, no próprio número.
+   Cinco passos, um embaixo do outro, cada um com um resumo de uma
+   linha no cabeçalho e o detalhe no corpo. A régua de tudo aqui é a
+   pedida na especificação: poucas informações por tela, decisões
+   explícitas, detalhe técnico recolhido.
 
-   O balão é posicionado por JS, e não por CSS, porque a tabela vive
-   dentro de um contêiner com `overflow-x: auto` — um ::after seria
-   recortado na borda do scroll.
-   ================================================================ */
-function tipPref(){
-  return "<b>Quantidade de pessoas que o LABOR tem no dia.</b> A diária que a fatura lança NÃO entra "
-    + "aqui: o alvo se chama quadro <b>fixo</b>, e diária é cobrança à parte. Ela aparece embaixo, em "
-    + "cinza, porque muda o que fazer com o gap — não o tamanho dele. A conta é a "
-    + "<b>início ≤ dia</b> e <b>fim ≥ dia</b>, com DATA FIM vazia valendo até o fim do período. "
-    + "Entram só as linhas de <b>LABOR DIRETO</b>, com cargo da lista do PREF e classificadas como "
-    + "competência corrente. Ficam de fora liderança e indiretos, a linha de ABS e todo retroativo.";
-}
-function tipSop(blocos){
-  return "Linha <b>Esperado</b> de cada aba de operação da planilha operacional, somada "
-    + "<b>por data</b> — nunca por posição de coluna. Neste arquivo: "
-    + blocos.map(b => "<b>"+esc(b)+"</b>").join(" + ")+".";
-}
-const TIP = {
-  qPos: "<b>MIN(PREF, S&OP)</b> do dia. É previsão conservadora e assimétrica de propósito: "
-      + "o cliente pode <b>cortar</b> o que foi enviado acima do plano, mas não paga o que não foi "
-      + "enviado. Com PREF abaixo do S&OP, o previsto é o próprio PREF — não o S&OP.",
-  gap:  "<b>PREF − S&OP</b> do dia. Positivo: enviado acima do plano, é o que pode ser cortado. "
-      + "Negativo: enviado abaixo do plano, indício de pessoa faturável faltando no Labor.",
-  corr: "<b>Q Pós previsto − PREF</b>. Fica negativa quando há risco de corte e <b>zero</b> quando "
-      + "o PREF está abaixo do S&OP — o app não presume aumento automático.",
-  data: "Cada dia do período faturado, do dia 16 do mês anterior ao dia 15 do mês da competência.",
-  status: "Comparação entre PREF e S&OP do dia: acima → possível correção, igual → alinhado, "
-      + "abaixo → possível subfaturamento. <b>Revisão necessária</b> quando o dia não pôde ser "
-      + "reconstruído e nenhum número foi previsto.",
-  diag: "A leitura do dia em texto, já com os números que a produziram.",
-  totalPref: "Soma do PREF de <b>todos os dias</b> do período, em HC-dia.",
-  totalSop:  "Soma do S&OP de <b>todos os dias</b> do período, em HC-dia.",
-  totalPos:  "Soma de <b>MIN(PREF, S&OP)</b> dia a dia. Não é o menor dos dois totais: é a soma "
-           + "dos menores de cada dia, que pode ser diferente.",
-  risco: "Soma de <b>(PREF − S&OP)</b> apenas nos dias em que o PREF está <b>acima</b>. Os dias "
-       + "abaixo <b>não abatem</b> este total — o que sobra num dia não compensa o que faltou "
-       + "em outro.",
-  abaixo: "Soma de <b>(S&OP − PREF)</b> apenas nos dias em que o PREF está <b>abaixo</b>. "
-        + "Não vira receita: é indício de gente faturável faltando no Labor.",
-  diasAlinhados: "Dias em que PREF e S&OP são iguais — nenhuma correção prevista.",
-  diasReducao: "Dias com PREF acima do S&OP.",
-  diasSub: "Dias com PREF abaixo do S&OP.",
-  diaristas: "Diaristas <b>solicitados no SIGO</b> naquele dia, contados uma vez por pessoa. "
-      + "Não entram os que <b>já constam no LABOR do dia</b> — esses já estão sendo cobrados como "
-      + "quadro fixo, e contá-los de novo seria contar duas vezes. Quem tem estorno no LABOR "
-      + "cobrindo o dia <b>conta</b>: o fixo foi devolvido justamente para pagar a diária. "
-      + "O detalhe separa quem foi pedido pela <b>ID</b> de quem foi pedido pelo <b>cliente</b>.",
-  totalDiaristas: "Soma dos diaristas disponíveis em todos os dias, em pessoa-dia.",
-  abate: "Quanto da falta os diaristas disponíveis dariam para cobrir: em cada dia, o menor entre "
-       + "os disponíveis e a própria falta. Um dia nunca fica positivo por sobra de diarista.",
-  diasRevisao: "Dias que não puderam ser reconstruídos — S&OP sem valor para o dia, ou linha do "
-             + "Labor que não pôde ser classificada. Saem sem número previsto, de propósito."
-};
+     1  Cadastro × base oficial   (se a base de GROOT foi carregada)
+     2  Quadro × S&OP             Data | Quadro | SOP | Diferença
+     3  Cobrir faltas             faltavam X → adicionados Y
+     4  Corrigir excessos         o motor da Fusão, e a decisão da diária
+     5  Revisão e exportação      o resumo curto e o arquivo
 
-/* Um único balão para o painel inteiro, movido conforme o cursor. */
-function ligarAjuda(){
-  const tip = $("sm-tip"), painel = $("vt-painel-simulacao");
-  if(!tip || !painel || painel.dataset.ajuda === "1") return;
-  painel.dataset.ajuda = "1";
-  painel.addEventListener("mouseover", ev => {
-    const alvo = ev.target.closest("[data-tip]");
-    if(!alvo) return;
-    tip.innerHTML = alvo.dataset.tip;
-    tip.hidden = false;
-    posicionar(alvo, tip, painel);
-  });
-  painel.addEventListener("mouseout", ev => {
-    const alvo = ev.target.closest("[data-tip]");
-    if(alvo && !alvo.contains(ev.relatedTarget)) tip.hidden = true;
-  });
-  painel.addEventListener("scroll", () => { tip.hidden = true; }, true);
-}
-function posicionar(alvo, tip, painel){
-  const a = alvo.getBoundingClientRect(), p = painel.getBoundingClientRect();
-  const largura = tip.offsetWidth, altura = tip.offsetHeight;
-  let x = a.left - p.left + a.width/2 - largura/2;
-  x = Math.max(6, Math.min(x, painel.clientWidth - largura - 6));
-  /* Acima do alvo quando cabe, abaixo quando não. O "cabe" é medido na
-     JANELA e não no painel: o painel é alto e rola, então um alvo no
-     topo da tela tem espaço de sobra em coordenadas do painel e mesmo
-     assim jogaria o balão para fora do campo de visão. Cabeçalho de
-     tabela é sticky e vive colado no topo — é justamente o caso. */
-  const cabeAcima = a.top - altura - 8 > 4;
-  const y = cabeAcima ? a.top - p.top - altura - 8 : a.bottom - p.top + 8;
-  tip.style.left = x + "px";
-  tip.style.top  = y + "px";
-}
-
-/* ================================================================
-   TELA
+   O raciocínio não mora aqui: quadro e plano vêm de js/simulacao.js,
+   o motor é o de js/equalizacao.js, o cadastro é js/cadastro.js.
    ================================================================ */
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const n2 = v => v === null || v === undefined || !isFinite(Number(v))
   ? "—" : Number(Number(v).toFixed(2)).toLocaleString("pt-BR");
 const sinal = v => v === null || v === undefined ? "—" : (Number(v) > 0 ? "+" : "") + n2(v);
 
-function render(){
-  const sim = S.sim, t = sim.totais;
-  $("sm-result").classList.remove("hidden");
-
-  const selo = $("sm-result").querySelector(".sm-selo");
-  if(selo){
-    selo.innerHTML = 'Retorno <b>previsto</b> — estimado por MIN(PREF, S&amp;OP). Não é o retorno '
-      + 'oficial do cliente. S&amp;OP '
-      + (sim.fonte === "fixo"
-          ? 'de <b>valor fixo</b>: '+n2(sim.valorFixo)+' HC em todos os dias do período.'
-          : 'da <b>planilha operacional</b>, dia a dia ('+sim.blocos.map(esc).join(" + ")+').');
-  }
-
-  $("sm-avisos").innerHTML = sim.avisos.map(a =>
-    '<div class="sm-aviso '+a.tipo+'">'+esc(a.texto)+'</div>').join("");
-
-  const cards = [
-    ["Labor total enviado", n2(t.pref), "HC-dia"
-      + (t.diarias ? " · "+n2(t.diarias)+" diária à parte" : ""),
-      "", TIP.totalPref+" "+tipPref()],
-    ["S&OP total", n2(t.cliente), "HC-dia", "", TIP.totalSop+" "+tipSop(sim.blocos)],
-    ["Q Pós total previsto", n2(t.pos), "HC-dia", "ok", TIP.totalPos+" "+TIP.qPos],
-    ["HC-dia em risco de correção", n2(t.hcEmRisco), "acima do S&OP", t.hcEmRisco > 0 ? "bad" : "ok", TIP.risco],
-    ["HC-dia abaixo do S&OP", n2(t.hcAbaixo), "possível subfaturamento", t.hcAbaixo > 0 ? "warn" : "ok", TIP.abaixo],
-    ["Dias alinhados", t.alinhado, "de "+t.dias, "ok", TIP.diasAlinhados],
-    ["Dias com possível redução", t.reducao, "PREF acima do S&OP", t.reducao ? "bad" : "ok", TIP.diasReducao],
-    ["Dias com possível subfaturamento", t.subfaturamento, "PREF abaixo do S&OP", t.subfaturamento ? "warn" : "ok", TIP.diasSub]
-  ];
-  if(t.revisao) cards.push(["Dias para revisão", t.revisao, "não reconstruídos", "warn", TIP.diasRevisao]);
-  if(t.diaristasDisp !== undefined){
-    cards.push(["Diaristas disponíveis", n2(t.diaristasDisp),
-      "pessoa-dia" + (t.diaristasOcupados ? " · "+t.diaristasOcupados+" já no LABOR" : ""),
-      "", TIP.totalDiaristas]);
-    cards.push(["Falta que os diaristas cobririam", n2(t.abatePossivel), "HC-dia",
-      t.abatePossivel > 0 ? "ok" : "", TIP.abate]);
-  }
-  $("sm-cards").innerHTML = cards.map(([l,v,s,cls,tip]) =>
-    '<div class="sm-card'+(cls?" "+cls:"")+'" data-tip="'+esc(tip)+'"><div class="v">'+esc(String(v))+'</div>'
-    + '<div class="l">'+esc(l)+'</div><div class="s">'+esc(s)+'</div></div>').join("");
-
-  desenharDesvios(sim.dias);
-  desenharTabela(sim);
-  desenharEqualizacao();
-  ligarAjuda();
-}
-
-function desenharDesvios(dias){
-  const grupos = [
-    ["reducao","Provável redução", dias.filter(d => d.status === "reducao").sort((a,b)=>b.gap-a.gap)],
-    ["subfaturamento","Possível subfaturamento", dias.filter(d => d.status === "subfaturamento").sort((a,b)=>a.gap-b.gap)],
-    ["revisao","Revisão necessária", dias.filter(d => d.status === "revisao")],
-    ["alinhado","Alinhado", dias.filter(d => d.status === "alinhado")]
-  ];
-  $("sm-desvios").innerHTML = grupos.filter(g => g[2].length).map(([k,titulo,ds]) =>
-    '<div class="sm-grupo st-'+k+'">'
-    + '<header><b>'+esc(titulo)+'</b><span>'+ds.length+' dia(s)</span></header>'
-    + '<div class="sm-chips">'+ds.map(d =>
-        '<span class="sm-chipdia" title="'+esc(d.diagnostico)+'">'+fmtShort(d.data)
-        + (d.gap === null ? '' : '<b>'+sinal(d.gap)+'</b>')+'</span>').join("")
-    + '</div></div>').join("");
-}
-
-/* Total do dia, com a origem embaixo. Ganha destaque só quando falta
-   gente — é aí que a disponibilidade responde alguma coisa. */
-function celulaDiaristas(d){
-  const c = d.diaristas;
-  if(!c) return '<td>—</td>';
-  const util = d.gap !== null && d.gap < 0;
-  const partes = [];
-  if(c.dispId)   partes.push(c.dispId+" ID");
-  if(c.dispMeli) partes.push(c.dispMeli+" cliente");
-  if(c.dispSem)  partes.push(c.dispSem+" s/ solic.");
-  return '<td class="sm-diar'+(util && c.disp ? " util" : "")+'">'
-    + '<b>'+n2(c.disp)+'</b>'
-    + (partes.length ? '<small>'+esc(partes.join(" · "))+'</small>' : "")
-    + (c.ocupados ? '<small class="ocup">'+c.ocupados+' já no LABOR</small>' : "")
-    + '</td>';
-}
-
-/* A primeira coluna é a quantidade de pessoas que o LABOR tem no dia.
-   A diária da fatura sai embaixo, em cinza, como informação: ela não
-   entra na conta contra o QF — o alvo é quadro FIXO —, mas muda o que
-   fazer com o gap. */
-function celulaQuadro(d){
-  return '<td class="forte">'+n2(d.pref)
-    + (d.diarias ? '<small class="sm-comp">+ '+n2(d.diarias)+' diária à parte</small>' : "")
-    + '</td>';
-}
-
-function desenharTabela(sim){
-  const th = (rotulo, tip) => '<th data-tip="'+esc(tip)+'">'+rotulo+'</th>';
-  /* A coluna por operação só existe quando há mais de uma: com um bloco
-     só — o caso do S&OP fixo — ela repetiria o total logo ao lado. */
-  const detalhar = sim.blocos.length > 1;
-  const temDiar = sim.dias.some(d => d.diaristas);
-  const cabBlocos = detalhar ? sim.blocos.map(b => th(esc(b),
-    "Linha <b>Esperado</b> da aba de <b>"+esc(b)+"</b>, na coluna deste dia. "
-    + "A coluna é resolvida para a data completa antes de entrar na soma.")).join("") : "";
-  const linhas = sim.dias.map(d =>
-    '<tr class="st-'+d.status+'">'
-    + '<td>'+fmtYmd(d.data)+'</td>'
-    + (detalhar ? d.blocos.map(b => '<td>'+n2(b.valor)+'</td>').join("") : "")
-    + '<td class="forte">'+n2(d.qCliente)+'</td>'
-    + celulaQuadro(d)
-    + '<td class="forte">'+n2(d.qPos)+'</td>'
-    + '<td class="'+(d.gap > 0 ? "pos" : d.gap < 0 ? "neg" : "")+'">'+sinal(d.gap)+'</td>'
-    + (temDiar ? celulaDiaristas(d) : "")
-    + '<td class="'+(d.correcao < 0 ? "neg" : "")+'">'+sinal(d.correcao)+'</td>'
-    + '<td><span class="sm-st st-'+d.status+'">'+esc(SIM_STATUS_LABEL[d.status])+'</span></td>'
-    + '<td class="diag">'+esc(d.diagnostico)+'</td></tr>').join("");
-  /* Com o valor fixo, a coluna é o QF do cliente — chamá-la de S&OP
-     seria dizer que veio da planilha operacional, e não veio. */
-  $("sm-tabela").innerHTML = '<table><thead><tr>'+th("Data", TIP.data)+cabBlocos
-    + th(sim.fonte === "fixo" ? "QF" : "S&amp;OP", tipSop(sim.blocos))
-    + th("Labor", tipPref())
-    + th("Q Pós", TIP.qPos)
-    + th("Gap", TIP.gap)
-    + (temDiar ? th("Diaristas disp.", TIP.diaristas) : "")
-    + th("Correção", TIP.corr)
-    + th("Status", TIP.status)
-    + th("Diagnóstico", TIP.diag)
-    + '</tr></thead><tbody>'+linhas+'</tbody></table>';
-}
-
-/* ================================================================
-   EQUALIZAÇÃO — PREF × QF DO CLIENTE
-
-   Esta seção não calcula nada. Ela chama simPlanoEqualizacao(), que
-   chama o motor de js/equalizacao.js — o MESMO que a Fusão de Linhas
-   usa para montar o Labor ajustado. Aqui o plano é SUGESTÃO: nada é
-   aplicado à fatura, e é por isso que a seção existe separada do
-   resto da tela.
-
-   Ela só aparece quando o alvo é o QF do cliente (fonte "valor fixo"),
-   porque é contra ele que a equalização faz sentido — o S&OP diário
-   responde outra pergunta.
-   ================================================================ */
 const EQ_ROTULO = {
   retirar:  "Retirar linha",
   adiar:    "Adiar início",
@@ -739,7 +568,21 @@ function opcoesEq(){
   const c = $("sm-eqAdiar"), p = $("sm-eqPausa");
   let pausaDesde = null;
   if(p && p.value){ const [y,m,d] = p.value.split("-").map(Number); pausaDesde = ymd(y,m,d); }
-  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde };
+  return { permitirAdiarInicio: c ? c.checked : true, pausaDesde,
+           cortarDiarias: S.decisaoDiarias === "reduzir" };
+}
+
+/* A DECISÃO SOBRE A DIÁRIA JÁ ALOCADA
+
+   O Labor se ajusta sozinho porque é projeção. A diária não: ela já
+   foi alocada e já está faturada, e reduzir a quantidade de um dia é
+   decisão de quem opera. O app calcula quanto DARIA para cortar,
+   mostra, e não corta até alguém escolher — a exportação fica
+   bloqueada enquanto isso, para o arquivo nunca sair de um estado que
+   ninguém decidiu. */
+function decidirDiarias(escolha){
+  S.decisaoDiarias = escolha;
+  render();
 }
 
 const faixaTxt = f => f.de === f.ate ? fmtShort(f.de) : fmtShort(f.de)+"–"+fmtShort(f.ate);
@@ -765,61 +608,325 @@ function eqDetalhe(a){
   if(a.diarista && a.diarista.dias.length){
     partes.push('<p class="sm-eqdiar"><b>Também aparece como diarista</b> em '
       + a.diarista.dias.length + ' dos dias que o plano tira do fixo ('
-      + esc(a.diarista.dias.map(fmtShort).join(", ")) + '). No período inteiro são '
-      + a.diarista.total + ' diária(s) — ' + a.diarista.id + ' ID, ' + a.diarista.meli + ' cliente. '
-      + 'Isso costuma ser transição de fixo para diária, e explica a correção: confirme se não há '
-      + 'dupla cobrança nesses dias.</p>');
-  } else if(a.diarista){
-    partes.push('<p class="sm-eqdiar">Aparece na base de diaristas em '+a.diarista.total
-      + ' dia(s) do período, mas nenhum deles coincide com os dias que o plano tira do fixo.</p>');
+      + esc(a.diarista.dias.map(fmtShort).join(", ")) + '). Costuma ser transição de fixo para '
+      + 'diária — confirme se não há dupla cobrança nesses dias.</p>');
   }
   return partes.join("");
 }
 
-function desenharEqualizacao(){
-  const bloco = $("sm-eq-bloco");
-  if(!bloco) return;
+/* ---------------------------------------------------------------
+   O plano do período — quadro, faltas, excessos. Uma chamada só, que
+   serve os passos 2, 3, 4 e 5. Com S&OP fixo o alvo é um número; com
+   a planilha operacional, o alvo é o S&OP de cada dia.
+   --------------------------------------------------------------- */
+function calcularPlano(){
   const sim = S.sim;
-  const alvo = (sim && sim.fonte === "fixo") ? sim.valorFixo : null;
-  if(!sim || !alvo){ bloco.hidden = true; return; }
-  bloco.hidden = false;
-
   const diaristas = S.diar
     ? S.diar.regs.filter(x => x.data >= sim.periodo.ini && x.data <= sim.periodo.fim) : [];
-  const plano = simPlanoEqualizacao({ labor:S.fatura.linhas, periodo:sim.periodo,
-    alvo, diaristas, diarias:S.fatura.diarias, opcoes:opcoesEq() });
-  S.plano = plano;
-  if(plano.erro){ $("sm-eq").innerHTML = '<div class="sm-aviso">'+esc(plano.erro)+'</div>'; return; }
+  const dados = { labor:S.fatura.linhas, periodo:sim.periodo,
+    diaristas, diarias:S.fatura.diarias, opcoes:opcoesEq() };
+  if(sim.fonte === "fixo") dados.alvo = sim.valorFixo;
+  else {
+    dados.alvos = {};
+    for(const d of sim.dias) dados.alvos[d.data] = d.qCliente;
+  }
+  S.plano = simPlanoEqualizacao(dados);
+}
 
-  const t = plano.totais;
-  const quadros = plano.dias.map(d => d.pref);
-  const item = (l,v) => '<div><span>'+l+'</span><b>'+v+'</b></div>';
-  /* O quadro é o do LABOR — o alvo se chama quadro FIXO, e diária não é
-     quadro fixo. A diária do período aparece à parte, porque muda o que
-     fazer com o gap, não o tamanho dele. */
-  const resumo = '<div class="sm-eqresumo">'
-    + item("Período", fmtShort(plano.periodo.ini)+" → "+fmtShort(plano.periodo.fim))
-    + item("QF do cliente", n2(alvo))
-    + item("Labor mínimo", n2(Math.min(...quadros)))
-    + item("Labor máximo", n2(Math.max(...quadros)))
-    + (t.diarias ? item("Diárias na fatura", n2(t.diarias)+" pessoa-dia, à parte") : "")
-    + item("Excesso no período", n2(t.excessoAntes)+" HC-dia")
-    + item("Excesso após o plano", n2(t.excessoDepois)+" HC-dia")
-    + '</div>';
+function render(){
+  $("sm-result").classList.remove("hidden");
+  $("sm-avisos").innerHTML = (S.sim.avisos || []).map(a =>
+    '<div class="sm-aviso '+a.tipo+'">'+esc(a.texto)+'</div>').join("")
+    || '<p class="fx-nada">Nenhum aviso técnico.</p>';
+  calcularPlano();
+  desenharCadastro();
+  desenharQuadro();
+  desenharFaltas();
+  desenharExcessos();
+  desenharFinal();
+}
 
+/* ================================================================
+   PASSO 1 — CADASTRO × BASE OFICIAL
+   ================================================================ */
+function pessoasDaFatura(){
+  const vistos = new Map();
+  const add = (groot, nome, origem) => {
+    const chave = simGrootNum(groot)+"|"+norm(nome);
+    if(!nome) return;
+    if(vistos.has(chave)){ vistos.get(chave).origem.add(origem); return; }
+    vistos.set(chave, { groot, nome, origem:new Set([origem]) });
+  };
+  for(const l of S.fatura.linhas) add(l.groot, l.nome, "LABOR");
+  for(const d of (S.fatura.diarias || [])) add(d.groot, d.nome, "DIARISTAS");
+  return [...vistos.values()].map(p => ({ groot:p.groot, nome:p.nome,
+    origem:[...p.origem].join(" + ") }));
+}
 
-  if(!plano.acoes.length && !Object.keys(plano.revisar).length && !Object.keys(plano.falta).length){
-    $("sm-eq").innerHTML = resumo + '<div class="sm-eqok"><b>Nada a equalizar.</b> '
-      + 'O quadro já bate com o QF em todos os dias do período.</div>';
+/* Aplica um GROOT confirmado à fatura EM MEMÓRIA — linhas do LABOR, da
+   aba DIARISTAS e as células cruas que a exportação reescreve. O
+   arquivo original só muda na exportação; aqui muda o que o resto do
+   fluxo enxerga, e por isso tudo é recalculado em seguida. */
+function mutarGroot(deGroot, nome, paraGroot){
+  const alvoG = simGrootNum(deGroot), alvoN = norm(nome);
+  const trocados = [];
+  const C = S.fatura.layout ? S.fatura.layout.cols : {};
+  for(const l of S.fatura.linhas){
+    if(simGrootNum(l.groot) !== alvoG || norm(l.nome) !== alvoN) continue;
+    trocados.push({ tipo:"labor", ref:l, prevGroot:l.groot,
+      prevBruta: (l.bruta && C.groot >= 0) ? l.bruta[C.groot] : undefined });
+    l.groot = paraGroot;
+    if(l.bruta && C.groot >= 0) l.bruta[C.groot] = numSePuder(paraGroot);
+  }
+  const CD = S.fatura.layoutDiarias ? S.fatura.layoutDiarias.cols : {};
+  for(const d of (S.fatura.diarias || [])){
+    if(simGrootNum(d.groot) !== alvoG || norm(d.nome) !== alvoN) continue;
+    trocados.push({ tipo:"diaria", ref:d, prevGroot:d.groot,
+      prevBruta: (d.bruta && CD.groot >= 0) ? d.bruta[CD.groot] : undefined });
+    d.groot = paraGroot;
+    if(d.bruta && CD.groot >= 0) d.bruta[CD.groot] = numSePuder(paraGroot);
+  }
+  return trocados;
+}
+
+function aplicarCorrecao(nome, deGroot, paraGroot){
+  const trocados = mutarGroot(deGroot, nome, paraGroot);
+  if(!trocados.length) return;
+  S.correcoes.push({ nome, de:simGrootNum(deGroot), para:simGrootNum(paraGroot),
+    linhas:trocados.length, trocados });
+  reanalisar();
+}
+
+function desfazerCorrecao(i){
+  const c = S.correcoes[i];
+  if(!c) return;
+  for(const t of c.trocados){
+    t.ref.groot = t.prevGroot;
+    if(t.prevBruta !== undefined){
+      const cols = t.tipo === "labor" ? S.fatura.layout.cols : S.fatura.layoutDiarias.cols;
+      t.ref.bruta[cols.groot] = t.prevBruta;
+    }
+  }
+  S.correcoes.splice(i,1);
+  reanalisar();
+}
+
+/* Recalcula tudo a partir da fatura em memória — depois de uma
+   correção de cadastro o quadro, a ocupação e o plano podem mudar. */
+function reanalisar(){ analisar(); }
+
+const CAD_ROTULO = { corrigir:"GROOT incorreto", preencher:"GROOT ausente",
+                     ambiguo:"Mais de um candidato", fora:"Fora da base" };
+
+function desenharCadastro(){
+  const sec = $("fx-cadastro");
+  const aplicadas = S.correcoes.length
+    ? '<div class="cad-aplicadas">'
+      + S.correcoes.map((c,i) =>
+          '<div class="cad-ok"><span>✓</span> '+esc(c.nome)+' · <code>'
+          + esc(c.de || "—")+' → '+esc(c.para)+'</code> ('+c.linhas+' linha(s))'
+          + ' <button class="cad-undo" data-undo="'+i+'">desfazer</button></div>').join("")
+      + '</div>' : "";
+
+  if(!S.baseG){
+    sec.hidden = false;
+    $("fx-cadResumo").textContent = "sem base carregada — passo pulado";
+    $("fx-cadCorpo").innerHTML = aplicadas
+      + '<p class="fx-nada">Carregue a <b>base oficial de GROOT</b> no passo de arquivos para '
+      + 'conferir e corrigir o cadastro (Groot ID · Nome · CPF · Filiais).</p>';
+    ligarCadastro();
     return;
   }
 
+  const r = cadConferir({ pessoas:pessoasDaFatura(), base:S.baseG.regs,
+    unidadeCod:S.fatura.unidadeCod, unidadeNome:S.fatura.unidade });
+  S.cadastro = r;
+  sec.hidden = false;
+
+  const acionaveis = r.achados.filter(a => a.tipo === "corrigir" || a.tipo === "preencher");
+  const ambiguos   = r.achados.filter(a => a.tipo === "ambiguo");
+  const fora       = r.achados.filter(a => a.tipo === "fora");
+
+  $("fx-cadResumo").textContent =
+    (acionaveis.length || ambiguos.length)
+      ? acionaveis.length+" sugestão(ões)"
+        + (ambiguos.length ? " · "+ambiguos.length+" para decidir" : "")
+        + (S.correcoes.length ? " · "+S.correcoes.length+" aplicada(s)" : "")
+      : S.correcoes.length
+        ? S.correcoes.length+" correção(ões) aplicada(s) — cadastro fechado"
+        : "cadastro confere com a base ("+r.totais.ok+" pessoas)";
+
+  const card = (a,i) => {
+    const chip = '<span class="cad-chip '+a.tipo+'">'+CAD_ROTULO[a.tipo]+'</span>';
+    if(a.tipo === "corrigir" || a.tipo === "preencher"){
+      return '<div class="cad-card">'
+        + '<div class="cab" onclick="this.parentElement.classList.toggle(\'aberto\')">'+chip
+        + '<b>'+esc(a.nome)+'</b><code>'+esc(a.groot || "—")+' → '+esc(a.sugestao.groot)+'</code>'
+        + '<span class="conf '+a.confianca+'">'+(a.confianca === "alta" ? "confiança alta" : "confiança média")+'</span>'
+        + '<button class="vt-btn mini" data-aplicar="'+i+'">Aplicar</button></div>'
+        + '<div class="det"><p>'+esc(a.motivo)+'</p><p class="ref">Na base: <b>'+esc(a.sugestao.nome)+'</b>'
+        + (a.sugestao.cpf ? ' · CPF '+esc(a.sugestao.cpf) : "")
+        + (a.sugestao.filiais ? ' · '+esc(a.sugestao.filiais) : "")
+        + ' · aparece em '+esc(a.origem)+'</p></div></div>';
+    }
+    if(a.tipo === "ambiguo"){
+      return '<div class="cad-card aberto">'
+        + '<div class="cab">'+chip+'<b>'+esc(a.nome)+'</b><code>'+esc(a.groot || "—")+'</code>'
+        + '<span class="conf">decisão sua</span></div>'
+        + '<div class="det"><p>'+esc(a.motivo)+'</p><div class="cad-cands">'
+        + a.candidatos.map(c =>
+            '<button class="cad-cand" data-nome="'+esc(a.nome)+'" data-de="'+esc(a.groot)+'" '
+            + 'data-para="'+esc(c.groot)+'">Usar <b>'+esc(c.groot)+'</b>'
+            + (c.filiais ? ' · '+esc(c.filiais) : "")+(c.cpf ? ' · CPF '+esc(c.cpf) : "")
+            + '</button>').join("")
+        + '</div></div></div>';
+    }
+    return "";
+  };
+
+  const foraBloco = fora.length
+    ? '<details class="cad-fora"><summary>'+fora.length+' pessoa(s) fora da base — '
+      + 'informação, nada a corrigir</summary>'
+      + fora.map(a => '<div class="cad-foraitem"><b>'+esc(a.nome)+'</b> · '
+          + esc(a.groot || "sem GROOT")+' · '+esc(a.origem)+'<br><small>'+esc(a.motivo)+'</small></div>').join("")
+      + '</details>' : "";
+
+  $("fx-cadCorpo").innerHTML =
+    aplicadas
+    + (acionaveis.length || ambiguos.length
+        ? r.achados.map((a,i) => card(a,i)).join("")
+        : '<p class="fx-nada">Todos os GROOTs conferem com a base oficial.</p>')
+    + foraBloco;
+  ligarCadastro();
+}
+
+function ligarCadastro(){
+  const corpo = $("fx-cadCorpo");
+  if(!corpo) return;
+  [...corpo.querySelectorAll("[data-aplicar]")].forEach(b => b.onclick = ev => {
+    ev.stopPropagation();
+    const a = S.cadastro.achados[+b.dataset.aplicar];
+    aplicarCorrecao(a.nome, a.groot, a.sugestao.groot);
+  });
+  [...corpo.querySelectorAll(".cad-cand")].forEach(b => b.onclick = () =>
+    aplicarCorrecao(b.dataset.nome, b.dataset.de, b.dataset.para));
+  [...corpo.querySelectorAll("[data-undo]")].forEach(b => b.onclick = () =>
+    desfazerCorrecao(+b.dataset.undo));
+}
+
+/* ================================================================
+   PASSO 2 — QUADRO × S&OP
+
+   A tela mais simples do fluxo, de propósito: Data | Quadro | SOP |
+   Diferença. O quadro é Labor ativo + diaristas já lançados na
+   fatura; o estorno (rateio ≤ 0) não é pessoa e fica fora da conta —
+   e fora do alcance de qualquer ajuste.
+   ================================================================ */
+function desenharQuadro(){
+  const p = S.plano;
+  if(p.erro){ $("fx-quadroCorpo").innerHTML = '<div class="sm-aviso">'+esc(p.erro)+'</div>'; return; }
+  const acima  = p.dias.filter(d => d.dif > 0).length;
+  const abaixo = p.dias.filter(d => d.dif < 0).length;
+  const semAlvo = p.dias.filter(d => d.dif == null).length;
+  $("fx-quadroResumo").textContent =
+    (!acima && !abaixo) ? "todos os dias no alvo"
+      : (acima ? acima+" dia(s) acima" : "") + (acima && abaixo ? " · " : "")
+        + (abaixo ? abaixo+" dia(s) abaixo" : "")
+        + (semAlvo ? " · "+semAlvo+" sem S&OP" : "");
+
+  const linhas = p.dias.map(d =>
+    '<tr class="'+(d.dif == null ? "" : d.dif > 0 ? "acima" : d.dif < 0 ? "abaixo" : "ok")+'">'
+    + '<td>'+fmtYmd(d.data)+'</td>'
+    + '<td class="forte">'+n2(d.quadro)
+    + (d.diarias ? '<small>'+n2(d.pref)+' fixo + '+n2(d.diarias)+' diária</small>' : "")+'</td>'
+    + '<td>'+(d.alvo == null ? "—" : n2(d.alvo))+'</td>'
+    + '<td class="'+(d.dif > 0 ? "pos" : d.dif < 0 ? "neg" : "")+'">'
+    + (d.dif == null ? "sem S&OP" : d.dif === 0 ? "✓" : sinal(d.dif))+'</td></tr>').join("");
+  $("fx-quadroCorpo").innerHTML =
+    '<table class="fx-tab"><thead><tr><th>Data</th><th>Quadro</th>'
+    + '<th>'+(S.sim.fonte === "fixo" ? "QF" : "S&amp;OP")+'</th><th>Diferença</th></tr></thead>'
+    + '<tbody>'+linhas+'</tbody></table>';
+}
+
+/* ================================================================
+   PASSO 3 — COBRIR FALTAS COM DIARISTA ID
+   ================================================================ */
+function desenharFaltas(){
+  const p = S.plano;
+  if(p.erro){ $("fx-faltasCorpo").innerHTML = ""; $("fx-faltasResumo").textContent = "—"; return; }
+  const faltaTotal = Object.values(p.falta || {}).reduce((s,v) => s+v, 0);
+  const inc = p.inclusoes;
+
+  if(!faltaTotal){
+    $("fx-faltasResumo").textContent = "nenhum dia abaixo do alvo";
+    $("fx-faltasCorpo").innerHTML = '<p class="fx-nada">Nenhuma falta a cobrir.</p>';
+    return;
+  }
+  if(!inc){
+    $("fx-faltasResumo").textContent = "faltam "+n2(faltaTotal)+" pessoa-dia — carregue o SIGO";
+    $("fx-faltasCorpo").innerHTML = '<p class="fx-nada">Há <b>'+n2(faltaTotal)+' pessoa-dia</b> abaixo '
+      + 'do alvo. Carregue a base <b>SIGO</b> no passo de arquivos para cobrir com diaristas ID — '
+      + 'só entram pessoas solicitadas naquele mesmo dia e ainda não cobradas.</p>';
+    return;
+  }
+
+  $("fx-faltasResumo").textContent =
+    "faltavam "+n2(faltaTotal)+" → adicionados "+n2(inc.totais.incluido)+" diaristas"
+    + (inc.totais.descoberto > 0 ? " · "+n2(inc.totais.descoberto)+" sem cobertura" : "");
+
+  const nomes = inc.pessoas.map(pp =>
+    '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
+    + '<div class="cab"><div class="nm">'+esc(pp.nome || "(sem nome no SIGO)")
+    + '<small>Groot '+esc(pp.groot)+' · diarista '
+    + (pp.solic === "id" ? "ID" : pp.solic === "meli" ? "do cliente" : "sem solicitante")+'</small></div>'
+    + '<div class="mud">'+esc(pp.faixas.map(faixaTxt).join(", "))
+    + '<small>+'+pp.total+' dia(s)</small></div></div>'
+    + '<div class="det"><p>Entra na aba <b>DIARISTAS</b> do template, no mesmo padrão das linhas '
+    + 'originais: uma linha por dia, cargo <i>Diarista</i>, quantidade 1.</p></div></div>').join("");
+
+  $("fx-faltasCorpo").innerHTML =
+    '<p class="fx-frase">Faltavam <b>'+n2(faltaTotal)+'</b> pessoa-dia → adicionados '
+    + '<b>'+n2(inc.totais.incluido)+'</b> diaristas ('+inc.totais.id+' ID'
+    + (inc.totais.meli ? ' · '+inc.totais.meli+' do cliente, só depois de esgotar os da ID' : "")+').'
+    + (inc.totais.descoberto > 0
+        ? ' Ficam <b>'+n2(inc.totais.descoberto)+'</b> pessoa-dia sem diarista livre no SIGO.' : "")
+    + ' Ninguém entra em dia em que já está no Labor, já é diária da fatura ou já foi '
+    + 'adicionado pelo próprio processo.</p>'
+    + '<details class="fx-exp"><summary>Ver os '+inc.totais.pessoas+' nomes</summary>'+nomes+'</details>';
+}
+
+/* ================================================================
+   PASSO 4 — CORRIGIR EXCESSOS NO LABOR
+
+   O mesmo motor da Fusão de Linhas, com as mesmas proteções: só mexe
+   onde resolve excesso sem criar falta indevida em outro dia. O Labor
+   é sempre a primeira camada; a diária já lançada só sai com decisão
+   explícita.
+   ================================================================ */
+function desenharExcessos(){
+  const p = S.plano;
+  if(p.erro){ $("fx-excessosCorpo").innerHTML = ""; $("fx-excessosResumo").textContent = "—"; return; }
+  const t = p.totais;
+  const podeCortar = p.corteDisponivel ? p.corteDisponivel.totais.cortado : 0;
+
+  const partes = [];
+  if(t.retirar)  partes.push("− "+t.retirar+" linha(s)");
+  if(t.adiar)    partes.push("↪ "+t.adiar+" início(s)");
+  if(t.encurtar) partes.push("↩ "+t.encurtar+" fim(ns)");
+  if(t.pausar)   partes.push("⏸ "+t.pausar+" pausa(s)");
+  $("fx-excessosResumo").textContent =
+    partes.length ? partes.join(" · ")
+      + (podeCortar > 0 && !S.decisaoDiarias ? " · decisão pendente" : "")
+    : podeCortar > 0 ? "excesso só em diária — decisão pendente"
+    : "nenhum excesso no período";
+
   const grupos = EQ_ORDEM.map(tipo => {
-    const itens = plano.acoes.filter(a => a.tipo === tipo);
+    const itens = p.acoes.filter(a => a.tipo === tipo);
     if(!itens.length) return "";
     return '<div class="sm-eqgrupo">'
       + '<header><span class="sm-eqchip '+tipo+'">'+EQ_ROTULO[tipo]+'</span>'
       + '<span class="n">'+itens.length+' pessoa(s)</span></header>'
+      + '<details class="fx-exp fx-exp-grupo"><summary>Ver os '+itens.length+' nomes</summary>'
       + itens.map(a =>
           '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
           + '<div class="cab"><div class="nm">'+esc(a.linha.nome)
@@ -828,66 +935,112 @@ function desenharEqualizacao(){
           + '<small>'+sinal(-a.impacto.hc)+' HC · '+a.impacto.dias+' dia(s)'
           + (a.diarista && a.diarista.dias.length ? ' · também diarista' : "")+'</small></div></div>'
           + '<div class="det">'+eqDetalhe(a)+'</div></div>').join("")
-      + '</div>';
+      + '</details></div>';
   }).join("");
 
-  /* As pessoas que faltam, com nome — só existe com a base do SIGO. */
-  const inc = plano.inclusoes;
-  const grupoInc = (inc && inc.pessoas.length)
-    ? '<div class="sm-eqgrupo"><header><span class="sm-eqchip incluir">Incluir</span>'
-      + '<span class="n">'+inc.totais.pessoas+' pessoa(s) · '+inc.totais.incluido+' pessoa-dia</span></header>'
-      + '<div class="det aberto"><p>Diaristas solicitados no SIGO e <b>sem cobrança naquele dia</b> '
-      + '— nem no LABOR, nem como diária já lançada nesta fatura. Primeiro os da <b>ID</b>, até '
-      + 'acabar; o do cliente só entra depois '
-      + '('+inc.totais.id+' ID · '+inc.totais.meli+' cliente'
-      + (inc.totais.sem ? ' · '+inc.totais.sem+' sem solicitante' : "")+'). '
-      + (inc.totais.descoberto > 0
-          ? 'Ainda ficam <b>'+n2(inc.totais.descoberto)+'</b> pessoa-dia sem cobertura — não havia '
-            + 'diarista livre bastante no SIGO.'
-          : 'A falta do período fica <b>inteiramente coberta</b>.')
-      + ' Os <b>'+inc.totais.verificados+'</b> pessoa-dia escolhidos foram reconferidos contra a '
-      + 'base antes de entrar'
-      + (inc.totais.recusados ? ', e <b>'+inc.totais.recusados+'</b> foram recusados por não '
-          + 'constar no dia' : ' — nenhum entrou num dia em que não foi solicitado')
-      + '.</p></div>'
-      + inc.pessoas.map(p =>
-          '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
-          + '<div class="cab"><div class="nm">'+esc(p.nome || "(sem nome no SIGO)")
-          + '<small>Groot '+esc(p.groot)+' · diarista '
-          + (p.solic === "id" ? "ID" : p.solic === "meli" ? "do cliente" : "sem solicitante")+'</small></div>'
-          + '<div class="mud">'+esc(p.faixas.map(faixaTxt).join(", "))
-          + '<small>+'+p.total+' dia(s)</small></div></div>'
-          + '<div class="det"><p>Sai na aba <b>Diaristas</b> do arquivo exportado, no layout da '
-          + 'fatura: '+p.total+' linha(s), uma por dia, cargo <i>Diarista</i> e quantidade 1. '
-          + 'Não entra no Labor — quem cobre a falta é diarista, não quadro fixo, e lançá-lo '
-          + 'como fixo seria cobrar outra coisa.</p></div></div>').join("")
-      + '</div>' : "";
+  const decisao = (podeCortar > 0) ? (() => {
+    const d = S.decisaoDiarias;
+    const dias = Object.keys(p.corteDisponivel.dias).length;
+    const bt = (chave,rot,desc) =>
+      '<button class="sm-eqdec'+(d === chave ? " ativo" : "")+'" data-dec="'+chave+'">'
+      + '<b>'+rot+'</b><i>'+desc+'</i></button>';
+    return '<div class="sm-eqdecisao'+(d ? " decidido" : "")+'">'
+      + '<div class="tit">'+(d ? "Decisão tomada" : "Falta uma decisão sua")+' — '
+      + '<b>'+n2(p.corteDisponivel.totais.excesso)+' HC-dia</b> acima do alvo em '+dias+' dia(s), '
+      + 'e o Labor já foi ajustado até onde dava</div>'
+      + '<p>O que passa do alvo nesses dias é <b>diária já alocada e faturada</b>. Reduzir isso é '
+      + 'decisão de quem opera — o app não decide sozinho.</p>'
+      + '<div class="sm-eqdecs">'
+      + bt("manter","Manter diaristas", "não mexer neles; o excesso residual sai declarado em REVISAR")
+      + bt("reduzir","Reduzir diaristas", "retirar só o necessário para chegar ao alvo — "
+          + n2(podeCortar)+" pessoa-dia, a interna primeiro")
+      + '</div></div>';
+  })() : "";
 
-  /* `falta` guarda o tamanho da falta como número positivo; na tela ela
-     é uma queda em relação ao QF e sai com sinal negativo. */
+  const cortes = (p.corte && p.corte.cortes.length) ? (() => {
+    const tc = p.corte.totais;
+    const porDia = new Map();
+    for(const c of p.corte.cortes){
+      if(!porDia.has(c.data)) porDia.set(c.data, []);
+      porDia.get(c.data).push(c);
+    }
+    return '<div class="sm-eqgrupo"><header><span class="sm-eqchip cortar">Retirar diária</span>'
+      + '<span class="n">'+n2(tc.cortado)+' pessoa-dia</span></header>'
+      + '<div class="det aberto"><p>Você escolheu <b>reduzir</b>. Sai só o necessário para chegar '
+      + 'ao alvo — a interna primeiro, a do cliente por último ('+tc.id+' interna(s) · '
+      + tc.meli+' do cliente'+(tc.sem ? ' · '+tc.sem+' sem solicitante' : "")+').</p></div>'
+      + [...porDia.entries()].sort((a,b) => a[0]-b[0]).map(([d,cs]) =>
+          '<div class="sm-eqitem" onclick="this.classList.toggle(\'aberto\')">'
+          + '<div class="cab"><div class="nm">'+fmtYmd(d)
+          + '<small>'+cs.length+' diária(s) acima do alvo</small></div>'
+          + '<div class="mud">−'+cs.length+'</div></div>'
+          + '<div class="det"><p>'+cs.map(c => esc(c.nome || "(sem nome)")
+              + ' <b>'+esc(c.groot)+'</b>').join(' · ')+'</p></div></div>').join("")
+      + '</div>';
+  })() : "";
+
   const listaDias = (o, neg) => Object.keys(o).map(Number).sort((a,b)=>a-b)
     .map(d => fmtShort(d)+" ("+sinal(neg ? -o[d] : o[d])+")").join(" · ");
-  const revisar = Object.keys(plano.revisar).length
+  const revisar = Object.keys(p.revisar).length
     ? '<div class="sm-eqgrupo revisar"><header><span class="sm-eqchip revisar">Revisar</span>'
-      + '<span class="n">'+Object.keys(plano.revisar).length+' dia(s)</span></header>'
-      + '<div class="det aberto"><p>Nestes dias o Labor continua acima do QF e nenhuma das quatro '
-      + 'ações resolve: zerar exigiria partir um contrato de um jeito que o motor não faz sozinho, '
-      + 'ou cortar quem cobre um dia sem sobra. Avalie caso a caso.</p>'
-      + '<p class="dias">'+listaDias(plano.revisar,false)+'</p></div></div>' : "";
-  const falta = (Object.keys(plano.falta).length && !grupoInc)
-    ? '<div class="sm-eqgrupo falta"><header><span class="sm-eqchip falta">Falta</span>'
-      + '<span class="n">'+Object.keys(plano.falta).length+' dia(s)</span></header>'
-      + '<div class="det aberto"><p>Nestes dias o Labor está <b>abaixo</b> do QF. A equalização não '
-      + 'mexe neles — inventar pessoa não é trabalho dela. Verifique se falta gente no arquivo.</p>'
-      + '<p class="dias">'+listaDias(plano.falta,true)+'</p></div></div>' : "";
+      + '<span class="n">'+Object.keys(p.revisar).length+' dia(s)</span></header>'
+      + '<div class="det aberto"><p>Excesso que nenhum ajuste resolve sem criar falta indevida. '
+      + 'Avalie caso a caso.</p><p class="dias">'+listaDias(p.revisar,false)+'</p></div></div>' : "";
 
-  $("sm-eq").innerHTML = resumo
-    + '<div class="sm-eqselo">Este plano equaliza <b>matematicamente</b> o Labor ao QF. '
-    + 'Confirme se corresponde à movimentação operacional real antes de aplicar — '
-    + 'nada é alterado na fatura por aqui.</div>'
-    + grupos + grupoInc + revisar + falta
-    + '<div class="vt-acoes-fim"><button class="vt-btn" id="sm-btnExportEq">'
-    + 'Exportar fatura equalizada (.xlsx)</button></div>';
+  $("fx-excessosCorpo").innerHTML =
+    (grupos || decisao || cortes || revisar)
+      ? '<p class="fx-frase">O <b>motor da Fusão de Linhas</b> analisou o período inteiro. Cada '
+        + 'ajuste só entra se resolver excesso <b>sem criar falta em outro dia</b>; estornos '
+        + '(rateio ≤ 0) são preservados como estão e nunca são candidatos.</p>'
+        + grupos + decisao + cortes + revisar
+      : '<p class="fx-nada">Nenhum excesso a corrigir.</p>';
+  [...$("fx-excessosCorpo").querySelectorAll(".sm-eqdec")].forEach(b =>
+    b.onclick = () => decidirDiarias(b.dataset.dec));
+}
+
+/* ================================================================
+   PASSO 5 — REVISÃO E EXPORTAÇÃO
+   ================================================================ */
+function desenharFinal(){
+  const p = S.plano;
+  if(p.erro){ $("fx-finalCorpo").innerHTML = ""; $("fx-finalResumo").textContent = "—"; return; }
+  const t = p.totais;
+  const inc = p.inclusoes;
+  const podeCortar = p.corteDisponivel ? p.corteDisponivel.totais.cortado : 0;
+  const pendente = podeCortar > 0 && !S.decisaoDiarias;
+  const revisarN = Object.keys(p.revisar).length
+    + (inc && inc.totais.descoberto > 0 ? 1 : 0);
+
+  const linhas = [];
+  if(inc && inc.totais.incluido) linhas.push(["+", n2(inc.totais.incluido)+" diárias adicionadas","mais"]);
+  if(t.retirar)  linhas.push(["−", t.retirar+" linha(s) retiradas do Labor","menos"]);
+  if(t.adiar)    linhas.push(["↪", t.adiar+" data(s) de início ajustadas","aj"]);
+  if(t.encurtar) linhas.push(["↩", t.encurtar+" data(s) fim ajustadas","aj"]);
+  if(t.pausar)   linhas.push(["⏸", t.pausar+" contrato(s) pausados e retomados","aj"]);
+  if(p.corte && p.corte.totais.cortado)
+    linhas.push(["−", n2(p.corte.totais.cortado)+" diária(s) retiradas (sua decisão)","menos"]);
+  if(S.correcoes.length) linhas.push(["✎", S.correcoes.length+" GROOT(s) corrigidos","aj"]);
+  if(revisarN) linhas.push(["⚠", revisarN+" caso(s) para revisar","rev"]);
+  if(!linhas.length) linhas.push(["✓","nada a corrigir — a fatura sai como entrou","ok"]);
+
+  $("fx-finalResumo").textContent = pendente ? "aguardando a decisão do passo 4"
+    : t.excessoDepois === 0 && (!inc || !inc.totais.descoberto)
+      ? "pronta para exportar" : "pronta, com ressalvas em REVISAR";
+
+  $("fx-finalCorpo").innerHTML =
+    '<div class="fx-resumofinal">'
+    + linhas.map(([ic,tx,cls]) => '<div class="fx-rl '+cls+'"><span>'+ic+'</span>'+esc(tx)+'</div>').join("")
+    + '</div>'
+    + '<div class="sm-eqselo">As correções equalizam <b>matematicamente</b> a fatura ao alvo. '
+    + 'Confirme se correspondem à movimentação operacional real antes de enviar. O arquivo '
+    + 'exportado é <b>o mesmo template</b> — estrutura, abas e formatação preservadas — com as '
+    + 'abas LABOR e DIARISTAS corrigidas e o memorial em EQUALIZACAO / INCLUSOES / REVISAR / '
+    + 'CADASTRO / METADADOS.</div>'
+    + '<div class="vt-acoes-fim">'
+    + '<button class="vt-btn" id="sm-btnExportEq"'+(pendente ? " disabled" : "")+'>'
+    + 'Exportar fatura corrigida (.xlsx)</button>'
+    + (pendente ? '<span class="sm-msg">Decida no passo 4 o que fazer com as diárias acima do alvo.</span>' : "")
+    + '</div>';
   const btn = $("sm-btnExportEq");
   if(btn) btn.onclick = exportarEqualizado;
 }
@@ -1103,16 +1256,26 @@ async function exportarEqualizado(){
     }
   }
 
-  /* ---- DIARISTAS: as da fatura, intactas, mais as novas ---- */
+  /* ---- DIARISTAS: as da fatura menos as cortadas, mais as novas ---- */
   const layD = fat.layoutDiarias;
   const incluir = $("sm-eqIncluir");
   const inc = (incluir && incluir.checked) ? plano.inclusoes : null;
   const escala = escalaDoDiarista(fat.unidade);
 
-  /* As diárias da fatura saem como estão: elas não entram na conta
-     contra o QF e a equalização não mexe nelas. O que o app acrescenta
-     vem depois. */
-  const linhasDiar = (fat.diarias || []).map(d => d.bruta ? d.bruta.slice() : []);
+  /* Cada corte tira UMA pessoa-dia; casar por (groot, data) e consumir
+     um por vez evita apagar duas linhas quando a fatura repete a pessoa
+     no mesmo dia. */
+  const aCortar = new Map();
+  for(const c of (plano.corte ? plano.corte.cortes : []))
+    aCortar.set(c.groot+"|"+c.data, (aCortar.get(c.groot+"|"+c.data) || 0) + 1);
+
+  const linhasDiar = [];
+  let cortadas = 0;
+  for(const d of (fat.diarias || [])){
+    const k = simGrootNum(d.groot)+"|"+d.data;
+    if(aCortar.get(k) > 0){ aCortar.set(k, aCortar.get(k)-1); cortadas++; continue; }
+    linhasDiar.push(d.bruta ? d.bruta.slice() : []);
+  }
   let novas = 0;
   if(inc && layD){
     const CD = layD.cols;
@@ -1151,6 +1314,12 @@ async function exportarEqualizado(){
     dt(a.linha.inicio), dt(a.linha.fim), dt(a.novoInicio), dt(a.novoFim),
     a.pausas.map(p => fmtYmd(p.fim)+" a "+fmtYmd(p.ini)).join(" · "),
     -a.impacto.hc, a.impacto.dias, a.motivo]);
+  for(const c of (plano.corte ? plano.corte.cortes : []))
+    eqLinhas.push(["Retirar diária", numSePuder(c.groot), c.nome, "Diarista",
+      dt(c.data), dt(c.data), null, null, "", -c.quantidade, 1,
+      "Diária lançada acima do QF num dia em que o quadro fixo já estava no teto. "
+      + "Sai a interna primeiro; a do cliente é a última ("
+      + (c.solic === "id" ? "interna" : c.solic === "meli" ? "do cliente" : "sem solicitante no SIGO")+")."]);
   if(!eqLinhas.length) eqLinhas.push(["(nada a ajustar)"]);
 
   const incLinhas = [];
@@ -1162,10 +1331,14 @@ async function exportarEqualizado(){
   if(!incLinhas.length) incLinhas.push(["(ninguém a incluir)"]);
 
   const revLinhas = [];
+  const diariasDe = {};
+  for(const d of plano.dias) diariasDe[d.data] = d.diarias || 0;
   for(const [d,q] of Object.entries(plano.revisar).sort((a,b) => a[0]-b[0]))
-    revLinhas.push(["Excesso sem solução", dt(+d), q,
-      "O Labor continua acima do QF e nenhuma das quatro ações resolve sem criar falta "
-      + "em outro dia. Avaliar caso a caso."]);
+    revLinhas.push(["Excesso mantido", dt(+d), q,
+      plano.decisaoDiarias === "manter" && diariasDe[+d] >= q
+        ? "O quadro fixo já está no teto e o que passa do QF são as "+diariasDe[+d]
+          + " diária(s) já alocadas neste dia. Mantidas por decisão do usuário."
+        : "Nem as quatro ações sobre o quadro fixo nem a redução de diária resolveram este dia."]);
   if(inc) for(const [d,c] of Object.entries(inc.dias).sort((a,b) => a[0]-b[0]))
     { if(c.descoberto > 0) revLinhas.push(["Falta descoberta", dt(+d), c.descoberto,
       "Não havia diarista livre bastante no SIGO neste dia ("+c.disponiveis+" disponível(is))."]); }
@@ -1180,15 +1353,24 @@ async function exportarEqualizado(){
     ["Fatura de origem", S.nomeF],
     ["Unidade", fat.unidade || "—"],
     ["Período", fmtYmd(plano.periodo.ini)+" a "+fmtYmd(plano.periodo.fim)],
-    ["QF do cliente (alvo)", plano.alvo],
+    ["Alvo", isFinite(plano.alvo) ? "QF fixo de "+plano.alvo+" HC por dia"
+                                   : "S&OP diário da planilha operacional"],
+    ["Correções de cadastro aplicadas", S.correcoes.length],
     ["Dias que fecham no QF", fechados+" de "+plano.dias.length],
     ["Permitir adiar início", plano.opcoes.permitirAdiarInicio ? "sim" : "não"],
     ["Pausar a partir de", plano.opcoes.pausaDesde ? fmtYmd(plano.opcoes.pausaDesde) : "não"],
+    ["Diárias acima do QF", plano.decisaoDiarias === "reduzir"
+      ? "REDUZIR — decisão do usuário; retirado só o necessário para chegar ao QF"
+      : "MANTER — decisão do usuário; o excesso residual sai declarado em REVISAR"],
     ["", ""],
     ["Linhas do LABOR mantidas", mantidas],
     ["Linhas do LABOR ajustadas", ajustadas],
     ["Linhas do LABOR removidas", removidas],
     ["Diárias da fatura mantidas", linhasDiar.length - novas],
+    ["Diárias retiradas por estar acima do QF", cortadas],
+    ["  · internas", plano.corte ? plano.corte.totais.id : 0],
+    ["  · do cliente", plano.corte ? plano.corte.totais.meli : 0],
+    ["  · sem solicitante no SIGO", plano.corte ? plano.corte.totais.sem : 0],
     ["Diárias acrescentadas para cobrir falta", novas],
     ["  · da ID", inc ? inc.totais.id : 0],
     ["  · do cliente", inc ? inc.totais.meli : 0],
@@ -1200,13 +1382,11 @@ async function exportarEqualizado(){
     ["", ""],
     ["AVISO", "As alterações equalizam MATEMATICAMENTE o quadro ao QF. Confirme se "
       + "correspondem à movimentação operacional real antes de enviar."],
-    ["O que é o quadro do dia", "O quadro do LABOR, e só ele. O alvo se chama quadro FIXO, e "
-      + "diária é cobrança à parte: as diárias da fatura NÃO entram na conta contra o QF e saem "
-      + "no arquivo como estavam."],
-    ["Ordem das ações", "O gap é a distância entre o Labor e o QF. Onde SOBRA, as quatro ações do "
-      + "motor baixam a curva do Labor — retirar linha, adiar início, pausar/retomar, antecipar "
-      + "fim —, nenhuma delas criando falta em outro dia. Onde FALTA, a sugestão é acrescentar "
-      + "diarista."],
+    ["O que é o quadro do dia", "Quadro fixo do LABOR MAIS as diárias da aba de diaristas. "
+      + "É esse total que vai ao confronto com o QF."],
+    ["Ordem das ações", "Primeiro as quatro do motor sobre o quadro FIXO — retirar linha, adiar "
+      + "início, pausar/retomar, antecipar fim —, nenhuma delas criando falta em outro dia. O que "
+      + "sobrar de excesso depois disso não é fixo: é diária acima do QF, e sai por último."],
     ["Como a inclusão foi escolhida", "Base SIGO: pessoa solicitada NAQUELE DIA e sem cobrança "
       + "no dia — nem no LABOR, nem como diária já lançada. Prioridade para os diaristas da ID; "
       + "o do cliente só entra depois de esgotados os internos. Cada pessoa-dia é reconferido "
@@ -1239,7 +1419,7 @@ async function exportarEqualizado(){
     const wsD = wb.getWorksheet(layD.aba);
     if(wsD) reescreverAba(wsD, layD.topo, linhasDiar, layD.largura);
   }
-  for(const nome of ["EQUALIZACAO","INCLUSOES","REVISAR","METADADOS"])
+  for(const nome of ["EQUALIZACAO","INCLUSOES","REVISAR","CADASTRO","METADADOS"])
     if(wb.getWorksheet(nome)) wb.removeWorksheet(wb.getWorksheet(nome).id);
   abaEstilizada(wb, "EQUALIZACAO", { ...TPL_DOC,
     colunas:["Ação","GROOT ID","Nome","Cargo","Início atual","Fim atual","Início novo",
@@ -1248,6 +1428,14 @@ async function exportarEqualizado(){
   abaEstilizada(wb, "INCLUSOES", { ...TPL_DOC,
     colunas:["GROOT ID","Nome","Solicitante","De","Até","Dias","Observação"],
     larguras:[12,34,16,12,12,7,52] }, incLinhas);
+  if(S.correcoes.length){
+    const cadLinhas = S.correcoes.map(c =>
+      [c.nome, c.de || "(sem GROOT)", c.para, c.linhas,
+       "Confirmada pelo usuário contra a base oficial de GROOT"]);
+    abaEstilizada(wb, "CADASTRO", { ...TPL_DOC,
+      colunas:["Nome","GROOT anterior","GROOT corrigido","Linhas alteradas","Observação"],
+      larguras:[34,16,16,14,52] }, cadLinhas);
+  }
   abaEstilizada(wb, "REVISAR", { ...TPL_DOC,
     colunas:["Tipo","Data","Quantidade","Observação"], larguras:[22,12,12,72] }, revLinhas);
   abaEstilizada(wb, "METADADOS", { ...TPL_DOC,
@@ -1268,113 +1456,6 @@ async function exportarEqualizado(){
   const btn = $("sm-btnExportEq");
   if(btn) btn.textContent = "Baixado ✓ — " + nome;
   return nome;
-}
-
-/* ================================================================
-   EXPORTAÇÃO
-   ================================================================ */
-function exportar(){
-  const sim = S.sim;
-  if(!sim) return;
-  const dt = v => v === null ? "" : ymdToExcelDate(v);
-  const wb = XLSX.utils.book_new();
-
-  /* --- aba 1: o comparativo, para leitura humana --- */
-  const cab = ["Data", ...sim.blocos.map(b => "S&OP "+b), "Q cliente / S&OP", "Labor do dia",
-               "Diárias já lançadas (à parte)", "Q Pós previsto", "Gap Labor x S&OP", "Correção prevista",
-               "Status", "Diagnóstico"];
-  const aoa = [cab];
-  for(const d of sim.dias){
-    aoa.push([ dt(d.data), ...d.blocos.map(b => b.valor), d.qCliente, d.pref, d.diarias, d.qPos,
-      d.gap, d.correcao, SIM_STATUS_LABEL[d.status], d.diagnostico ]);
-  }
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  formatarDatas(ws, aoa.length, 0);
-  ws["!cols"] = [{wch:12}, ...sim.blocos.map(()=>({wch:11})), {wch:17},{wch:14},{wch:16},
-                 {wch:16},{wch:16},{wch:17},{wch:24},{wch:110}];
-  XLSX.utils.book_append_sheet(wb, ws, "COMPARATIVO");
-
-  /* --- aba 2: o retorno simulado, no formato que a Fusão de Linhas lê ---
-     A Fusão localiza esta aba pelo CABEÇALHO, não pelo nome, então o nome
-     pode dizer com todas as letras que o arquivo é simulado. */
-  const retAoa = [["Data Trab.","Employee_Type","Qtd. PREF","Q Meli (Pós Comp. Diaristas)",
-                   "Desvio","Ocorrencia"]];
-  for(const l of simLinhasRetorno(sim)){
-    retAoa.push([ dt(l.data), l.tipo, l.pref, l.qPos, l.desvio, l.ocorrencia ]);
-  }
-  const wsR = XLSX.utils.aoa_to_sheet(retAoa);
-  formatarDatas(wsR, retAoa.length, 0);
-  wsR["!cols"] = [{wch:12},{wch:14},{wch:11},{wch:28},{wch:10},{wch:110}];
-  XLSX.utils.book_append_sheet(wb, wsR, "RETORNO SIMULADO");
-
-  /* --- aba 3: metadados, para ninguém confundir com o oficial --- */
-  const meta = [
-    ["AVISO", SIM_AVISO_METADADOS],
-    [],
-    ["Fatura de origem", S.nomeF],
-    ["Planilha operacional", sim.fonte === "fixo" ? "(não usada)" : S.nomeS],
-    ["Período", fmtYmd(sim.periodo.ini)+" a "+fmtYmd(sim.periodo.fim)],
-    ["Fonte do S&OP", sim.fonte === "fixo"
-      ? "valor fixo informado na tela: "+sim.valorFixo+" HC em todos os dias"
-      : "planilha operacional, dia a dia por operação"],
-    ["Competência", sim.comp ? sim.comp.label : ""],
-    ["Blocos de S&OP somados", sim.blocos.join(" + ")],
-    [],
-    ["Fórmula — PREF", "soma dos % RATEIO das linhas ativas no dia, com o sinal — mesma regra da Fusão de Linhas"],
-    ["Fórmula — Q cliente", "soma do Esperado de cada bloco no dia"],
-    ["Fórmula — Q Pós previsto", "MIN(PREF, Q cliente)"],
-    ["Fórmula — Gap", "PREF - Q cliente"],
-    ["Fórmula — Correção prevista", "Q Pós previsto - PREF"],
-    [],
-    ["Linhas do LABOR no PREF", sim.linhas.dentro],
-    ["Linhas fora do PREF", sim.linhas.fora.length],
-    [],
-    ["Labor total (HC-dia)", sim.totais.pref],
-    ["Diárias já lançadas na fatura (à parte)", sim.totais.diarias],
-
-    ["Linhas de estorno no PREF", sim.totais.estornos],
-    ["S&OP total (HC-dia)", sim.totais.cliente],
-    ["Q Pós total previsto (HC-dia)", sim.totais.pos],
-    ["HC-dia em risco de correção", sim.totais.hcEmRisco],
-    ["HC-dia abaixo do S&OP", sim.totais.hcAbaixo]
-  ];
-  for(const a of sim.avisos) meta.push(["Aviso", a.texto]);
-  const wsM = XLSX.utils.aoa_to_sheet(meta);
-  wsM["!cols"] = [{wch:32},{wch:120}];
-  XLSX.utils.book_append_sheet(wb, wsM, "METADADOS");
-
-  /* --- aba 4: o que ficou fora do PREF, e por quê --- */
-  const foraAoa = [["Linha","GROOT","Nome","Cargo","Conta","Início","Fim","Rateio","Motivo","Detalhe"]];
-  for(const f of sim.linhas.fora){
-    const l = f.linha;
-    foraAoa.push([ l.linha, l.groot, l.nome, l.cargo, l.conta,
-      isValidYmd(l.inicio)?dt(l.inicio):"", isValidYmd(l.fim)?dt(l.fim):"", l.rateio,
-      f.motivo.texto, f.motivo.detalhe || "" ]);
-  }
-  const wsF = XLSX.utils.aoa_to_sheet(foraAoa);
-  formatarDatas(wsF, foraAoa.length, 5); formatarDatas(wsF, foraAoa.length, 6);
-  wsF["!cols"] = [{wch:8},{wch:11},{wch:34},{wch:24},{wch:26},{wch:12},{wch:12},{wch:8},{wch:56},{wch:100}];
-  XLSX.utils.book_append_sheet(wb, wsF, "FORA DO PREF");
-
-  const base = String(S.nomeF).replace(/\.xlsx?$/i,"");
-  /* Sem acento: num link para blob: URL, acento no atributo `download`
-     faz o Chromium descartar o nome inteiro. */
-  const nome = ("Retorno Simulado - "+base+".xlsx")
-    .normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[\\/:*?"<>|]/g,"-");
-  const buf = XLSX.write(wb,{ bookType:"xlsx", type:"array" });
-  const url = URL.createObjectURL(new Blob([buf],
-    { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-  const link = document.createElement("a");
-  link.href = url; link.download = nome; link.click();
-  URL.revokeObjectURL(url);
-}
-
-function formatarDatas(ws, linhas, coluna){
-  for(let r=1;r<linhas;r++){
-    const ref = XLSX.utils.encode_cell({ r, c:coluna });
-    const cel = ws[ref];
-    if(cel && cel.v instanceof Date){ cel.t = "d"; cel.z = "dd/mm/yyyy"; }
-  }
 }
 
 /* ================================================================
@@ -1401,8 +1482,9 @@ document.querySelectorAll('input[name="sm-fonte"]').forEach(r => r.onchange = pr
 const campoFixo = $("sm-sopFixo");
 if(campoFixo) campoFixo.oninput = pronto;
 pronto();   // deixa o passo 3 e o destaque da fonte coerentes já na abertura
-[$("sm-eqAdiar"), $("sm-eqPausa"), $("sm-eqIncluir")].forEach(el => { if(el) el.onchange = () => { if(S.sim) desenharEqualizacao(); }; });
+bindDrop("sm-dropG","sm-fileG",(f,d) => carregar("groot",f,d));
+[$("sm-eqAdiar"), $("sm-eqPausa"), $("sm-eqIncluir")].forEach(el =>
+  { if(el) el.onchange = () => { if(S.sim) render(); }; });
 const btnRun = $("sm-btnRun"); if(btnRun) btnRun.onclick = analisar;
-const btnExp = $("sm-btnExport"); if(btnExp) btnExp.onclick = exportar;
 
 })();

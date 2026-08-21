@@ -226,17 +226,14 @@ function render(){
   $("vt-drop").classList.add("compacto");
   $("vt-result").classList.remove("hidden");
 
+  /* Uma linha de contexto, e direto para os cards: o quadro diário e
+     os painéis grandes moram no assistente de fechamento — esta tela é
+     só a lista de inconsistências, compacta. */
   const p = a.periodo;
   $("vt-cabecalho").innerHTML =
-    '<div class="vt-ident">'
-    + '<div><span>Arquivo</span><b>'+esc(V.arquivo)+'</b></div>'
-    + '<div><span>Período faturado</span><b>'+fmtD(p.ini)+" a "+fmtD(p.fim)+'</b>'
-    + '<i>'+esc(p.origem || "")+'</i></div>'
-    + '<div><span>LABOR</span><b>'+a.totais.labor+' linhas</b></div>'
-    + '<div><span>DIARISTAS</span><b>'+a.totais.diaristas+' linhas</b></div>'
-    + '</div>';
-
-  desenharQuadro(a.quadro);
+    '<p class="vt-linha1">'+esc(V.arquivo)+' · '+fmtD(p.ini)+" a "+fmtD(p.fim)
+    + ' · LABOR '+a.totais.labor+' · DIARISTAS '+a.totais.diaristas+'</p>';
+  $("vt-quadro").innerHTML = "";
 
   const total = a.achados.length;
   const cards = [
@@ -360,8 +357,8 @@ function cardAchado(x){
   return '<article class="vt-achado sev-'+x.severidade+(marca?" marcado":"")+'">'
     + '<header>'
     +   '<span class="vt-chip sev-'+x.severidade+'">'+SEV_LABEL[x.severidade]+'</span>'
-    +   '<div class="vt-tit"><b>'+esc(x.titulo)+'</b>'
-    +     '<small>'+esc(x.regra)+(x.nome?" · "+esc(x.nome):"")+'</small></div>'
+    +   '<div class="vt-tit"><b>'+esc(x.nome || x.titulo)+'</b>'
+    +     '<small>'+esc(x.nome ? x.titulo : x.regra)+'</small></div>'
     +   (marca ? '<span class="vt-marca">'+esc(marca)+'</span>' : "")
     +   '<span class="vt-seta">▾</span>'
     + '</header>'
