@@ -233,7 +233,45 @@ o número veio.
 
 ### Validação Template
 
-Dois modos, escolhidos no topo da aba: **auditar a fatura** e **simular o retorno**.
+Deixou de ser uma tela de diagnóstico e virou um **assistente de fechamento da fatura**:
+
+```
+Fatura original → validar cadastro → quadro × S&OP → cobrir faltas com
+diarista ID → eliminar excessos com o motor da Fusão → revisão humana
+→ o MESMO template corrigido
+```
+
+O modo principal, **Fechar a fatura**, é um passo a passo:
+
+1. **Cadastro × base oficial** — com a base de GROOT carregada (`Groot ID · Nome · CPF · Filiais`),
+   cada pessoa da fatura é conferida. GROOT que não bate mas cujo nome existe na base vira sugestão
+   (`211618 → 2611618`), com nome + filial como contexto e CPF como confirmação forte. Mais de um
+   candidato plausível = decisão humana, nunca palpite. Toda correção é confirmada por clique e
+   reversível.
+2. **Quadro × S&OP** — `Data | Quadro | SOP | Diferença`, e só. Quadro = Labor ativo + diárias já
+   lançadas; estornos (rateio ≤ 0) não são pessoas, saem preservados e nunca são candidatos.
+3. **Cobrir faltas** — diarista ID do SIGO, solicitado naquele mesmo dia, só a quantidade
+   necessária. Ninguém entra duas vezes: nem quem já está no Labor, nem quem já é diária da fatura,
+   nem quem o próprio processo já adicionou. Na tela: *faltavam X → adicionados X*, nomes no clique.
+   As linhas novas entram na própria aba `DIARISTAS`, no padrão das originais.
+4. **Corrigir excessos** — o mesmo motor da Fusão de Linhas, sem heurística nova: retirar linha,
+   adiar início, antecipar fim ou pausar/retomar, sempre olhando o período inteiro e nunca criando
+   falta indevida. Labor é a primeira camada; excesso residual causado por diária já lançada vira
+   pergunta explícita — **manter** ou **reduzir** — e o app nunca decide sozinho.
+5. **Revisão e exportação** — resumo curto (`+X diaristas · −X linhas · ↪X inícios · ↩X fins ·
+   ✎X GROOTs · ⚠X revisar`) e a **própria fatura original corrigida**: mesmas abas, formatação
+   preservada, LABOR e DIARISTAS reescritos, memorial em `EQUALIZACAO / INCLUSOES / CADASTRO /
+   REVISAR / METADADOS`.
+
+O segundo modo, **Inconsistências**, é a auditoria de sempre em cards compactos — nome · o que há,
+raciocínio no clique.
+
+O casamento com a base oficial vive em `js/cadastro.js` (puro): candidatos pelo comparador de nomes
+da auditoria (idêntico ou variação — parcial não basta), filial desempata, CPF confirma ou derruba,
+e ambiguidade para e pergunta. `tests/cadastro.test.js` cobre a fronteira entre corrigir e escolher,
+incluindo o caso real dos sobrenomes repetidos: contar "SILVA" duas vezes fazia outra pessoa passar
+por variação, e a correção disso vale também para a auditoria (`valCompararNomes` passou a conter
+por tokens únicos).
 
 #### Auditar inconsistências
 

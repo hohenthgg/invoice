@@ -218,16 +218,22 @@ function valCompararNomes(a,b){
   if(!na || !nb) return { relacao:"distintos", motivo:"um dos nomes está vazio" };
 
   const ta = valTokens(a), tb = valTokens(b);
-  const setB = new Set(tb);
+  const setA = new Set(ta), setB = new Set(tb);
   const comuns = ta.filter(t => setB.has(t));
 
   /* Contenção: "MARIANA COSTA DO AMARAL" dentro de "MARIANA COSTA DO
      AMARAL SANTOS". Exige 2 tokens em comum para um "MARIA" solto não
-     engolir toda Maria da planilha. */
-  if(comuns.length >= 2 && (comuns.length === ta.length || comuns.length === tb.length)){
+     engolir toda Maria da planilha.
+
+     A conta é sobre tokens ÚNICOS: "LORRANY SILVA SANTOS SILVA" repete
+     SILVA, e contar a repetição fazia "JULIANA DA SILVA" — dois tokens,
+     os dois presentes em Lorrany — passar por contenção. Gente diferente
+     virando variação é o pior erro que este comparador pode cometer. */
+  const comunsU = [...setA].filter(t => setB.has(t));
+  if(comunsU.length >= 2 && (comunsU.length === setA.size || comunsU.length === setB.size)){
     return { relacao:"variacao",
       motivo:"um dos nomes é o outro com "
-        + Math.abs(ta.length-tb.length) + " sobrenome(s) a mais" };
+        + Math.abs(setA.size-setB.size) + " sobrenome(s) a mais" };
   }
 
   /* Digitação: mesma estrutura, um único token diferente e próximo.
